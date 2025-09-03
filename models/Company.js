@@ -12,10 +12,10 @@ const roleSchema = new mongoose.Schema(
   {
     roleName: { type: String, required: true, trim: true },
 
-    // 🔹 Flexible CTC: variable keys depending on company
+ 
     ctc: {
       type: Map,
-      of: Number,  // each key in the map will be a number
+      of: Number,  
       default: {}
     },
 
@@ -31,6 +31,7 @@ const companySchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
     type: { type: String, required: true },
+    business_model: {type: String,required: true},
     eligibility: { type: String, required: true },
 
     roles: [roleSchema],   // Multiple roles with flexible CTCs
