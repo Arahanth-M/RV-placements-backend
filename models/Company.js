@@ -46,7 +46,9 @@ const companySchema = new mongoose.Schema(
 
     onlineQuestions: [{ type: String }],
 
-    // ⬅️ MCQ Questions (all optional)
+    onlineQuestion_solution: [{type: String}],
+
+    
     mcqQuestions: [
       {
         question: { type: String },

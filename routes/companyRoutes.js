@@ -11,13 +11,8 @@ dotenv.config();
 
 companyRouter.post("/api/companies", userAuth , async (req, res) => {
     try {
-      const params = {
-        Bucket: bucketName,
-        Key: req. file.originalname,
-        Body: req. file.buffer,
-        ContentType: req.file.mimetype,
-        }
-        const command = new PutObjectCommand (params)
+      
+        
       const company = await Company.create(req.body);
       console.log("✅ New company created");
       return res.status(201).json(company);
