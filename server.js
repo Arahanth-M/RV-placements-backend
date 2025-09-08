@@ -63,9 +63,9 @@ app.use("/api", experienceRouter);
 app.use("/auth",headerRouter);
 
 const PORT = process.env.PORT || 7779;
-const MONGO_URI = process.env.MONGODB_URL;
+const MONGO_URI = process.env.MONGODB_URL ;
 
-connectDB(MONGO_URI).then(() => {
+connectDB("mongodb+srv://Arahanth:MftpTuEzF7ILWZcY@nodejs.dkfd9.mongodb.net/RV-placements?retryWrites=true&w=majority&appName=NodeJS").then(() => {
   app.listen(PORT, () =>
     console.log(`🚀 Server running on http://localhost:${PORT}`)
   );
