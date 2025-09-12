@@ -64,7 +64,8 @@ const companySchema = new mongoose.Schema(
     interviewProcess: { type: String },
     count: {type: String},
     selectedCandidates: [selectedCandidateSchema],
-    Must_Do_Topics: [{type: String}]
+    Must_Do_Topics: [{type: String}],
+    date_of_visit: {type: String}
   },
   { timestamps: true }
 );

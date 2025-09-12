@@ -27,7 +27,7 @@ companyRouter.post("/api/companies", userAuth , async (req, res) => {
   companyRouter.get("/api/companies", userAuth ,async (req, res) => {
     try {
   
-      const companies = await Company.find({}, "name type eligibility roles count business_model");
+      const companies = await Company.find({}, "name type eligibility roles count business_model date_of_visit");
       
       return res.json(companies);
     } catch (e) {
