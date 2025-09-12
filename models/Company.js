@@ -56,14 +56,15 @@ const companySchema = new mongoose.Schema(
         optionB: { type: String },
         optionC: { type: String },
         optionD: { type: String },
-        answer: { type: String } // e.g., "A", "B", "C", "D" or full option text
+        answer: { type: String }
       }
     ],
 
     interviewQuestions: [{ type: String }],
     interviewProcess: { type: String },
     count: {type: String},
-    selectedCandidates: [selectedCandidateSchema]
+    selectedCandidates: [selectedCandidateSchema],
+    Must_Do_Topics: [{type: String}]
   },
   { timestamps: true }
 );
