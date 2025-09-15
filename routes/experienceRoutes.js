@@ -1,25 +1,16 @@
 import express from "express";
-import {
-  S3Client,
-  ListObjectsV2Command,
-  GetObjectCommand,
-} from "@aws-sdk/client-s3";
+import {ListObjectsV2Command,GetObjectCommand,} from "@aws-sdk/client-s3";
 import mammoth from "mammoth";
 import dotenv from "dotenv";
 import { streamToBuffer } from "../utils/streamToBuffer.js";
 import { userAuth } from "../middlewares/auth.js";
+import { s3 } from "../utils/s3.js";
 
 dotenv.config();
 const router = express.Router();
 
 
-const s3 = new S3Client({
-  region: process.env.BUCKET_REGION,
-  credentials: {
-    accessKeyId: process.env.ACCESS_KEY,
-    secretAccessKey: process.env.SECRET_ACCESS_KEY,
-  },
-});
+
 
 router.get("/experiences",userAuth, async (req, res) => {
     try {

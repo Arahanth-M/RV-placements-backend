@@ -2,6 +2,8 @@ import express from "express";
 import { validateSignUpData } from "../utils/validation.js";
 import User from "../models/User.js";
 import bcrypt from "bcrypt";
+
+
 const userRouter = express.Router();
 
 
@@ -75,11 +77,10 @@ userRouter.post("/login", async (req, res) => {
     }
 });
 
+
 userRouter.post("/logout", async (req, res) => {
-    res.cookie("token", null, {
-        expires: new Date(Date.now()),
-    });
-    res.send("Logout Successful!!");
+  res.cookie("token", null, { expires: new Date(Date.now()) });
+  res.send("Logout Successful!!");
 });
 
 export default userRouter;

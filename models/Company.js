@@ -65,7 +65,8 @@ const companySchema = new mongoose.Schema(
     count: {type: String},
     selectedCandidates: [selectedCandidateSchema],
     Must_Do_Topics: [{type: String}],
-    date_of_visit: {type: String}
+    date_of_visit: {type: String},
+    videoKey: {type: String}
   },
   { timestamps: true }
 );
