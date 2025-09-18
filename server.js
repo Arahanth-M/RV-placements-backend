@@ -21,7 +21,7 @@ const app = express();
 
 // ✅ CORS should come BEFORE session and routes
 app.use(cors({
-  origin: "http://localhost:5173",  // React frontend
+  origin: "http://51.21.171.150",  // React frontend
   credentials: true,                // allow cookies
 }));
 
