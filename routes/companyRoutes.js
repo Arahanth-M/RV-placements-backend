@@ -103,7 +103,7 @@ dotenv.config();
 
 const companyRouter = express.Router();
 
-companyRouter.post("/api/companies", async (req, res) => {
+companyRouter.post("/", async (req, res) => {
   try {
     const company = await Company.create(req.body);
     console.log("✅ New company created");
@@ -114,7 +114,7 @@ companyRouter.post("/api/companies", async (req, res) => {
   }
 });
 
-companyRouter.get("/api/companies", async (req, res) => {
+companyRouter.get("/", async (req, res) => {
   try {
     const companies = await Company.find({}, "name type eligibility roles count business_model date_of_visit");
     return res.json(companies);
@@ -125,7 +125,7 @@ companyRouter.get("/api/companies", async (req, res) => {
 });
 
 // Protected route - requires authentication
-companyRouter.get("/api/companies/:id", requireAuth, async (req, res) => {
+companyRouter.get("/:id", requireAuth, async (req, res) => {
   try {
     const company = await Company.findById(req.params.id);
 
