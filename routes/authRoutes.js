@@ -12,7 +12,7 @@ router.get('/google/callback',
   passport.authenticate('google'),
   (req, res) => {
     
-    res.redirect('http://51.21.171.150?login=success');
+    res.redirect('http://lastMinutePlacementPrep.in?login=success');//http://localhost:5173
   }
 );
 

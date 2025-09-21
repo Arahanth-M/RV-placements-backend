@@ -9,7 +9,7 @@ import requireAuth from "../middleware/requireAuth.js";
 dotenv.config();
 const router = express.Router();
 
-// Protected route - requires authentication
+
 router.get("/experiences", requireAuth, async (req, res) => {
   try {
     const params = { Bucket: process.env.BUCKET_NAME };
