@@ -124,9 +124,9 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 // Routes
-app.use("/api/auth", authRouter);
-app.use("/api/companies", companyRouter);
-app.use("/api/experience", experienceRouter);
+app.use("/auth", authRouter);
+app.use("/", companyRouter);
+app.use("/api", experienceRouter);
 
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGODB_URL;

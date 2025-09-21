@@ -53,14 +53,14 @@ router.get("/google", passport.authenticate("google", {
 router.get(
   "/google/callback",
   passport.authenticate("google", {
-    failureRedirect: `${CLIENT_URL}?login=failed`, // ✅ handle failure
+    failureRedirect: `${CLIENT_URL}?login=failed`, 
   }),
   (req, res) => {
-    res.redirect(`${CLIENT_URL}?login=success`); // ✅ flexible redirect
+    res.redirect(`${CLIENT_URL}?login=success`); 
   }
 );
 
-// Get current logged-in user
+
 router.get("/current_user", (req, res) => {
   if (!req.user) {
     return res.status(401).json({ error: "Not authenticated" });

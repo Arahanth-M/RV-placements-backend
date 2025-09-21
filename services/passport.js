@@ -70,11 +70,10 @@ passport.use(
     {
       clientID: keys.googleClientID,
       clientSecret: keys.googleClientSecret,
-      // ✅ Update callbackURL to match backend route
       callbackURL:
         process.env.NODE_ENV === "production"
-          ? "http://lastminuteplacementprep.in/api/auth/google/callback"
-          : "http://localhost:5000/api/auth/google/callback",
+          ? "http://lastminuteplacementprep.in/auth/google/callback"
+          : "http://localhost:7779/auth/google/callback",
       proxy: true,
     },
     async (accessToken, refreshToken, profile, done) => {
