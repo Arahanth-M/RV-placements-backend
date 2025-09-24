@@ -88,7 +88,7 @@ const router = express.Router();
 
 // ✅ Fixed client URL determination - consistent with frontend constants
 const CLIENT_URL = process.env.NODE_ENV === "production"
-  ? "http://lastminuteplacementprep.in"
+  ? "https://lastminuteplacementprep.in"
   : "http://localhost:5173";
 
 // Start Google OAuth - this creates route /api/auth/google

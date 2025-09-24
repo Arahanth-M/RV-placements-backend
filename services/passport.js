@@ -72,8 +72,8 @@ passport.use(
       clientSecret: keys.googleClientSecret,
       callbackURL:
         process.env.NODE_ENV === "production"
-          ? "http://lastminuteplacementprep.in/api/auth/google/callback"
-          : "http://localhost:7779/api/auth/google/callback",
+          ? "https://lastminuteplacementprep.in/api/auth/google/callback"
+          : "https://localhost:7779/api/auth/google/callback",
       proxy: true,
     },
     async (accessToken, refreshToken, profile, done) => {
