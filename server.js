@@ -159,7 +159,8 @@ const app = express();
 // ✅ Fixed allowed origins - consistent domain names
 const allowedOrigins = [
   "http://localhost:5173", // local React dev
-  "http://lastminuteplacementprep.in" // production domain (consistent casing)
+  "http://lastminuteplacementprep.in",// production domain (consistent casing)
+  "https://lastminuteplacementprep.in" 
 ];
 
 // ✅ CORS should come BEFORE session and routes
@@ -186,7 +187,7 @@ app.use(session({
   }),
   cookie: {
     httpOnly: true,
-    secure: false, // ✅ must be false for HTTP
+    secure: true, // ✅ must be false for HTTP
     sameSite: "lax", // ✅ safe default for http
     maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
   },
