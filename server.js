@@ -138,6 +138,80 @@
 // });
 
 
+// import express from "express";
+// import cors from "cors";
+// import dotenv from "dotenv";
+// import session from "express-session";
+// import MongoStore from "connect-mongo";
+// import passport from "passport";
+// import { connectDB } from "./config/db.js";
+// import keys from "./config/keys.js";
+// // Import routes
+// import companyRouter from "./routes/companyRoutes.js";
+// import experienceRouter from "./routes/experienceRoutes.js";
+// import authRouter from "./routes/authRoutes.js";
+// // Import passport configuration
+// import "./services/passport.js";
+
+// dotenv.config();
+// const app = express();
+// app.set("trust proxy", 1);
+
+// // ✅ Fixed allowed origins - consistent domain names
+// const allowedOrigins = [
+//   "http://localhost:5173", // local React dev
+//   "http://lastminuteplacementprep.in",// production domain (consistent casing)
+//   "https://lastminuteplacementprep.in" 
+// ];
+
+// // ✅ CORS should come BEFORE session and routes
+// app.use(cors({
+//   origin: function (origin, callback) {
+//     if (!origin || allowedOrigins.includes(origin)) {
+//       callback(null, true);
+//     } else {
+//       callback(new Error("Not allowed by CORS"));
+//     }
+//   },
+//   credentials: true, // allow cookies/sessions
+// }));
+
+// app.use(express.json());
+
+// app.use(session({
+//   secret: keys.sessionSecret,
+//   resave: false,
+//   saveUninitialized: false,
+//   store: MongoStore.create({
+//     mongoUrl: keys.mongoURI,
+//     touchAfter: 24 * 3600, // lazy update once/day
+//   }),
+//   cookie: {
+//     httpOnly: true,
+//     secure: true, // ✅ must be false for HTTP
+//     sameSite: "none", // ✅ safe default for http
+//     maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+//   },
+// }));
+
+// // ✅ Passport middleware AFTER session
+// app.use(passport.initialize());
+// app.use(passport.session());
+
+// // ✅ Routes - all mounted under /api for consistency
+// app.use("/api/auth", authRouter);
+// app.use("/api/companies", companyRouter);
+// app.use("/api/experiences", experienceRouter);
+
+// const PORT = process.env.PORT || 7779;
+// const MONGO_URI = process.env.MONGODB_URL;
+
+// connectDB(MONGO_URI).then(() => {
+//   app.listen(PORT, () =>
+//     console.log(`🚀 Server running on http://localhost:${PORT}`)
+//   );
+// });
+
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -156,48 +230,56 @@ import "./services/passport.js";
 dotenv.config();
 const app = express();
 
+// ✅ Trust proxy so secure cookies work behind Nginx
+app.set("trust proxy", 1);
+
 // ✅ Fixed allowed origins - consistent domain names
 const allowedOrigins = [
   "http://localhost:5173", // local React dev
-  "http://lastminuteplacementprep.in",// production domain (consistent casing)
-  "https://lastminuteplacementprep.in" 
+  "http://lastminuteplacementprep.in", // fallback
+  "https://lastminuteplacementprep.in", // production
 ];
 
-// ✅ CORS should come BEFORE session and routes
-app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error("Not allowed by CORS"));
-    }
-  },
-  credentials: true, // allow cookies/sessions
-}));
+// ✅ CORS before session and routes
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true, // allow cookies/sessions
+  })
+);
 
 app.use(express.json());
 
-app.use(session({
-  secret: keys.sessionSecret,
-  resave: false,
-  saveUninitialized: false,
-  store: MongoStore.create({
-    mongoUrl: keys.mongoURI,
-    touchAfter: 24 * 3600, // lazy update once/day
-  }),
-  cookie: {
-    httpOnly: true,
-    secure: true, // ✅ must be false for HTTP
-    sameSite: "lax", // ✅ safe default for http
-    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-  },
-}));
+// ✅ Session configuration with HTTPS support
+app.use(
+  session({
+    secret: keys.sessionSecret,
+    resave: false,
+    saveUninitialized: false,
+    store: MongoStore.create({
+      mongoUrl: keys.mongoURI,
+      touchAfter: 24 * 3600, // lazy update once/day
+    }),
+    cookie: {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production", // only true in prod (HTTPS)
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+    },
+  })
+);
 
 // ✅ Passport middleware AFTER session
 app.use(passport.initialize());
 app.use(passport.session());
 
-// ✅ Routes - all mounted under /api for consistency
+// ✅ Routes - all mounted under /api
 app.use("/api/auth", authRouter);
 app.use("/api/companies", companyRouter);
 app.use("/api/experiences", experienceRouter);
