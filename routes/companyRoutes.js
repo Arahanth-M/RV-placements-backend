@@ -103,17 +103,38 @@ dotenv.config();
 
 const companyRouter = express.Router();
 
+// companyRouter.post("/", async (req, res) => {
+//   try {
+//     const company = await Company.create(req.body);
+//     console.log("✅ New company created");
+//     return res.status(201).json(company);
+//   } catch (e) {
+//     console.error("❌ Error creating company:", e.message);
+//     return res.status(400).json({ error: e.message });
+//   }
+// });
+
 companyRouter.post("/", async (req, res) => {
   try {
-    const company = await Company.create(req.body);
-    console.log("✅ New company created");
-    return res.status(201).json(company);
-  } catch (e) {
-    console.error("❌ Error creating company:", e.message);
-    return res.status(400).json({ error: e.message });
+    if (!req.user) {
+      return res.status(401).json({ message: "Not logged in" });
+    }
+
+    const newCompany = new Company({
+      ...req.body,
+      submittedBy: {
+        name: req.user.name,
+        email: req.user.email,
+      }
+    });
+
+    await newCompany.save();
+    res.status(201).json(newCompany);
+  } catch (err) {
+    console.error("Error creating company:", err);
+    res.status(500).json({ message: "Server error" });
   }
 });
-
 // companyRouter.get("/", async (req, res) => {
 //   try {
 //     const companies = await Company.find({}, "name type eligibility roles count business_model date_of_visit");

@@ -71,6 +71,11 @@ const companySchema = new mongoose.Schema(
       enum: ["pending", "approved", "rejected"],
       default: "pending"
     },
+    submittedBy: {
+      id: String,   // Google ID or MongoDB user ID
+      name: String, // User's display name
+      email: String // optional but useful
+    },
     videoKey: {type: String}
   },
   
