@@ -123,8 +123,8 @@ companyRouter.post("/", async (req, res) => {
     const newCompany = new Company({
       ...req.body,
       submittedBy: {
-        name: req.user.name,
-        email: req.user.email,
+        name: req.user.firstName,
+        email: req.user.emailId,
       }
     });
 
@@ -135,28 +135,28 @@ companyRouter.post("/", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
-// companyRouter.get("/", async (req, res) => {
-//   try {
-//     const companies = await Company.find({}, "name type eligibility roles count business_model date_of_visit");
-//     return res.json(companies);
-//   } catch (e) {
-//     console.error("❌ Error fetching companies:", e.message);
-//     return res.status(500).json({ error: "Server error" });
-//   }
-// });
-
 companyRouter.get("/", async (req, res) => {
   try {
-    const companies = await Company.find(
-      { status: "approved" }, 
-      "name type eligibility roles count business_model date_of_visit"
-    );
+    const companies = await Company.find({}, "name type eligibility roles count business_model date_of_visit");
     return res.json(companies);
   } catch (e) {
     console.error("❌ Error fetching companies:", e.message);
     return res.status(500).json({ error: "Server error" });
   }
 });
+
+// companyRouter.get("/", async (req, res) => {
+//   try {
+//     const companies = await Company.find(
+//       { status: "approved" }, 
+//       "name type eligibility roles count business_model date_of_visit"
+//     );
+//     return res.json(companies);
+//   } catch (e) {
+//     console.error("❌ Error fetching companies:", e.message);
+//     return res.status(500).json({ error: "Server error" });
+//   }
+// });
 
 // Protected route - requires authentication
 companyRouter.get("/:id", requireAuth, async (req, res) => {
