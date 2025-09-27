@@ -114,9 +114,22 @@ companyRouter.post("/", async (req, res) => {
   }
 });
 
+// companyRouter.get("/", async (req, res) => {
+//   try {
+//     const companies = await Company.find({}, "name type eligibility roles count business_model date_of_visit");
+//     return res.json(companies);
+//   } catch (e) {
+//     console.error("❌ Error fetching companies:", e.message);
+//     return res.status(500).json({ error: "Server error" });
+//   }
+// });
+
 companyRouter.get("/", async (req, res) => {
   try {
-    const companies = await Company.find({}, "name type eligibility roles count business_model date_of_visit");
+    const companies = await Company.find(
+      { status: "approved" }, 
+      "name type eligibility roles count business_model date_of_visit"
+    );
     return res.json(companies);
   } catch (e) {
     console.error("❌ Error fetching companies:", e.message);
@@ -127,7 +140,10 @@ companyRouter.get("/", async (req, res) => {
 // Protected route - requires authentication
 companyRouter.get("/:id", requireAuth, async (req, res) => {
   try {
-    const company = await Company.findById(req.params.id);
+    const company = await Company.findOne({
+      _id: req.params.id,
+      status: "approved", // only approved companies accessible
+    });
 
     if (!company) {
       return res.status(404).json({ error: "Company not found" });

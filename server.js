@@ -220,17 +220,17 @@ import MongoStore from "connect-mongo";
 import passport from "passport";
 import { connectDB } from "./config/db.js";
 import keys from "./config/keys.js";
-// Import routes
 import companyRouter from "./routes/companyRoutes.js";
 import experienceRouter from "./routes/experienceRoutes.js";
 import authRouter from "./routes/authRoutes.js";
-// Import passport configuration
 import "./services/passport.js";
+
+
 
 dotenv.config();
 const app = express();
 
-// ✅ Trust proxy so secure cookies work behind Nginx
+
 app.set("trust proxy", 1);
 
 // ✅ Fixed allowed origins - consistent domain names

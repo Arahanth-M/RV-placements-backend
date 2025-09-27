@@ -30,9 +30,9 @@ const roleSchema = new mongoose.Schema(
 const companySchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
-    type: { type: String, required: true },
-    business_model: {type: String,required: true},
-    eligibility: { type: String, required: true },
+    type: { type: String },
+    business_model: {type: String},
+    eligibility: { type: String},
 
     roles: [roleSchema],   // Multiple roles with flexible CTCs
     
@@ -66,8 +66,14 @@ const companySchema = new mongoose.Schema(
     selectedCandidates: [selectedCandidateSchema],
     Must_Do_Topics: [{type: String}],
     date_of_visit: {type: String},
+    status: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending"
+    },
     videoKey: {type: String}
   },
+  
   { timestamps: true }
 );
 
