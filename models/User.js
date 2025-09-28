@@ -12,6 +12,13 @@ const userSchema = new Schema({
     type: String, 
     sparse: true  
   },
+  isPremium: {
+    type: Boolean,
+    default: false
+  },
+  membershipType: {
+    type: String,
+  },
   picture: String,
   createdAt: {
     type: Date,

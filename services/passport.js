@@ -24,9 +24,9 @@ passport.use(
       callbackURL:
         process.env.NODE_ENV === "production"
           ? "https://lastminuteplacementprep.in/api/auth/google/callback"
-          : "https://localhost:7779/api/auth/google/callback",
+          : "http://localhost:7779/api/auth/google/callback",
       proxy: true,
-    },
+    },  
     async (accessToken, refreshToken, profile, done) => {
       try {
         const existingUser = await User.findOne({ userId: profile.id });
