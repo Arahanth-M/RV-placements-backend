@@ -39,6 +39,40 @@ companyRouter.get("/", async (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 });
+// companyRouter.get("/:id", requireAuth, async (req, res) => {
+//   try {
+//     const company = await Company.findOne({
+//       _id: req.params.id,
+//       status: "approved", 
+//     });
+
+//     if (!company) {
+//       return res.status(404).json({ error: "Company not found" });
+//     }
+
+//     let videoUrl = null;
+
+//     if (company.videoKey) {
+//       try {
+//         const command = new GetObjectCommand({
+//           Bucket: process.env.BUCKET_NAME,
+//           Key: company.videoKey,
+//         });
+//         videoUrl = await getSignedUrl(s3, command, { expiresIn: 600 });
+//       } catch (s3Err) {
+//         console.error("❌ S3 Signed URL Error:", s3Err.message);
+//       }
+//     }
+
+//     res.json({
+//       ...company.toObject(),
+//       videoUrl,
+//     });
+//   } catch (err) {
+//     console.error("❌ Company Fetch Error:", err.message);
+//     res.status(500).json({ error: "Internal Server Error" });
+//   }
+// });
 companyRouter.get("/:id", requireAuth, async (req, res) => {
   try {
     const company = await Company.findOne({
@@ -64,8 +98,15 @@ companyRouter.get("/:id", requireAuth, async (req, res) => {
       }
     }
 
+    // Convert Map -> Object for each role
+    const companyObj = company.toObject();
+    companyObj.roles = (companyObj.roles || []).map(role => ({
+      ...role,
+      ctc: role.ctc instanceof Map ? Object.fromEntries(role.ctc) : role.ctc
+    }));
+
     res.json({
-      ...company.toObject(),
+      ...companyObj,
       videoUrl,
     });
   } catch (err) {
