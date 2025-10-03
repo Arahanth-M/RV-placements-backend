@@ -62,3 +62,6 @@ connectDB(config.MONGO_URI).then(() => {
     console.log(`🚀 Server running on ${config.BACKEND_URL}`)
   );
 });
+
+// Export app for testing
+export default app;
