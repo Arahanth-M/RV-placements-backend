@@ -17,7 +17,7 @@ const {
 } = process.env;
 
 // --- Safety checks ---
-if (!HF_API_KEY) throw new Error("❌ HF_API_KEY is missing in .env");
+if (!HF_API_KEY) console.warn("⚠️ HF_API_KEY is missing in .env - AI features may not work");
 if (!MONGODB_URL) throw new Error("❌ MONGODB_URL is missing in .env");
 
 let cached = {
