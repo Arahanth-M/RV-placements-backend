@@ -6,10 +6,15 @@ import MongoStore from "connect-mongo";
 import passport from "passport";
 import { connectDB } from "./config/db.js";
 import keys from "./config/keys.js";
+import { config, urls, routes, messages, sessionConfig } from "./config/constants.js";
 import companyRouter from "./routes/companyRoutes.js";
 import experienceRouter from "./routes/experienceRoutes.js";
 import authRouter from "./routes/authRoutes.js";
+import submissionRoutes from "./routes/submissionsRoutes.js";
+import chatRouter from "./routes/chatRoutes.js";
+
 import "./services/passport.js";
+
 
 
 
@@ -18,11 +23,7 @@ const app = express();
 
 
 app.set("trust proxy", 1);
-const allowedOrigins = [
-  "http://localhost:5173", 
-  "http://lastminuteplacementprep.in", 
-  "https://lastminuteplacementprep.in",
-];
+const allowedOrigins = config.CORS_ORIGINS;
 
 app.use(
   cors({
@@ -30,7 +31,7 @@ app.use(
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
-        callback(new Error("Not allowed by CORS"));
+        callback(new Error(messages.ERROR.CORS_ERROR));
       }
     },
     credentials: true,
@@ -40,33 +41,24 @@ app.use(
 app.use(express.json());
 app.use(
   session({
-    secret: keys.sessionSecret,
-    resave: false,
-    saveUninitialized: false,
+    ...sessionConfig,
     store: MongoStore.create({
-      mongoUrl: keys.mongoURI,
-      touchAfter: 24 * 3600, 
+      mongoUrl: config.MONGO_URI,
+      touchAfter: config.SESSION_TOUCH_AFTER, 
     }),
-    cookie: {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production", 
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      maxAge: 30 * 24 * 60 * 60 * 1000, 
-    },
   })
 );
 
 app.use(passport.initialize());
 app.use(passport.session());
-app.use("/api/auth", authRouter);
-app.use("/api/companies", companyRouter);
-app.use("/api/experiences", experienceRouter);
+app.use(routes.AUTH, authRouter);
+app.use(routes.COMPANIES, companyRouter);
+app.use(routes.EXPERIENCES, experienceRouter);
+app.use(routes.SUBMISSIONS, submissionRoutes);
+app.use(routes.CHAT, chatRouter);
 
-const PORT = process.env.PORT || 7779;
-const MONGO_URI = process.env.MONGODB_URL;
-
-connectDB(MONGO_URI).then(() => {
-  app.listen(PORT, () =>
-    console.log(`🚀 Server running on http://localhost:${PORT}`)
+connectDB(config.MONGO_URI).then(() => {
+  app.listen(config.PORT, () =>
+    console.log(`🚀 Server running on ${config.BACKEND_URL}`)
   );
 });

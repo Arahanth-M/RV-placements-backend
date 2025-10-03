@@ -5,6 +5,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { s3 } from "../utils/s3.js";
 import requireAuth from "../middleware/requireAuth.js";
 import dotenv from "dotenv";
+import Submission from "../models/Submission.js";
 dotenv.config();
 
 const companyRouter = express.Router();
@@ -15,10 +16,10 @@ companyRouter.post("/", async (req, res) => {
       return res.status(401).json({ message: "Not logged in" });
     }
 
-    const newCompany = new Company({
+    const newCompany = new Company({  
       ...req.body,
       submittedBy: {
-        name: req.user.username, // use the correct field
+        name: req.user.username, 
         email: req.user.email,
       }
     });
@@ -114,5 +115,32 @@ companyRouter.get("/:id", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+
+
+
+
+
+
+
+
+companyRouter.post("/", async (req, res) => {
+  try {
+    const { companyId, type, content } = req.body;
+
+    if (!companyId || !type || !content) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const newSubmission = new Submission({ companyId, type, content });
+    await newSubmission.save();
+
+    res.status(201).json({ message: "Submission received and pending approval." });
+  } catch (error) {
+    res.status(500).json({ error: "Error saving submission" });
+  }
+});
+
+
+
 
 export default companyRouter;

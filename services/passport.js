@@ -2,6 +2,7 @@ import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import keys from "../config/keys.js";
 import User from "../models/User.js";
+import { urls } from "../config/constants.js";
 
 passport.serializeUser((user, done) => {
   done(null, user.id);
@@ -21,10 +22,7 @@ passport.use(
     {
       clientID: keys.googleClientID,
       clientSecret: keys.googleClientSecret,
-      callbackURL:
-        process.env.NODE_ENV === "production"
-          ? "https://lastminuteplacementprep.in/api/auth/google/callback"
-          : "http://localhost:7779/api/auth/google/callback",
+      callbackURL: urls.GOOGLE_CALLBACK_URL,
       proxy: true,
     },  
     async (accessToken, refreshToken, profile, done) => {
