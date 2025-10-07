@@ -12,6 +12,7 @@ import experienceRouter from "./routes/experienceRoutes.js";
 import authRouter from "./routes/authRoutes.js";
 import submissionRoutes from "./routes/submissionsRoutes.js";
 import chatRouter from "./routes/chatRoutes.js";
+import paymentRouter from "./routes/payment.js";
 
 import "./services/passport.js";
 
@@ -56,6 +57,7 @@ app.use(routes.COMPANIES, companyRouter);
 app.use(routes.EXPERIENCES, experienceRouter);
 app.use(routes.SUBMISSIONS, submissionRoutes);
 app.use(routes.CHAT, chatRouter);
+app.use(routes.PAYMENT, paymentRouter);
 
 connectDB(config.MONGO_URI).then(() => {
   app.listen(config.PORT, () =>

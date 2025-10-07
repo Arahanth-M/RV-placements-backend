@@ -58,6 +58,7 @@ export const routes = {
   SUBMISSIONS: '/api/submissions',
   EXPERIENCES: '/api/experiences',
   CHAT: '/api/chat',
+  PAYMENT: '/api/payment',
 };
 
 // Messages
