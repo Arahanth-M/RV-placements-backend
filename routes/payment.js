@@ -11,15 +11,14 @@ const paymentRouter = express.Router();
 
 paymentRouter.post("/create", requireAuth, async(req,res) => {
     try{
-        const {membershipType} = req.body;
         const {firstName , lastName , emailId} = req.user
         const order = await razorpayInstance.orders.create({
-            amount: membershipAmount[membershipType]*100,
+            amount: membershipAmount["premium"]*100,
             currency: "INR",
             receipt: "receipt#1",
             notes: {
                 firstName,lastName,emailId,
-                membershipType: membershipType,
+                membershipType: "premium",
             },
         });
         //save it in the database
@@ -29,7 +28,7 @@ paymentRouter.post("/create", requireAuth, async(req,res) => {
             status: order.status,
             amount: order.amount,
             currency: order.currency,
-            reciept: order.receipt,
+            receipt: order.receipt,
             notes: order.notes
         });
         const savedPayment = await payment.save();
@@ -68,7 +67,7 @@ paymentRouter.post("/webhook", async(req,res) => {
             const user = await User.findOne({_id: payment.userId});
             if (user) {
                 user.isPremium = true;
-                user.membershipType = payment.notes.membershipType;
+                user.membershipType = "premium";
                 await user.save();
             }
         }
@@ -83,13 +82,52 @@ paymentRouter.post("/webhook", async(req,res) => {
 
 paymentRouter.get("/verify", requireAuth, async(req,res) => {
     const user = req.user;
+    console.log('Premium verification request for user:', user._id, 'isPremium:', user.isPremium);
     if(user.isPremium){
         return res.json({
             isPremium: true,
-            membershipType: user.membershipType || 'silver' // Default to silver if not specified
+            membershipType: "premium"
         });
     }
     return res.json({isPremium: false});
+})
+
+// Manual payment verification endpoint for development
+paymentRouter.post("/payment/verify", requireAuth, async(req,res) => {
+    try {
+        const { payment_id, order_id } = req.body;
+        
+        // Find the payment record
+        const payment = await Payment.findOne({ orderId: order_id });
+        if (!payment) {
+            return res.status(404).json({ msg: "Payment not found" });
+        }
+
+        // Update payment status
+        payment.status = 'captured';
+        await payment.save();
+
+        // Update user premium status
+        const user = await User.findOne({ _id: payment.userId });
+        if (user) {
+            console.log('Updating user premium status:', user._id);
+            user.isPremium = true;
+            user.membershipType = "premium";
+            await user.save();
+            console.log('User premium status updated successfully');
+        } else {
+            console.log('User not found for payment:', payment.userId);
+        }
+
+        return res.json({ 
+            success: true, 
+            message: "Payment verified and user upgraded to premium",
+            membershipType: "premium"
+        });
+    } catch (error) {
+        console.error('Payment verification error:', error);
+        return res.status(500).json({ msg: error.message });
+    }
 })
 
 export default paymentRouter;

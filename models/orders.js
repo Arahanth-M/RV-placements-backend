@@ -27,7 +27,7 @@ const paymentSchema = new mongoose.Schema(
             type: String,
             required: true
         },
-        reciept: {
+        receipt: {
             type: String,
             required: true
         },
