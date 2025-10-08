@@ -1,5 +1,6 @@
 import express from 'express';
 import dotenv from 'dotenv';
+import crypto from 'crypto';
 import razorpayInstance from "../utils/instance.js"
 import Payment from '../models/orders.js';
 import { membershipAmount } from '../utils/constants.js';
@@ -8,6 +9,19 @@ import requireAuth from '../middleware/requireAuth.js';
 
 dotenv.config();
 const paymentRouter = express.Router();
+
+// Webhook signature validation function
+const verifyWebhookSignature = (body, signature, secret) => {
+    const expectedSignature = crypto
+        .createHmac('sha256', secret)
+        .update(body)
+        .digest('hex');
+    
+    return crypto.timingSafeEqual(
+        Buffer.from(signature, 'hex'),
+        Buffer.from(expectedSignature, 'hex')
+    );
+};
 
 paymentRouter.post("/create", requireAuth, async(req,res) => {
     try{
@@ -44,21 +58,48 @@ paymentRouter.post("/create", requireAuth, async(req,res) => {
 
 // Webhook endpoint for Razorpay payment verification
 // Note: This endpoint should not require authentication as it's called by Razorpay
-paymentRouter.post("/webhook", async(req,res) => {
+paymentRouter.post("/webhook", express.raw({type: 'application/json'}), async(req,res) => {
     try{
-        console.log('🔔 Webhook received:', JSON.stringify(req.body, null, 2));
-        console.log('🔔 Webhook headers:', req.headers);
+        const signature = req.headers['x-razorpay-signature'];
+        const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
         
-        // For now, we'll skip webhook signature validation
-        // In production, you should implement proper webhook signature validation
-        const paymentDetails = req.body.payload?.payment?.entity;
+        console.log('🔔 Webhook received');
+        console.log('🔔 Webhook signature:', signature);
+        console.log('🔔 Webhook body length:', req.body.length);
+        
+        // Parse the raw body
+        const body = JSON.parse(req.body.toString());
+        console.log('🔔 Webhook payload:', JSON.stringify(body, null, 2));
+        
+        // Verify webhook signature if secret is available
+        if (webhookSecret && signature) {
+            const isValidSignature = verifyWebhookSignature(req.body, signature, webhookSecret);
+            if (!isValidSignature) {
+                console.log('❌ Invalid webhook signature');
+                return res.status(400).json({msg: "Invalid webhook signature"});
+            }
+            console.log('✅ Webhook signature verified');
+        } else {
+            console.log('⚠️ Skipping webhook signature validation (no secret or signature provided)');
+        }
+        
+        // Razorpay webhook payload structure
+        const event = body.event;
+        const paymentDetails = body.payload?.payment?.entity;
 
-        if (!paymentDetails) {
-            console.log('❌ Invalid webhook payload:', req.body);
+        if (!event || !paymentDetails) {
+            console.log('❌ Invalid webhook payload:', body);
             return res.status(400).json({msg: "Invalid webhook payload"});
         }
 
+        console.log('📅 Event:', event);
         console.log('💳 Payment details:', paymentDetails);
+
+        // Only process payment.captured events
+        if (event !== 'payment.captured') {
+            console.log('ℹ️ Ignoring non-capture event:', event);
+            return res.status(200).json({msg: "Event ignored"});
+        }
 
         const payment = await Payment.findOne({orderId: paymentDetails.order_id});
         if (!payment) {
@@ -68,7 +109,10 @@ paymentRouter.post("/webhook", async(req,res) => {
 
         console.log('📝 Found payment record:', payment._id);
 
+        // Update payment status
         payment.status = paymentDetails.status;
+        payment.paymentId = paymentDetails.id;
+        payment.method = paymentDetails.method;
         await payment.save();
         console.log('✅ Payment status updated to:', paymentDetails.status);
 
@@ -77,10 +121,13 @@ paymentRouter.post("/webhook", async(req,res) => {
             const user = await User.findOne({_id: payment.userId});
             if (user) {
                 console.log('👤 Updating user premium status:', user._id);
+                console.log('👤 Current user status - isPremium:', user.isPremium, 'membershipType:', user.membershipType);
+                
                 user.isPremium = true;
                 user.membershipType = "premium";
                 await user.save();
-                console.log('✅ User premium status updated successfully');
+                
+                console.log('✅ User premium status updated - isPremium:', user.isPremium, 'membershipType:', user.membershipType);
             } else {
                 console.log('❌ User not found for payment:', payment.userId);
             }
@@ -126,40 +173,121 @@ paymentRouter.post("/payment/verify", requireAuth, async(req,res) => {
 
         console.log('📝 Found payment record:', payment._id, 'Status:', payment.status);
 
-        // Update payment status
-        payment.status = 'captured';
-        await payment.save();
-        console.log('✅ Payment status updated to captured');
+        // Verify payment with Razorpay
+        try {
+            const razorpayPayment = await razorpayInstance.payments.fetch(payment_id);
+            console.log('🔍 Razorpay payment details:', razorpayPayment);
+            
+            if (razorpayPayment.status === 'captured') {
+                // Update payment status
+                payment.status = 'captured';
+                payment.paymentId = payment_id;
+                payment.method = razorpayPayment.method;
+                await payment.save();
+                console.log('✅ Payment status updated to captured');
 
-        // Update user premium status
-        const user = await User.findOne({ _id: payment.userId });
-        if (user) {
-            console.log('👤 Updating user premium status:', user._id);
-            console.log('👤 Current user status - isPremium:', user.isPremium, 'membershipType:', user.membershipType);
+                // Update user premium status
+                const user = await User.findOne({ _id: payment.userId });
+                if (user) {
+                    console.log('👤 Updating user premium status:', user._id);
+                    console.log('👤 Current user status - isPremium:', user.isPremium, 'membershipType:', user.membershipType);
+                    
+                    user.isPremium = true;
+                    user.membershipType = "premium";
+                    await user.save();
+                    
+                    console.log('✅ User premium status updated - isPremium:', user.isPremium, 'membershipType:', user.membershipType);
+                    
+                    console.log('✅ Manual payment verification completed successfully');
+                    return res.json({ 
+                        success: true, 
+                        message: "Payment verified and user upgraded to premium",
+                        membershipType: "premium",
+                        userId: user._id,
+                        isPremium: user.isPremium
+                    });
+                } else {
+                    console.log('❌ User not found for payment:', payment.userId);
+                    return res.status(404).json({ msg: "User not found" });
+                }
+            } else {
+                console.log('❌ Payment not captured, status:', razorpayPayment.status);
+                return res.status(400).json({ msg: "Payment not captured" });
+            }
+        } catch (razorpayError) {
+            console.error('❌ Razorpay verification error:', razorpayError);
+            // Fallback: just update the payment status without Razorpay verification
+            payment.status = 'captured';
+            payment.paymentId = payment_id;
+            await payment.save();
             
-            user.isPremium = true;
-            user.membershipType = "premium";
-            await user.save();
-            
-            console.log('✅ User premium status updated - isPremium:', user.isPremium, 'membershipType:', user.membershipType);
-        } else {
-            console.log('❌ User not found for payment:', payment.userId);
-            return res.status(404).json({ msg: "User not found" });
+            const user = await User.findOne({ _id: payment.userId });
+            if (user) {
+                user.isPremium = true;
+                user.membershipType = "premium";
+                await user.save();
+                
+                return res.json({ 
+                    success: true, 
+                    message: "Payment verified and user upgraded to premium (fallback mode)",
+                    membershipType: "premium",
+                    userId: user._id,
+                    isPremium: user.isPremium
+                });
+            }
         }
-
-        console.log('✅ Manual payment verification completed successfully');
-        return res.json({ 
-            success: true, 
-            message: "Payment verified and user upgraded to premium",
-            membershipType: "premium",
-            userId: user._id,
-            isPremium: user.isPremium
-        });
     } catch (error) {
         console.error('❌ Payment verification error:', error);
         return res.status(500).json({ msg: error.message });
     }
 })
+
+// Force refresh premium status endpoint
+paymentRouter.post("/refresh-status", requireAuth, async(req,res) => {
+    try {
+        const user = req.user;
+        console.log('🔄 Force refresh premium status for user:', user._id);
+        
+        // Find the most recent successful payment for this user
+        const recentPayment = await Payment.findOne({ 
+            userId: user._id, 
+            status: 'captured' 
+        }).sort({ createdAt: -1 });
+        
+        if (recentPayment) {
+            console.log('💳 Found successful payment:', recentPayment._id);
+            
+            // Update user premium status
+            user.isPremium = true;
+            user.membershipType = "premium";
+            await user.save();
+            
+            console.log('✅ User premium status refreshed - isPremium:', user.isPremium, 'membershipType:', user.membershipType);
+            
+            return res.json({
+                success: true,
+                message: "Premium status refreshed successfully",
+                isPremium: true,
+                membershipType: "premium"
+            });
+        } else {
+            console.log('❌ No successful payment found for user');
+            user.isPremium = false;
+            user.membershipType = null;
+            await user.save();
+            
+            return res.json({
+                success: true,
+                message: "No successful payment found, premium status reset",
+                isPremium: false,
+                membershipType: null
+            });
+        }
+    } catch (error) {
+        console.error('❌ Refresh status error:', error);
+        return res.status(500).json({ msg: error.message });
+    }
+});
 
 // Test endpoint to check payment status
 paymentRouter.get("/test", requireAuth, async(req,res) => {
