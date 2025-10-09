@@ -516,12 +516,408 @@ I'm here to help you with placement-related questions. Here are some topics I ca
 Feel free to ask me anything about placements! I'm here to help you succeed. 🚀`;
 }
 
-// --- Ask Question (Main Function with RAG) ---
+// --- Analytical Query Detection ---
+function isAnalyticalQuery(question) {
+  const analyticalKeywords = [
+    'how many', 'count', 'total', 'number of', 'statistics', 'stats',
+    'average', 'mean', 'median', 'highest', 'lowest', 'maximum', 'minimum',
+    'range', 'distribution', 'percentage', 'ratio', 'compare', 'comparison',
+    'top', 'bottom', 'most', 'least', 'best', 'worst', 'summary', 'overview',
+    'when', 'date', 'visit', 'year', 'month', 'recent', 'latest', 'earliest',
+    'timeline', 'schedule', 'calendar', 'period', 'duration', 'frequency'
+  ];
+  
+  const questionLower = question.toLowerCase();
+  return analyticalKeywords.some(keyword => questionLower.includes(keyword));
+}
+
+// --- MongoDB Aggregation Queries ---
+async function getAnalyticalData(question) {
+  const client = await getMongoClient();
+  const db = client.db(MONGODB_DB_NAME);
+  const companiesCollection = db.collection("companies");
+  
+  const questionLower = question.toLowerCase();
+  let analyticalData = {};
+  
+  try {
+    // Company count queries
+    if (questionLower.includes('how many') && questionLower.includes('compan')) {
+      const totalCompanies = await companiesCollection.countDocuments({ status: "approved" });
+      const pendingCompanies = await companiesCollection.countDocuments({ status: "pending" });
+      const rejectedCompanies = await companiesCollection.countDocuments({ status: "rejected" });
+      
+      analyticalData.companyCounts = {
+        total: totalCompanies,
+        approved: totalCompanies,
+        pending: pendingCompanies,
+        rejected: rejectedCompanies
+      };
+    }
+    
+    // Package analysis queries
+    if (questionLower.includes('package') || questionLower.includes('salary') || questionLower.includes('ctc')) {
+      const pipeline = [
+        { $match: { status: "approved" } },
+        { $unwind: "$roles" },
+        { $match: { "roles.ctc.total": { $exists: true, $ne: null } } },
+        {
+          $addFields: {
+            totalPackage: { $toDouble: "$roles.ctc.total" }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            averagePackage: { $avg: "$totalPackage" },
+            maxPackage: { $max: "$totalPackage" },
+            minPackage: { $min: "$totalPackage" },
+            packageCount: { $sum: 1 },
+            packages: { $push: { company: "$name", package: "$totalPackage", role: "$roles.roleName" } }
+          }
+        }
+      ];
+      
+      const packageStats = await companiesCollection.aggregate(pipeline).toArray();
+      if (packageStats.length > 0) {
+        analyticalData.packageStats = packageStats[0];
+        
+        // Sort packages for top/bottom queries
+        analyticalData.packageStats.packages.sort((a, b) => b.package - a.package);
+        analyticalData.packageStats.topPackages = analyticalData.packageStats.packages.slice(0, 10);
+        analyticalData.packageStats.bottomPackages = analyticalData.packageStats.packages.slice(-10).reverse();
+      }
+    }
+    
+    // Role analysis queries
+    if (questionLower.includes('role') || questionLower.includes('position')) {
+      const rolePipeline = [
+        { $match: { status: "approved" } },
+        { $unwind: "$roles" },
+        {
+          $group: {
+            _id: "$roles.roleName",
+            count: { $sum: 1 },
+            companies: { $addToSet: "$name" },
+            avgPackage: { $avg: { $toDouble: "$roles.ctc.total" } }
+          }
+        },
+        { $sort: { count: -1 } },
+        { $limit: 20 }
+      ];
+      
+      const roleStats = await companiesCollection.aggregate(rolePipeline).toArray();
+      analyticalData.roleStats = roleStats;
+    }
+    
+    // Company type analysis
+    if (questionLower.includes('type') || questionLower.includes('category')) {
+      const typePipeline = [
+        { $match: { status: "approved" } },
+        {
+          $group: {
+            _id: "$type",
+            count: { $sum: 1 },
+            companies: { $addToSet: "$name" }
+          }
+        },
+        { $sort: { count: -1 } }
+      ];
+      
+      const typeStats = await companiesCollection.aggregate(typePipeline).toArray();
+      analyticalData.typeStats = typeStats;
+    }
+    
+    // Selection statistics
+    if (questionLower.includes('selected') || questionLower.includes('candidate') || questionLower.includes('student')) {
+      const selectionPipeline = [
+        { $match: { status: "approved" } },
+        {
+          $group: {
+            _id: null,
+            totalSelected: { $sum: { $toInt: "$count" } },
+            companiesWithSelections: { $sum: { $cond: [{ $gt: [{ $toInt: "$count" }, 0] }, 1, 0] } },
+            avgSelectionsPerCompany: { $avg: { $toInt: "$count" } },
+            maxSelections: { $max: { $toInt: "$count" } },
+            selectionData: { 
+              $push: { 
+                company: "$name", 
+                selected: { $toInt: "$count" },
+                candidates: "$selectedCandidates"
+              } 
+            }
+          }
+        }
+      ];
+      
+      const selectionStats = await companiesCollection.aggregate(selectionPipeline).toArray();
+      if (selectionStats.length > 0) {
+        analyticalData.selectionStats = selectionStats[0];
+        // Sort by selection count
+        analyticalData.selectionStats.selectionData.sort((a, b) => b.selected - a.selected);
+        analyticalData.selectionStats.topSelectors = analyticalData.selectionStats.selectionData.slice(0, 10);
+      }
+    }
+    
+    // Date analysis (visit dates)
+    if (questionLower.includes('date') || questionLower.includes('visit') || questionLower.includes('year') || questionLower.includes('when')) {
+      const datePipeline = [
+        { $match: { status: "approved" } },
+        {
+          $addFields: {
+            hasVisitDate: { $ne: ["$date_of_visit", null] },
+            visitDateString: "$date_of_visit"
+          }
+        },
+        {
+          $addFields: {
+            visitYear: {
+              $cond: {
+                if: { $ne: ["$date_of_visit", null] },
+                then: {
+                  $cond: {
+                    if: { $gte: [{ $strLenCP: "$date_of_visit" }, 4] },
+                    then: { $substr: ["$date_of_visit", 0, 4] },
+                    else: "Unknown"
+                  }
+                },
+                else: "No Date"
+              }
+            }
+          }
+        },
+        {
+          $group: {
+            _id: "$visitYear",
+            count: { $sum: 1 },
+            companies: { $addToSet: "$name" },
+            visitDates: { $addToSet: "$date_of_visit" }
+          }
+        },
+        { $sort: { _id: -1 } }
+      ];
+      
+      const dateStats = await companiesCollection.aggregate(datePipeline).toArray();
+      analyticalData.dateStats = dateStats;
+      
+      // Additional query for companies with specific visit dates
+      const companiesWithDates = await companiesCollection.find(
+        { 
+          status: "approved", 
+          date_of_visit: { $exists: true, $ne: null, $ne: "" } 
+        },
+        { name: 1, date_of_visit: 1, type: 1 }
+      ).sort({ date_of_visit: -1 }).limit(20).toArray();
+      
+      analyticalData.companiesWithDates = companiesWithDates;
+      
+      // Additional query for recent/upcoming visits
+      if (questionLower.includes('recent') || questionLower.includes('latest') || questionLower.includes('upcoming')) {
+        const currentYear = new Date().getFullYear();
+        const recentVisits = await companiesCollection.find(
+          { 
+            status: "approved", 
+            date_of_visit: { 
+              $exists: true, 
+              $ne: null, 
+              $ne: "",
+              $regex: `^${currentYear}` // Current year visits
+            } 
+          },
+          { name: 1, date_of_visit: 1, type: 1, roles: 1 }
+        ).sort({ date_of_visit: -1 }).limit(15).toArray();
+        
+        analyticalData.recentVisits = recentVisits;
+      }
+    }
+    
+    console.log("📊 Analytical data collected:", Object.keys(analyticalData));
+    return analyticalData;
+    
+  } catch (error) {
+    console.error("❌ Error in analytical data collection:", error);
+    return {};
+  }
+}
+
+// --- Format Analytical Response ---
+function formatAnalyticalResponse(analyticalData, question) {
+  const questionLower = question.toLowerCase();
+  let response = "**Analytical Summary:**\n\n";
+  
+  // Company count analysis
+  if (analyticalData.companyCounts) {
+    const counts = analyticalData.companyCounts;
+    response += `**Company Statistics:**\n`;
+    response += `• Total Companies: ${counts.total}\n`;
+    response += `• Approved Companies: ${counts.approved}\n`;
+    response += `• Pending Companies: ${counts.pending}\n`;
+    response += `• Rejected Companies: ${counts.rejected}\n\n`;
+  }
+  
+  // Package analysis
+  if (analyticalData.packageStats) {
+    const stats = analyticalData.packageStats;
+    response += `**Package Analysis:**\n`;
+    response += `• Average Package: ₹${stats.averagePackage.toFixed(2)} LPA\n`;
+    response += `• Highest Package: ₹${stats.maxPackage} LPA\n`;
+    response += `• Lowest Package: ₹${stats.minPackage} LPA\n`;
+    response += `• Total Packages Analyzed: ${stats.packageCount}\n\n`;
+    
+    if (questionLower.includes('top') || questionLower.includes('highest')) {
+      response += `**Top 10 Packages:**\n`;
+      stats.topPackages.forEach((pkg, idx) => {
+        response += `${idx + 1}. ${pkg.company} - ${pkg.role}: ₹${pkg.package} LPA\n`;
+      });
+      response += `\n`;
+    }
+    
+    if (questionLower.includes('lowest') || questionLower.includes('bottom')) {
+      response += `**Lowest 10 Packages:**\n`;
+      stats.bottomPackages.forEach((pkg, idx) => {
+        response += `${idx + 1}. ${pkg.company} - ${pkg.role}: ₹${pkg.package} LPA\n`;
+      });
+      response += `\n`;
+    }
+  }
+  
+  // Role analysis
+  if (analyticalData.roleStats) {
+    response += `**Popular Roles:**\n`;
+    analyticalData.roleStats.slice(0, 10).forEach((role, idx) => {
+      response += `${idx + 1}. ${role._id}: ${role.count} companies (Avg: ₹${role.avgPackage?.toFixed(2) || 'N/A'} LPA)\n`;
+    });
+    response += `\n`;
+  }
+  
+  // Company type analysis
+  if (analyticalData.typeStats) {
+    response += `**Company Types:**\n`;
+    analyticalData.typeStats.forEach((type, idx) => {
+      response += `${idx + 1}. ${type._id}: ${type.count} companies\n`;
+    });
+    response += `\n`;
+  }
+  
+  // Selection statistics
+  if (analyticalData.selectionStats) {
+    const stats = analyticalData.selectionStats;
+    response += `**Selection Statistics:**\n`;
+    response += `• Total Students Selected: ${stats.totalSelected}\n`;
+    response += `• Companies with Selections: ${stats.companiesWithSelections}\n`;
+    response += `• Average Selections per Company: ${stats.avgSelectionsPerCompany.toFixed(2)}\n`;
+    response += `• Maximum Selections by One Company: ${stats.maxSelections}\n\n`;
+    
+    if (questionLower.includes('top') || questionLower.includes('most')) {
+      response += `**Top 10 Companies by Selections:**\n`;
+      stats.topSelectors.forEach((company, idx) => {
+        response += `${idx + 1}. ${company.company}: ${company.selected} students\n`;
+      });
+      response += `\n`;
+    }
+  }
+  
+  // Date analysis
+  if (analyticalData.dateStats) {
+    response += `**Visit Statistics by Year:**\n`;
+    analyticalData.dateStats.forEach((year, idx) => {
+      if (year._id !== "No Date" && year._id !== "Unknown") {
+        response += `• ${year._id}: ${year.count} companies visited\n`;
+        if (year.companies && year.companies.length > 0) {
+          response += `  Companies: ${year.companies.slice(0, 5).join(', ')}${year.companies.length > 5 ? '...' : ''}\n`;
+        }
+      }
+    });
+    
+    // Show companies without dates
+    const noDateGroup = analyticalData.dateStats.find(group => group._id === "No Date");
+    if (noDateGroup) {
+      response += `• No Date Recorded: ${noDateGroup.count} companies\n`;
+    }
+    
+    response += `\n`;
+  }
+  
+  // Companies with specific visit dates
+  if (analyticalData.companiesWithDates && analyticalData.companiesWithDates.length > 0) {
+    response += `**Company Visits with Dates:**\n`;
+    analyticalData.companiesWithDates.slice(0, 10).forEach((company, idx) => {
+      response += `${idx + 1}. ${company.name} - ${company.date_of_visit} (${company.type})\n`;
+    });
+    response += `\n`;
+  }
+  
+  // Recent visits (current year)
+  if (analyticalData.recentVisits && analyticalData.recentVisits.length > 0) {
+    const currentYear = new Date().getFullYear();
+    response += `**Recent Visits (${currentYear}):**\n`;
+    analyticalData.recentVisits.forEach((company, idx) => {
+      const packageInfo = company.roles && company.roles.length > 0 
+        ? ` - Packages: ${company.roles.map(r => r.ctc?.total ? `₹${r.ctc.total}LPA` : 'N/A').join(', ')}`
+        : '';
+      response += `${idx + 1}. ${company.name} - ${company.date_of_visit} (${company.type})${packageInfo}\n`;
+    });
+    response += `\n`;
+  }
+  
+  return response.trim();
+}
+
+// --- Ask Question (Main Function with RAG + Analytics) ---
 export async function askQuestion(question) {
   console.log("\n🔍 Question:", question);
   
   try {
-    // Try the advanced RAG system first
+    // Check if this is an analytical query
+    const isAnalytical = isAnalyticalQuery(question);
+    console.log(`📊 Is analytical query: ${isAnalytical}`);
+    
+    if (isAnalytical) {
+      // Get analytical data
+      const analyticalData = await getAnalyticalData(question);
+      
+      if (Object.keys(analyticalData).length > 0) {
+        // Format analytical response
+        const analyticalResponse = formatAnalyticalResponse(analyticalData, question);
+        
+        // Also get some relevant context from vector search for additional insights
+        try {
+          const retriever = await getRetriever(5);
+          const docs = await retriever.getRelevantDocuments(question);
+          
+          if (docs.length > 0) {
+            const context = docs.map((doc, idx) => {
+              const content = doc.pageContent || doc.text || "";
+              return `[Additional Context ${idx + 1}]\n${content}`;
+            }).join("\n\n---\n\n");
+            
+            // Combine analytical data with context for LLM
+            const combinedContext = `${analyticalResponse}\n\n--- Additional Context ---\n${context}`;
+            
+            if (LLM_PROVIDER === "groq" && GROQ_API_KEY) {
+              const answer = await callGroqAPI(combinedContext, question);
+              console.log("✅ Analytical answer generated with Groq\n");
+              return answer;
+            } else if (LLM_PROVIDER === "together" && process.env.TOGETHER_API_KEY) {
+              const answer = await callTogetherAPI(combinedContext, question);
+              console.log("✅ Analytical answer generated with Together AI\n");
+              return answer;
+            } else {
+              console.log("✅ Analytical answer generated with formatting\n");
+              return analyticalResponse;
+            }
+          } else {
+            console.log("✅ Analytical answer generated without additional context\n");
+            return analyticalResponse;
+          }
+        } catch (contextError) {
+          console.error("⚠️ Context retrieval failed, using analytical data only:", contextError.message);
+          return analyticalResponse;
+        }
+      }
+    }
+    
+    // Fall back to regular RAG system for non-analytical queries
     try {
       // Step 1: Enhance question for better retrieval
       const enhancedQuestion = enhanceQuery(question);
