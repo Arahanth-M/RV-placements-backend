@@ -27,7 +27,13 @@ export const config = {
   // CORS
   CORS_ORIGINS: process.env.CORS_ORIGINS ? 
     process.env.CORS_ORIGINS.split(',') : 
-    ['http://localhost:5173', 'http://lastminuteplacementprep.in', 'https://lastminuteplacementprep.in'],
+    [
+      'http://localhost:5173', 
+      'http://lastminuteplacementprep.in', 
+      'https://lastminuteplacementprep.in',
+      'http://www.lastminuteplacementprep.in',
+      'https://www.lastminuteplacementprep.in'
+    ],
   
   // AWS (if needed)
   AWS_REGION: process.env.AWS_REGION || 'us-east-1',

@@ -28,11 +28,21 @@ const allowedOrigins = config.CORS_ORIGINS;
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error(messages.ERROR.CORS_ERROR));
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) {
+        return callback(null, true);
       }
+      
+      // Check if origin is in allowed list
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      
+      // Log the rejected origin for debugging
+      console.log('🚫 CORS rejected origin:', origin);
+      console.log('✅ Allowed origins:', allowedOrigins);
+      
+      callback(new Error(messages.ERROR.CORS_ERROR));
     },
     credentials: true,
   })
