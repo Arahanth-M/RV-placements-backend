@@ -35,9 +35,6 @@ export const config = {
   AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
   BUCKET_NAME: process.env.BUCKET_NAME,
   
-  // AI/ML
-  AI_API_KEY: process.env.AI_API_KEY,
-  AI_MODEL_NAME: process.env.AI_MODEL_NAME || 'gpt-3.5-turbo',
 };
 
 // Derived URLs
@@ -57,7 +54,6 @@ export const routes = {
   COMPANIES: '/api/companies',
   SUBMISSIONS: '/api/submissions',
   EXPERIENCES: '/api/experiences',
-  CHAT: '/api/chat',
   PAYMENT: '/api/payment',
 };
 
