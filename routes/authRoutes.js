@@ -21,19 +21,33 @@ router.get("/google/signup", (req, res, next) => {
 
 router.get(
   "/google/callback",
-  passport.authenticate("google", {
-    failureRedirect: `${urls.CLIENT_URL}?login=failed`,
-  }),
-  (req, res) => {
-    // Check if this was a signup or login
-    const isSignup = req.session.signupFlow || false;
-    req.session.signupFlow = false; // Reset the flag
-    
-    if (isSignup) {
-      res.redirect(`${urls.CLIENT_URL}?signup=success`);
-    } else {
-      res.redirect(`${urls.CLIENT_URL}?login=success`);
-    }
+  (req, res, next) => {
+    passport.authenticate("google", (err, user, info) => {
+      if (err) {
+        return res.redirect(`${urls.CLIENT_URL}/auth/callback?login=failed`);
+      }
+      if (!user) {
+        // If domain is invalid, surface a specific code so UI can show a message
+        if (info && info.reason === "domain") {
+          return res.redirect(`${urls.CLIENT_URL}/auth/callback?login=failed&reason=domain`);
+        }
+        return res.redirect(`${urls.CLIENT_URL}/auth/callback?login=failed`);
+      }
+
+      req.logIn(user, (loginErr) => {
+        if (loginErr) {
+          return res.redirect(`${urls.CLIENT_URL}/auth/callback?login=failed`);
+        }
+
+        const isSignup = req.session.signupFlow || false;
+        req.session.signupFlow = false;
+
+        if (isSignup) {
+          return res.redirect(`${urls.CLIENT_URL}/auth/callback?signup=success`);
+        }
+        return res.redirect(`${urls.CLIENT_URL}/auth/callback?login=success`);
+      });
+    })(req, res, next);
   }
 );
 

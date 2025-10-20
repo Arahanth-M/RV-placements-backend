@@ -27,6 +27,15 @@ passport.use(
     },  
     async (accessToken, refreshToken, profile, done) => {
       try {
+        const primaryEmail = profile?.emails?.[0]?.value || "";
+        // Enforce rvce.edu.in email domain
+        const allowedDomain = "rvce.edu.in";
+        const emailDomain = primaryEmail.split("@")[1] || "";
+        if (emailDomain.toLowerCase() !== allowedDomain) {
+          // Send a specific reason so the client can show a friendly message
+          return done(null, false, { reason: "domain" });
+        }
+
         const existingUser = await User.findOne({ userId: profile.id });
 
         if (existingUser) {
@@ -36,7 +45,7 @@ passport.use(
         const user = await new User({
           userId: profile.id,
           username: profile.displayName,
-          email: profile.emails[0].value,
+          email: primaryEmail,
           picture: profile.photos[0].value,
         }).save();
 
