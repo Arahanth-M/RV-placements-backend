@@ -33,7 +33,11 @@ companyRouter.post("/", async (req, res) => {
 });
 companyRouter.get("/", async (req, res) => {
   try {
-    const companies = await Company.find({}, "name type eligibility roles count business_model date_of_visit");
+    // Only expose approved companies to the public list to avoid 404s on details
+    const companies = await Company.find(
+      { status: "approved" },
+      "name type eligibility roles count business_model date_of_visit"
+    );
     return res.json(companies);
   } catch (e) {
     console.error("❌ Error fetching companies:", e.message);
