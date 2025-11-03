@@ -310,6 +310,7 @@ const companySchema = new mongoose.Schema(
       email: { type: String, trim: true },
     },
     videoKey: { type: String, trim: true },
+    logo: { type: String, trim: true },
   },
   { timestamps: true }
 );
