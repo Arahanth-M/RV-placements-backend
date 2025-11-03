@@ -61,6 +61,7 @@ export const routes = {
   SUBMISSIONS: '/api/submissions',
   EXPERIENCES: '/api/experiences',
   PAYMENT: '/api/payment',
+  LEETCODE: '/api/leetcode',
 };
 
 // Messages

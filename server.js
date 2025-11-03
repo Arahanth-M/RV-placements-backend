@@ -12,6 +12,7 @@ import experienceRouter from "./routes/experienceRoutes.js";
 import authRouter from "./routes/authRoutes.js";
 import submissionRoutes from "./routes/submissionsRoutes.js";
 import paymentRouter from "./routes/payment.js";
+import leetcodeRouter from "./routes/leetcodeRoutes.js";
 
 import "./services/passport.js";
 
@@ -66,6 +67,7 @@ app.use(routes.COMPANIES, companyRouter);
 app.use(routes.EXPERIENCES, experienceRouter);
 app.use(routes.SUBMISSIONS, submissionRoutes);
 app.use(routes.PAYMENT, paymentRouter);
+app.use(routes.LEETCODE, leetcodeRouter);
 
 connectDB(config.MONGO_URI).then(() => {
   app.listen(config.PORT, () =>
