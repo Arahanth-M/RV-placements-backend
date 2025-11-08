@@ -447,5 +447,31 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
   }
 });
 
+// Reject submission (delete it from database)
+adminRouter.delete("/submissions/:id/reject", async (req, res) => {
+  try {
+    const submission = await Submission.findById(req.params.id);
+    
+    if (!submission) {
+      return res.status(404).json({ error: "Submission not found" });
+    }
+
+    // Delete the submission
+    await Submission.findByIdAndDelete(req.params.id);
+    
+    console.log('✅ Submission rejected and deleted:', req.params.id);
+    
+    res.json({ 
+      message: "Submission rejected and deleted successfully"
+    });
+  } catch (error) {
+    console.error('❌ Error rejecting submission:', error);
+    res.status(500).json({ 
+      error: "Server error", 
+      details: error.message
+    });
+  }
+});
+
 export default adminRouter;
 

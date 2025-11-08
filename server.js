@@ -11,6 +11,7 @@ import companyRouter from "./routes/companyRoutes.js";
 import experienceRouter from "./routes/experienceRoutes.js";
 import authRouter from "./routes/authRoutes.js";
 import submissionRoutes from "./routes/submissionsRoutes.js";
+// PAYMENT GATEWAY INTEGRATION - COMMENTED OUT
 import paymentRouter from "./routes/payment.js";
 import leetcodeRouter from "./routes/leetcodeRoutes.js";
 import adminRouter from "./routes/adminRoutes.js";
@@ -67,7 +68,9 @@ app.use(routes.AUTH, authRouter);
 app.use(routes.COMPANIES, companyRouter);
 app.use(routes.EXPERIENCES, experienceRouter);
 app.use(routes.SUBMISSIONS, submissionRoutes);
-app.use(routes.PAYMENT, paymentRouter);
+// PAYMENT GATEWAY INTEGRATION - COMMENTED OUT
+// app.use(routes.PAYMENT, paymentRouter);
+app.use(routes.PAYMENT, paymentRouter); // Router exists but all routes are commented out
 app.use(routes.LEETCODE, leetcodeRouter);
 app.use(routes.ADMIN, adminRouter);
 
