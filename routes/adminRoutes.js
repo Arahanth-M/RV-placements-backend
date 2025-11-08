@@ -77,14 +77,26 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
       parsedContent = { question: submission.content, solution: "" };
     }
 
+    // Helper function to sanitize text (remove script tags and dangerous HTML)
+    const sanitizeText = (text) => {
+      if (!text) return '';
+      let str = String(text);
+      // Remove script tags
+      str = str.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+      // Remove other potentially dangerous HTML tags
+      str = str.replace(/<[^>]+>/g, '');
+      return str.trim();
+    };
+
     // Helper function to truncate text to max length (strictly enforce limit)
     const truncateText = (text, maxLength) => {
-      if (!text || typeof text !== 'string') return '';
-      // Convert to string, trim, then truncate
-      const trimmed = String(text).trim();
-      if (trimmed.length <= maxLength) return trimmed;
-      // Truncate to maxLength, then trim again to remove any partial words/whitespace
-      return trimmed.substring(0, maxLength).trim();
+      if (!text) return '';
+      // Sanitize first, then convert to string, trim
+      const sanitized = sanitizeText(text);
+      const str = String(sanitized).trim();
+      if (str.length <= maxLength) return str;
+      // Truncate to maxLength exactly (no trim after to avoid going under)
+      return str.substring(0, maxLength);
     };
 
     // Update company based on submission type
@@ -107,12 +119,13 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
         let truncatedQuestion = truncateText(questionText, 500);
         
         // Final safety check: ensure it's exactly 500 or less
-        if (truncatedQuestion && truncatedQuestion.length > 500) {
-          truncatedQuestion = truncatedQuestion.slice(0, 500).trim();
+        if (truncatedQuestion.length > 500) {
+          truncatedQuestion = truncatedQuestion.substring(0, 500);
         }
         
         // Double-check length before adding (should never exceed 500)
-        if (truncatedQuestion && truncatedQuestion.length <= 500) {
+        // Also ensure it's not just whitespace after sanitization
+        if (truncatedQuestion.length > 0 && truncatedQuestion.length <= 500 && truncatedQuestion.trim().length > 0) {
           // Only add if question doesn't already exist
           if (!company.onlineQuestions.includes(truncatedQuestion)) {
             company.onlineQuestions.push(truncatedQuestion);
@@ -124,14 +137,14 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
               let truncatedSolution = truncateText(parsedContent.solution, 500);
               // Final safety check
               if (truncatedSolution.length > 500) {
-                truncatedSolution = truncatedSolution.slice(0, 500).trim();
+                truncatedSolution = truncatedSolution.substring(0, 500);
               }
               // Ensure solution also doesn't exceed limit
               if (truncatedSolution.length <= 500) {
                 company.onlineQuestion_solution.push(truncatedSolution);
               } else {
                 // Last resort: force to 500
-                company.onlineQuestion_solution.push(truncatedSolution.slice(0, 500));
+                company.onlineQuestion_solution.push(truncatedSolution.substring(0, 500));
               }
             } else {
               // Add empty string to maintain array alignment
@@ -164,7 +177,8 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
         const truncatedQuestion = truncateText(questionText, 500);
         
         // Double-check length before adding
-        if (truncatedQuestion && truncatedQuestion.length <= 500) {
+        // Also ensure it's not just whitespace after sanitization
+        if (truncatedQuestion.length > 0 && truncatedQuestion.length <= 500 && truncatedQuestion.trim().length > 0) {
           // Only add if question doesn't already exist
           if (!company.interviewQuestions.includes(truncatedQuestion)) {
             company.interviewQuestions.push(truncatedQuestion);
@@ -186,17 +200,20 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
         // Truncate interview process to max length (500 characters)
         const truncatedProcess = truncateText(processText, 500);
         
-        if (truncatedProcess && truncatedProcess.length <= 500) {
+        if (truncatedProcess.length > 0 && truncatedProcess.length <= 500 && truncatedProcess.trim().length > 0) {
           // If there's existing content, try to append, but ensure total doesn't exceed 500
           if (company.interviewProcess) {
             const separator = "\n\n";
             const combined = `${company.interviewProcess}${separator}${truncatedProcess}`;
             // If combined exceeds 500, just replace with new content
-            const finalProcess = combined.length > 500 
+            let finalProcess = combined.length > 500 
               ? truncatedProcess 
               : truncateText(combined, 500);
-            // Final safety check
-            company.interviewProcess = finalProcess.length <= 500 ? finalProcess : finalProcess.substring(0, 500).trim();
+            // Final safety check - ensure it's exactly 500 or less
+            if (finalProcess.length > 500) {
+              finalProcess = finalProcess.substring(0, 500);
+            }
+            company.interviewProcess = finalProcess;
           } else {
             company.interviewProcess = truncatedProcess;
           }
@@ -205,44 +222,170 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
       }
     }
 
-    // Final validation: ensure all array values don't exceed 500 characters
+    // Final validation: ensure all array values don't exceed their max lengths
+    // Also filter out empty strings that might cause validation issues
     if (company.onlineQuestions) {
-      company.onlineQuestions = company.onlineQuestions.map(q => {
-        if (typeof q === 'string' && q.length > 500) {
-          return q.slice(0, 500).trim();
-        }
-        return q;
-      });
+      company.onlineQuestions = company.onlineQuestions
+        .map(q => {
+          if (typeof q === 'string' && q.length > 500) {
+            return q.substring(0, 500);
+          }
+          return q || '';
+        })
+        .filter(q => q && q.trim().length > 0); // Remove empty strings
       // Mark array as modified for Mongoose
       company.markModified('onlineQuestions');
     }
     if (company.onlineQuestion_solution) {
       company.onlineQuestion_solution = company.onlineQuestion_solution.map(s => {
         if (typeof s === 'string' && s.length > 500) {
-          return s.slice(0, 500).trim();
+          return s.substring(0, 500);
         }
-        return s;
+        return s || '';
       });
       // Mark array as modified for Mongoose
       company.markModified('onlineQuestion_solution');
     }
     if (company.interviewQuestions) {
-      company.interviewQuestions = company.interviewQuestions.map(q => {
-        if (typeof q === 'string' && q.length > 500) {
-          return q.slice(0, 500).trim();
-        }
-        return q;
-      });
+      company.interviewQuestions = company.interviewQuestions
+        .map(q => {
+          if (typeof q === 'string' && q.length > 500) {
+            return q.substring(0, 500);
+          }
+          return q || '';
+        })
+        .filter(q => q && q.trim().length > 0); // Remove empty strings
       // Mark array as modified for Mongoose
       company.markModified('interviewQuestions');
     }
     if (company.interviewProcess && typeof company.interviewProcess === 'string' && company.interviewProcess.length > 500) {
-      company.interviewProcess = company.interviewProcess.slice(0, 500).trim();
+      company.interviewProcess = company.interviewProcess.substring(0, 500);
+    }
+    
+    // Truncate Must_Do_Topics to max 200 characters
+    if (company.Must_Do_Topics && Array.isArray(company.Must_Do_Topics)) {
+      company.Must_Do_Topics = company.Must_Do_Topics.map(topic => {
+        if (typeof topic === 'string' && topic.length > 200) {
+          return topic.substring(0, 200);
+        }
+        return topic || '';
+      }).filter(topic => topic && topic.trim().length > 0);
+      company.markModified('Must_Do_Topics');
+    }
+    
+    // Truncate mcqQuestions fields to their max lengths
+    // Convert to plain objects first to ensure Mongoose recognizes changes
+    if (company.mcqQuestions && Array.isArray(company.mcqQuestions)) {
+      company.mcqQuestions = company.mcqQuestions.map((mcq, index) => {
+        if (!mcq || typeof mcq !== 'object') return mcq;
+        
+        // Convert to plain object if it's a Mongoose subdocument
+        const plainMcq = mcq.toObject ? mcq.toObject() : { ...mcq };
+        const truncatedMcq = {};
+        
+        // Copy all fields first
+        Object.keys(plainMcq).forEach(key => {
+          truncatedMcq[key] = plainMcq[key];
+        });
+        
+        // Question max 300
+        if (typeof truncatedMcq.question === 'string') {
+          if (truncatedMcq.question.length > 300) {
+            console.log(`⚠️ Truncating mcqQuestions[${index}].question from ${truncatedMcq.question.length} to 300`);
+            truncatedMcq.question = truncatedMcq.question.substring(0, 300);
+          }
+        }
+        
+        // Options max 100 each
+        ['optionA', 'optionB', 'optionC', 'optionD', 'answer'].forEach(field => {
+          if (typeof truncatedMcq[field] === 'string') {
+            if (truncatedMcq[field].length > 100) {
+              console.log(`⚠️ Truncating mcqQuestions[${index}].${field} from ${truncatedMcq[field].length} to 100`);
+              truncatedMcq[field] = truncatedMcq[field].substring(0, 100);
+            }
+          }
+        });
+        
+        // Final safety check - ensure no field exceeds limits
+        if (truncatedMcq.question && truncatedMcq.question.length > 300) {
+          truncatedMcq.question = truncatedMcq.question.substring(0, 300);
+        }
+        ['optionA', 'optionB', 'optionC', 'optionD', 'answer'].forEach(field => {
+          if (truncatedMcq[field] && truncatedMcq[field].length > 100) {
+            truncatedMcq[field] = truncatedMcq[field].substring(0, 100);
+          }
+        });
+        
+        return truncatedMcq;
+      });
+      
+      // Mark as modified
+      company.markModified('mcqQuestions');
+      
+      // Final verification pass - double check all lengths
+      company.mcqQuestions.forEach((mcq, index) => {
+        if (mcq && typeof mcq === 'object') {
+          if (mcq.question && typeof mcq.question === 'string' && mcq.question.length > 300) {
+            console.error(`❌ FINAL CHECK FAILED: mcqQuestions[${index}].question still ${mcq.question.length} chars`);
+            mcq.question = mcq.question.substring(0, 300);
+          }
+          ['optionA', 'optionB', 'optionC', 'optionD', 'answer'].forEach(field => {
+            if (mcq[field] && typeof mcq[field] === 'string' && mcq[field].length > 100) {
+              console.error(`❌ FINAL CHECK FAILED: mcqQuestions[${index}].${field} still ${mcq[field].length} chars`);
+              mcq[field] = mcq[field].substring(0, 100);
+            }
+          });
+        }
+      });
+      
+      // Mark again after final verification
+      company.markModified('mcqQuestions');
+    }
+    
+    // Truncate other string fields with maxlength constraints
+    if (company.eligibility && typeof company.eligibility === 'string' && company.eligibility.length > 500) {
+      company.eligibility = company.eligibility.substring(0, 500);
+    }
+    if (company.business_model && typeof company.business_model === 'string' && company.business_model.length > 100) {
+      company.business_model = company.business_model.substring(0, 100);
+    }
+    
+    // Truncate jobDescription fields
+    if (company.jobDescription && Array.isArray(company.jobDescription)) {
+      company.jobDescription = company.jobDescription.map(jd => {
+        if (jd && typeof jd === 'object') {
+          const truncatedJd = { ...jd };
+          // Title max 100
+          if (typeof truncatedJd.title === 'string' && truncatedJd.title.length > 100) {
+            truncatedJd.title = truncatedJd.title.substring(0, 100);
+          }
+          return truncatedJd;
+        }
+        return jd;
+      });
+      company.markModified('jobDescription');
     }
 
     // Save the company and check for errors
     try {
-      const savedCompany = await company.save();
+      // Log current state before save for debugging
+      console.log('📊 Company data before save:');
+      if (company.mcqQuestions) {
+        company.mcqQuestions.forEach((mcq, idx) => {
+          if (mcq && typeof mcq === 'object') {
+            console.log(`  mcqQuestions[${idx}]:`, {
+              questionLength: mcq.question?.length || 0,
+              optionALength: mcq.optionA?.length || 0,
+              optionBLength: mcq.optionB?.length || 0,
+              optionCLength: mcq.optionC?.length || 0,
+              optionDLength: mcq.optionD?.length || 0,
+            });
+          }
+        });
+      }
+      
+      // Use validateBeforeSave: true to ensure validation runs
+      const savedCompany = await company.save({ validateBeforeSave: true });
       console.log('✅ Company updated successfully:', savedCompany._id);
       console.log('Updated fields:', {
         onlineQuestions: savedCompany.onlineQuestions?.length || 0,
@@ -251,6 +394,32 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
       });
     } catch (saveError) {
       console.error('❌ Error saving company:', saveError);
+      console.error('❌ Error details:', {
+        name: saveError.name,
+        message: saveError.message,
+        errors: saveError.errors
+      });
+      
+      // Log each validation error individually
+      if (saveError.errors) {
+        Object.keys(saveError.errors).forEach(key => {
+          console.error(`❌ Validation error for ${key}:`, saveError.errors[key].message);
+        });
+      }
+      
+      // Return more detailed error information
+      if (saveError.name === 'ValidationError') {
+        const errors = {};
+        Object.keys(saveError.errors || {}).forEach(key => {
+          errors[key] = saveError.errors[key].message;
+        });
+        return res.status(400).json({ 
+          error: "Validation failed", 
+          details: errors,
+          message: saveError.message 
+        });
+      }
+      
       throw saveError;
     }
 
@@ -263,7 +432,18 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error approving submission:", error.message);
-    res.status(500).json({ error: "Server error", details: error.message });
+    console.error("❌ Full error stack:", error.stack);
+    console.error("❌ Error name:", error.name);
+    console.error("❌ Error details:", error.errors || error);
+    
+    // Return more detailed error information
+    const statusCode = error.name === 'ValidationError' ? 400 : 500;
+    res.status(statusCode).json({ 
+      error: "Server error", 
+      details: error.message,
+      errorName: error.name,
+      validationErrors: error.errors || null
+    });
   }
 });
 
