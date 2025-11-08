@@ -9,6 +9,14 @@ router.get("/google", passport.authenticate("google", {
   scope: ["profile", "email"],
 }));
 
+// Admin login route - same as regular login but will check email in callback
+router.get("/google/admin", (req, res, next) => {
+  req.session.isAdminLogin = true; // Set flag to indicate this is admin login
+  next();
+}, passport.authenticate("google", {
+  scope: ["profile", "email"],
+}));
+
 // Signup route - forces account selection
 router.get("/google/signup", (req, res, next) => {
   req.session.signupFlow = true; // Set flag to indicate this is a signup
@@ -34,6 +42,20 @@ router.get(
         return res.redirect(`${urls.CLIENT_URL}/auth/callback?login=failed`);
       }
 
+      const isAdminLogin = req.session.isAdminLogin || false;
+      req.session.isAdminLogin = false;
+
+      // Check if admin login and verify admin email
+      if (isAdminLogin) {
+        const ADMIN_EMAIL = "arahanthm.cs22@rvce.edu.in";
+        if (user.email?.toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
+          req.logout(() => {
+            return res.redirect(`${urls.CLIENT_URL}/auth/callback?login=failed&reason=not_admin`);
+          });
+          return;
+        }
+      }
+
       req.logIn(user, (loginErr) => {
         if (loginErr) {
           return res.redirect(`${urls.CLIENT_URL}/auth/callback?login=failed`);
@@ -42,6 +64,9 @@ router.get(
         const isSignup = req.session.signupFlow || false;
         req.session.signupFlow = false;
 
+        if (isAdminLogin) {
+          return res.redirect(`${urls.CLIENT_URL}/auth/callback?login=success&admin=true`);
+        }
         if (isSignup) {
           return res.redirect(`${urls.CLIENT_URL}/auth/callback?signup=success`);
         }

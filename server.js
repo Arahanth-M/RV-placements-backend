@@ -13,6 +13,7 @@ import authRouter from "./routes/authRoutes.js";
 import submissionRoutes from "./routes/submissionsRoutes.js";
 import paymentRouter from "./routes/payment.js";
 import leetcodeRouter from "./routes/leetcodeRoutes.js";
+import adminRouter from "./routes/adminRoutes.js";
 
 import "./services/passport.js";
 
@@ -68,6 +69,7 @@ app.use(routes.EXPERIENCES, experienceRouter);
 app.use(routes.SUBMISSIONS, submissionRoutes);
 app.use(routes.PAYMENT, paymentRouter);
 app.use(routes.LEETCODE, leetcodeRouter);
+app.use(routes.ADMIN, adminRouter);
 
 connectDB(config.MONGO_URI).then(() => {
   app.listen(config.PORT, () =>
