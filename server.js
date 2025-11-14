@@ -15,6 +15,7 @@ import submissionRoutes from "./routes/submissionsRoutes.js";
 import paymentRouter from "./routes/payment.js";
 import leetcodeRouter from "./routes/leetcodeRoutes.js";
 import adminRouter from "./routes/adminRoutes.js";
+import eventRouter from "./routes/eventRoutes.js";
 
 import "./services/passport.js";
 
@@ -73,6 +74,7 @@ app.use(routes.SUBMISSIONS, submissionRoutes);
 app.use(routes.PAYMENT, paymentRouter); // Router exists but all routes are commented out
 app.use(routes.LEETCODE, leetcodeRouter);
 app.use(routes.ADMIN, adminRouter);
+app.use(routes.EVENTS, eventRouter);
 
 connectDB(config.MONGO_URI).then(() => {
   app.listen(config.PORT, () =>

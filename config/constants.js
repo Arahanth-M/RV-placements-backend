@@ -63,6 +63,7 @@ export const routes = {
   PAYMENT: '/api/payment',
   LEETCODE: '/api/leetcode',
   ADMIN: '/api/admin',
+  EVENTS: '/api/events',
 };
 
 // Messages
