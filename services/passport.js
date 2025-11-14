@@ -3,6 +3,7 @@ import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import keys from "../config/keys.js";
 import User from "../models/User.js";
 import { urls } from "../config/constants.js";
+import { sendWelcomeEmailWebhook } from "./webhookService.js";
 
 passport.serializeUser((user, done) => {
   done(null, user.id);
@@ -39,15 +40,23 @@ passport.use(
         const existingUser = await User.findOne({ userId: profile.id });
 
         if (existingUser) {
+          // Existing user - no webhook needed
           return done(null, existingUser);
         }
 
+        // New user - create account
         const user = await new User({
           userId: profile.id,
           username: profile.displayName,
           email: primaryEmail,
           picture: profile.photos[0].value,
         }).save();
+
+        // Send welcome email webhook only for new users
+        // Fire and forget - don't block login if webhook fails
+        sendWelcomeEmailWebhook(primaryEmail, profile.displayName).catch((err) => {
+          console.error("Webhook error (non-blocking):", err);
+        });
 
         done(null, user);
       } catch (err) {
