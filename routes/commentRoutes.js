@@ -3,6 +3,8 @@ import Comment from "../models/Comment.js";
 import Company from "../models/Company.js";
 import requireAuth from "../middleware/requireAuth.js";
 
+const ADMIN_EMAIL = "arahanthm.cs22@rvce.edu.in";
+
 const commentRouter = express.Router();
 
 // Get all comments for a company
@@ -86,7 +88,7 @@ commentRouter.post("/companies/:companyId/comments", requireAuth, async (req, re
   }
 });
 
-// Delete a comment (only by the user who created it)
+// Delete a comment (by the user who created it, or by admin)
 commentRouter.delete("/comments/:commentId", requireAuth, async (req, res) => {
   try {
     const { commentId } = req.params;
@@ -97,8 +99,13 @@ commentRouter.delete("/comments/:commentId", requireAuth, async (req, res) => {
       return res.status(404).json({ error: "Comment not found" });
     }
 
-    // Check if user owns the comment
-    if (comment.user.toString() !== req.user._id.toString()) {
+    // Check if user is admin
+    const isAdmin = req.user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+    
+    // Check if user owns the comment or is admin
+    const isOwner = comment.user.toString() === req.user._id.toString();
+    
+    if (!isOwner && !isAdmin) {
       return res.status(403).json({ error: "You can only delete your own comments" });
     }
 
