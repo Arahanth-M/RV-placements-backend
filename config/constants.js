@@ -65,6 +65,7 @@ export const routes = {
   ADMIN: '/api/admin',
   EVENTS: '/api/events',
   YEAR_STATS: '/api/year-stats',
+  COMMENTS: '/api',
 };
 
 // Messages

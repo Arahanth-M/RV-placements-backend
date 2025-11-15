@@ -17,6 +17,7 @@ import leetcodeRouter from "./routes/leetcodeRoutes.js";
 import adminRouter from "./routes/adminRoutes.js";
 import eventRouter from "./routes/eventRoutes.js";
 import yearStatsRouter from "./routes/yearStatsRoutes.js";
+import commentRouter from "./routes/commentRoutes.js";
 
 import "./services/passport.js";
 
@@ -77,6 +78,7 @@ app.use(routes.LEETCODE, leetcodeRouter);
 app.use(routes.ADMIN, adminRouter);
 app.use(routes.EVENTS, eventRouter);
 app.use(routes.YEAR_STATS, yearStatsRouter);
+app.use(routes.COMMENTS, commentRouter);
 
 connectDB(config.MONGO_URI).then(() => {
   app.listen(config.PORT, () =>
