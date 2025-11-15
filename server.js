@@ -16,6 +16,7 @@ import paymentRouter from "./routes/payment.js";
 import leetcodeRouter from "./routes/leetcodeRoutes.js";
 import adminRouter from "./routes/adminRoutes.js";
 import eventRouter from "./routes/eventRoutes.js";
+import yearStatsRouter from "./routes/yearStatsRoutes.js";
 
 import "./services/passport.js";
 
@@ -75,6 +76,7 @@ app.use(routes.PAYMENT, paymentRouter); // Router exists but all routes are comm
 app.use(routes.LEETCODE, leetcodeRouter);
 app.use(routes.ADMIN, adminRouter);
 app.use(routes.EVENTS, eventRouter);
+app.use(routes.YEAR_STATS, yearStatsRouter);
 
 connectDB(config.MONGO_URI).then(() => {
   app.listen(config.PORT, () =>

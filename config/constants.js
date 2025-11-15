@@ -64,6 +64,7 @@ export const routes = {
   LEETCODE: '/api/leetcode',
   ADMIN: '/api/admin',
   EVENTS: '/api/events',
+  YEAR_STATS: '/api/year-stats',
 };
 
 // Messages
