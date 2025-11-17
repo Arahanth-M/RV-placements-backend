@@ -70,7 +70,7 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
     }
 
     // Legacy support: if old field onlineQuestion_solution exists, migrate it
-    const legacySolutions = company.get?.("onlineQuestion_solution");
+    const legacySolutions = company.get?.("onlineQuestions_solution");
     if (
       (!company.onlineQuestions_solution || company.onlineQuestions_solution.length === 0) &&
       Array.isArray(legacySolutions) &&
@@ -80,7 +80,7 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
       company.markModified("onlineQuestions_solution");
       // Remove legacy field to avoid duplication
       if (typeof company.set === "function") {
-        company.set("onlineQuestion_solution", undefined, { strict: false });
+        company.set("onlineQuestion_solutions", undefined, { strict: false });
       }
     }
 

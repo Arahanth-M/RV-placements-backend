@@ -114,11 +114,11 @@ companyRouter.get("/:id", requireAuth, async (req, res) => {
     // Legacy support: if onlineQuestions_solution missing, fallback to old field
     if (
       (!companyObj.onlineQuestions_solution || companyObj.onlineQuestions_solution.length === 0) &&
-      Array.isArray(companyObj.onlineQuestion_solution)
+      Array.isArray(companyObj.onlineQuestions_solution)
     ) {
-      companyObj.onlineQuestions_solution = companyObj.onlineQuestion_solution;
+      companyObj.onlineQuestions_solution = companyObj.onlineQuestions_solution;
     }
-    delete companyObj.onlineQuestion_solution;
+    delete companyObj.onlineQuestions_solution;
 
     res.json({
       ...companyObj,
