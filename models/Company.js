@@ -262,7 +262,7 @@ const companySchema = new mongoose.Schema(
         },
       },
     ],
-    onlineQuestion_solution: [
+    onlineQuestions_solution: [
       { type: String, trim: true, maxlength: 500 },
     ],
     mcqQuestions: [

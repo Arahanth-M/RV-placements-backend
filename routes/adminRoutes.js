@@ -69,6 +69,21 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
       return res.status(404).json({ error: "Company not found" });
     }
 
+    // Legacy support: if old field onlineQuestion_solution exists, migrate it
+    const legacySolutions = company.get?.("onlineQuestion_solution");
+    if (
+      (!company.onlineQuestions_solution || company.onlineQuestions_solution.length === 0) &&
+      Array.isArray(legacySolutions) &&
+      legacySolutions.length > 0
+    ) {
+      company.onlineQuestions_solution = legacySolutions;
+      company.markModified("onlineQuestions_solution");
+      // Remove legacy field to avoid duplication
+      if (typeof company.set === "function") {
+        company.set("onlineQuestion_solution", undefined, { strict: false });
+      }
+    }
+
     // Parse submission content
     let parsedContent;
     try {
@@ -111,9 +126,14 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
         if (!company.onlineQuestions) {
           company.onlineQuestions = [];
         }
-        if (!company.onlineQuestion_solution) {
-          company.onlineQuestion_solution = [];
+        if (!company.onlineQuestions_solution) {
+          company.onlineQuestions_solution = [];
         }
+        const ensureSolutionArraySync = () => {
+          while (company.onlineQuestions_solution.length < company.onlineQuestions.length) {
+            company.onlineQuestions_solution.push("");
+          }
+        };
         
         // Truncate question to max length (500 characters) - be very strict
         let truncatedQuestion = truncateText(questionText, 500);
@@ -126,36 +146,49 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
         // Double-check length before adding (should never exceed 500)
         // Also ensure it's not just whitespace after sanitization
         if (truncatedQuestion.length > 0 && truncatedQuestion.length <= 500 && truncatedQuestion.trim().length > 0) {
-          // Only add if question doesn't already exist
-          if (!company.onlineQuestions.includes(truncatedQuestion)) {
-            company.onlineQuestions.push(truncatedQuestion);
-            // Mark array as modified for Mongoose
-            company.markModified('onlineQuestions');
-            
-            // If solution exists, truncate and add to onlineQuestion_solution
-            if (parsedContent.solution) {
-              let truncatedSolution = truncateText(parsedContent.solution, 500);
-              // Final safety check
-              if (truncatedSolution.length > 500) {
-                truncatedSolution = truncatedSolution.substring(0, 500);
-              }
-              // Ensure solution also doesn't exceed limit
-              if (truncatedSolution.length <= 500) {
-                company.onlineQuestion_solution.push(truncatedSolution);
-              } else {
-                // Last resort: force to 500
-                company.onlineQuestion_solution.push(truncatedSolution.substring(0, 500));
-              }
-            } else {
-              // Add empty string to maintain array alignment
-              company.onlineQuestion_solution.push("");
+          const existingIndex = company.onlineQuestions.findIndex(
+            (q) => typeof q === "string" && q.trim() === truncatedQuestion.trim()
+          );
+
+          const getTruncatedSolution = () => {
+            if (!parsedContent.solution) return "";
+            let truncatedSolution = truncateText(parsedContent.solution, 500);
+            if (truncatedSolution.length > 500) {
+              truncatedSolution = truncatedSolution.substring(0, 500);
             }
-            // Mark solution array as modified for Mongoose
-            company.markModified('onlineQuestion_solution');
+            return truncatedSolution;
+          };
+
+          if (existingIndex === -1) {
+            company.onlineQuestions.push(truncatedQuestion);
+            company.markModified('onlineQuestions');
+
+            ensureSolutionArraySync();
+            const newIndex = company.onlineQuestions.length - 1;
+
+            const truncatedSolution = getTruncatedSolution();
+            company.onlineQuestions_solution[newIndex] = truncatedSolution || "";
+            company.markModified('onlineQuestions_solution');
             
             console.log('✅ Added online question to company:', company._id);
           } else {
-            console.log('⚠️ Question already exists in company');
+            console.log('ℹ️ Question already exists, updating solution text');
+            ensureSolutionArraySync();
+            const truncatedSolution = getTruncatedSolution();
+            if (truncatedSolution) {
+              const existingSolution = company.onlineQuestions_solution[existingIndex] || "";
+              const combined = existingSolution
+                ? `${existingSolution}\n\n${truncatedSolution}`.substring(0, 500)
+                : truncatedSolution;
+              company.onlineQuestions_solution[existingIndex] = combined;
+              company.markModified('onlineQuestions_solution');
+            } else if (
+              !company.onlineQuestions_solution[existingIndex] ||
+              typeof company.onlineQuestions_solution[existingIndex] !== "string"
+            ) {
+              company.onlineQuestions_solution[existingIndex] = "";
+              company.markModified('onlineQuestions_solution');
+            }
           }
         } else {
           console.warn(`Question truncated but still exceeds limit: ${truncatedQuestion?.length || 0} chars`);
@@ -236,15 +269,15 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
       // Mark array as modified for Mongoose
       company.markModified('onlineQuestions');
     }
-    if (company.onlineQuestion_solution) {
-      company.onlineQuestion_solution = company.onlineQuestion_solution.map(s => {
+    if (company.onlineQuestions_solution) {
+      company.onlineQuestions_solution = company.onlineQuestions_solution.map(s => {
         if (typeof s === 'string' && s.length > 500) {
           return s.substring(0, 500);
         }
         return s || '';
       });
       // Mark array as modified for Mongoose
-      company.markModified('onlineQuestion_solution');
+      company.markModified('onlineQuestions_solution');
     }
     if (company.interviewQuestions) {
       company.interviewQuestions = company.interviewQuestions

@@ -7,10 +7,23 @@ const ADMIN_EMAIL = "arahanthm.cs22@rvce.edu.in";
 
 const commentRouter = express.Router();
 
-// Get all comments for a company
+// Get all comments for a company (with pagination)
 commentRouter.get("/companies/:companyId/comments", async (req, res) => {
   try {
     const { companyId } = req.params;
+    
+    // Pagination parameters
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20; // Default 20 comments per page
+    const skip = (page - 1) * limit;
+
+    // Validate pagination parameters
+    if (page < 1) {
+      return res.status(400).json({ error: "Page number must be at least 1" });
+    }
+    if (limit < 1 || limit > 100) {
+      return res.status(400).json({ error: "Limit must be between 1 and 100" });
+    }
 
     // Verify company exists
     const company = await Company.findById(companyId);
@@ -18,14 +31,34 @@ commentRouter.get("/companies/:companyId/comments", async (req, res) => {
       return res.status(404).json({ error: "Company not found" });
     }
 
-    // Get all comments for this company, sorted by newest first
+    // Get total count of comments for this company
+    const totalComments = await Comment.countDocuments({ company: companyId });
+
+    // Get paginated comments, sorted by newest first
     const comments = await Comment.find({ company: companyId })
       .populate("user", "username email picture")
       .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
       .select("-__v")
       .lean();
 
-    res.json(comments);
+    // Calculate pagination metadata
+    const totalPages = Math.ceil(totalComments / limit);
+    const hasNextPage = page < totalPages;
+    const hasPrevPage = page > 1;
+
+    res.json({
+      comments,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalComments,
+        limit,
+        hasNextPage,
+        hasPrevPage,
+      },
+    });
   } catch (error) {
     console.error("❌ Error fetching comments:", error.message);
     res.status(500).json({ error: "Server error" });

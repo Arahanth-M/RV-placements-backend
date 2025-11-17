@@ -1,5 +1,5 @@
 const WELCOME_WEBHOOK_URL = "https://dkn123.app.n8n.cloud/webhook/welcome-user";
-const COMPANY_NEWS_WEBHOOK_URL = "https://dkn123.app.n8n.cloud/webhook-test/scrape-ambitionbox";
+const KNOW_MORE_WEBHOOK_URL = "https://dkn123.app.n8n.cloud/webhook-test/10c801c1-dc27-4fb4-b3f4-7b1ce4f81c7b";
 
 /**
  * Sends a welcome email webhook notification to n8n when a new user logs in
@@ -16,7 +16,7 @@ export const sendWelcomeEmailWebhook = async (email, username) => {
 
     // Create AbortController for timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 100000); // 100 second timeout
 
     const response = await fetch(WELCOME_WEBHOOK_URL, {
       method: "POST",
@@ -44,7 +44,7 @@ export const sendWelcomeEmailWebhook = async (email, username) => {
       console.error("❌ Welcome email webhook timeout:", {
         email,
         username,
-        error: "Request timed out after 10 seconds",
+        error: "Request timed out after 100 seconds",
       });
     } else {
       console.error("❌ Failed to send welcome email webhook:", {
@@ -57,26 +57,29 @@ export const sendWelcomeEmailWebhook = async (email, username) => {
 };
 
 /**
- * Fetches company news from n8n webhook
- * @param {string} companyName - Company name to fetch news for
+ * Fetches company information from n8n webhook when user clicks "Know More"
+ * @param {string} companyName - Company name
  * @returns {Promise<Object>} - JSON response from webhook
  */
-export const getCompanyNews = async (companyName) => {
+export const sendKnowMoreWebhook = async (companyName) => {
   try {
+    // Convert to lowercase and replace spaces with hyphens
+    const formattedCompanyName = companyName.toLowerCase().replace(/\s+/g, '-');
+    
     const payload = {
-      companyName: companyName,
+      companyName: formattedCompanyName,
     };
 
-    console.log("📤 Sending company news webhook request:", {
-      url: COMPANY_NEWS_WEBHOOK_URL,
+    console.log("📤 Sending Know More webhook request:", {
+      url: KNOW_MORE_WEBHOOK_URL,
       payload,
     });
 
     // Create AbortController for timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 150000); // 150 second timeout
 
-    const response = await fetch(COMPANY_NEWS_WEBHOOK_URL, {
+    const response = await fetch(KNOW_MORE_WEBHOOK_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -114,7 +117,7 @@ export const getCompanyNews = async (companyName) => {
 
     const data = await response.json();
 
-    console.log("✅ Company news webhook fetched successfully:", {
+    console.log("✅ Know More webhook fetched successfully:", {
       companyName,
       status: response.status,
     });
@@ -123,13 +126,13 @@ export const getCompanyNews = async (companyName) => {
   } catch (error) {
     // Log error and throw - we want to handle this in the route
     if (error.name === "AbortError") {
-      console.error("❌ Company news webhook timeout:", {
+      console.error("❌ Know More webhook timeout:", {
         companyName,
         error: "Request timed out after 15 seconds",
       });
       throw new Error("Request timed out. Please try again.");
     } else {
-      console.error("❌ Failed to fetch company news webhook:", {
+      console.error("❌ Failed to fetch Know More webhook:", {
         companyName,
         error: error.message,
       });

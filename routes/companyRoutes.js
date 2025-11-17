@@ -6,7 +6,7 @@ import { s3 } from "../utils/s3.js";
 import requireAuth from "../middleware/requireAuth.js";
 import dotenv from "dotenv";
 import Submission from "../models/Submission.js";
-import { getCompanyNews } from "../services/webhookService.js";
+import { sendKnowMoreWebhook } from "../services/webhookService.js";
 dotenv.config();
 
 const companyRouter = express.Router();
@@ -111,6 +111,15 @@ companyRouter.get("/:id", requireAuth, async (req, res) => {
       ctc: role.ctc instanceof Map ? Object.fromEntries(role.ctc) : role.ctc
     }));
 
+    // Legacy support: if onlineQuestions_solution missing, fallback to old field
+    if (
+      (!companyObj.onlineQuestions_solution || companyObj.onlineQuestions_solution.length === 0) &&
+      Array.isArray(companyObj.onlineQuestion_solution)
+    ) {
+      companyObj.onlineQuestions_solution = companyObj.onlineQuestion_solution;
+    }
+    delete companyObj.onlineQuestion_solution;
+
     res.json({
       ...companyObj,
       videoUrl,
@@ -145,8 +154,8 @@ companyRouter.post("/", async (req, res) => {
   }
 });
 
-// Get company news from webhook
-companyRouter.post("/news", async (req, res) => {
+// Get "Know More" information from webhook
+companyRouter.post("/know-more", async (req, res) => {
   try {
     const { companyName } = req.body;
 
@@ -154,12 +163,12 @@ companyRouter.post("/news", async (req, res) => {
       return res.status(400).json({ error: "Company name is required" });
     }
 
-    const newsData = await getCompanyNews(companyName);
-    res.json(newsData);
+    const data = await sendKnowMoreWebhook(companyName);
+    res.json(data);
   } catch (error) {
-    console.error("❌ Error fetching company news:", error.message);
+    console.error("❌ Error fetching Know More webhook:", error.message);
     res.status(500).json({ 
-      error: error.message || "Failed to fetch company news. Please try again later." 
+      error: error.message || "Failed to fetch company information. Please try again later." 
     });
   }
 });
