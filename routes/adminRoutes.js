@@ -104,24 +104,13 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
 
     // Helper function to sanitize text (remove script tags and dangerous HTML)
     const sanitizeText = (text) => {
-      if (!text) return '';
+      if (text === undefined || text === null) return '';
       let str = String(text);
       // Remove script tags
       str = str.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
       // Remove other potentially dangerous HTML tags
       str = str.replace(/<[^>]+>/g, '');
       return str.trim();
-    };
-
-    // Helper function to truncate text to max length (strictly enforce limit)
-    const truncateText = (text, maxLength) => {
-      if (!text) return '';
-      // Sanitize first, then convert to string, trim
-      const sanitized = sanitizeText(text);
-      const str = String(sanitized).trim();
-      if (str.length <= maxLength) return str;
-      // Truncate to maxLength exactly (no trim after to avoid going under)
-      return str.substring(0, maxLength);
     };
 
     // Update company based on submission type
@@ -145,51 +134,39 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
           }
         };
         
-        // Truncate question to max length (500 characters) - be very strict
-        let truncatedQuestion = truncateText(questionText, 500);
+        const sanitizedQuestion = sanitizeText(questionText);
         
-        // Final safety check: ensure it's exactly 500 or less
-        if (truncatedQuestion.length > 500) {
-          truncatedQuestion = truncatedQuestion.substring(0, 500);
-        }
-        
-        // Double-check length before adding (should never exceed 500)
-        // Also ensure it's not just whitespace after sanitization
-        if (truncatedQuestion.length > 0 && truncatedQuestion.length <= 500 && truncatedQuestion.trim().length > 0) {
+        if (sanitizedQuestion.length > 0) {
           const existingIndex = company.onlineQuestions.findIndex(
-            (q) => typeof q === "string" && q.trim() === truncatedQuestion.trim()
+            (q) => typeof q === "string" && q.trim() === sanitizedQuestion.trim()
           );
 
-          const getTruncatedSolution = () => {
+          const getSanitizedSolution = () => {
             if (!parsedContent.solution) return "";
-            let truncatedSolution = truncateText(parsedContent.solution, 500);
-            if (truncatedSolution.length > 500) {
-              truncatedSolution = truncatedSolution.substring(0, 500);
-            }
-            return truncatedSolution;
+            return sanitizeText(parsedContent.solution);
           };
 
           if (existingIndex === -1) {
-            company.onlineQuestions.push(truncatedQuestion);
+            company.onlineQuestions.push(sanitizedQuestion);
             company.markModified('onlineQuestions');
 
             ensureSolutionArraySync();
             const newIndex = company.onlineQuestions.length - 1;
 
-            const truncatedSolution = getTruncatedSolution();
-            company.onlineQuestions_solution[newIndex] = truncatedSolution || "";
+            const sanitizedSolution = getSanitizedSolution();
+            company.onlineQuestions_solution[newIndex] = sanitizedSolution || "";
             company.markModified('onlineQuestions_solution');
             
             console.log('✅ Added online question to company:', company._id);
           } else {
             console.log('ℹ️ Question already exists, updating solution text');
             ensureSolutionArraySync();
-            const truncatedSolution = getTruncatedSolution();
-            if (truncatedSolution) {
+            const sanitizedSolution = getSanitizedSolution();
+            if (sanitizedSolution) {
               const existingSolution = company.onlineQuestions_solution[existingIndex] || "";
               const combined = existingSolution
-                ? `${existingSolution}\n\n${truncatedSolution}`.substring(0, 500)
-                : truncatedSolution;
+                ? `${existingSolution}\n\n${sanitizedSolution}`
+                : sanitizedSolution;
               company.onlineQuestions_solution[existingIndex] = combined;
               company.markModified('onlineQuestions_solution');
             } else if (
@@ -216,15 +193,11 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
           company.interviewQuestions = [];
         }
         
-        // Truncate question to max length (500 characters)
-        const truncatedQuestion = truncateText(questionText, 500);
+        const sanitizedQuestion = sanitizeText(questionText);
         
-        // Double-check length before adding
-        // Also ensure it's not just whitespace after sanitization
-        if (truncatedQuestion.length > 0 && truncatedQuestion.length <= 500 && truncatedQuestion.trim().length > 0) {
-          // Only add if question doesn't already exist
-          if (!company.interviewQuestions.includes(truncatedQuestion)) {
-            company.interviewQuestions.push(truncatedQuestion);
+        if (sanitizedQuestion.length > 0) {
+          if (!company.interviewQuestions.includes(sanitizedQuestion)) {
+            company.interviewQuestions.push(sanitizedQuestion);
             // Mark array as modified for Mongoose
             company.markModified('interviewQuestions');
             console.log('✅ Added interview question to company:', company._id);
@@ -240,25 +213,13 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
         processText = String(processText);
       }
       if (processText) {
-        // Truncate interview process to max length (500 characters)
-        const truncatedProcess = truncateText(processText, 500);
-        
-        if (truncatedProcess.length > 0 && truncatedProcess.length <= 500 && truncatedProcess.trim().length > 0) {
-          // If there's existing content, try to append, but ensure total doesn't exceed 500
+        const sanitizedProcess = sanitizeText(processText);
+        if (sanitizedProcess.length > 0) {
           if (company.interviewProcess) {
             const separator = "\n\n";
-            const combined = `${company.interviewProcess}${separator}${truncatedProcess}`;
-            // If combined exceeds 500, just replace with new content
-            let finalProcess = combined.length > 500 
-              ? truncatedProcess 
-              : truncateText(combined, 500);
-            // Final safety check - ensure it's exactly 500 or less
-            if (finalProcess.length > 500) {
-              finalProcess = finalProcess.substring(0, 500);
-            }
-            company.interviewProcess = finalProcess;
+            company.interviewProcess = `${company.interviewProcess}${separator}${sanitizedProcess}`;
           } else {
-            company.interviewProcess = truncatedProcess;
+            company.interviewProcess = sanitizedProcess;
           }
           console.log('✅ Updated interview process for company:', company._id);
         }
@@ -269,40 +230,22 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
     // Also filter out empty strings that might cause validation issues
     if (company.onlineQuestions) {
       company.onlineQuestions = company.onlineQuestions
-        .map(q => {
-          if (typeof q === 'string' && q.length > 500) {
-            return q.substring(0, 500);
-          }
-          return q || '';
-        })
-        .filter(q => q && q.trim().length > 0); // Remove empty strings
-      // Mark array as modified for Mongoose
+        .map((q) => sanitizeText(q))
+        .filter((q) => q && q.length > 0);
       company.markModified('onlineQuestions');
     }
     if (company.onlineQuestions_solution) {
-      company.onlineQuestions_solution = company.onlineQuestions_solution.map(s => {
-        if (typeof s === 'string' && s.length > 500) {
-          return s.substring(0, 500);
-        }
-        return s || '';
-      });
-      // Mark array as modified for Mongoose
+      company.onlineQuestions_solution = company.onlineQuestions_solution.map((s) => sanitizeText(s));
       company.markModified('onlineQuestions_solution');
     }
     if (company.interviewQuestions) {
       company.interviewQuestions = company.interviewQuestions
-        .map(q => {
-          if (typeof q === 'string' && q.length > 500) {
-            return q.substring(0, 500);
-          }
-          return q || '';
-        })
-        .filter(q => q && q.trim().length > 0); // Remove empty strings
-      // Mark array as modified for Mongoose
+        .map((q) => sanitizeText(q))
+        .filter((q) => q && q.length > 0);
       company.markModified('interviewQuestions');
     }
-    if (company.interviewProcess && typeof company.interviewProcess === 'string' && company.interviewProcess.length > 500) {
-      company.interviewProcess = company.interviewProcess.substring(0, 500);
+    if (company.interviewProcess && typeof company.interviewProcess === 'string') {
+      company.interviewProcess = sanitizeText(company.interviewProcess);
     }
     
     // Truncate Must_Do_Topics to max 200 characters

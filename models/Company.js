@@ -255,7 +255,6 @@ const companySchema = new mongoose.Schema(
       {
         type: String,
         trim: true,
-        maxlength: 500,
         validate: {
           validator: (v) => !/<script.*?>.*?<\/script>/gi.test(v),
           message: "Malicious script detected in online questions",
@@ -263,11 +262,11 @@ const companySchema = new mongoose.Schema(
       },
     ],
     onlineQuestions_solution: [
-      { type: String, trim: true, maxlength: 500 },
+      { type: String, trim: true },
     ],
     mcqQuestions: [
       {
-        question: { type: String, trim: true, maxlength: 300 },
+        question: { type: String, trim: true },
         optionA: { type: String, trim: true, maxlength: 100 },
         optionB: { type: String, trim: true, maxlength: 100 },
         optionC: { type: String, trim: true, maxlength: 100 },
@@ -279,14 +278,13 @@ const companySchema = new mongoose.Schema(
       {
         type: String,
         trim: true,
-        maxlength: 500,
         validate: {
           validator: (v) => !/<script.*?>.*?<\/script>/gi.test(v),
           message: "Malicious script detected in interview questions",
         },
       },
     ],
-    interviewProcess: { type: String, trim: true, maxlength: 500 },
+    interviewProcess: { type: String, trim: true },
     count: { type: String},
     selectedCandidates: [selectedCandidateSchema],
     Must_Do_Topics: [
@@ -360,6 +358,6 @@ companySchema.pre("save", function (next) {
   next();
 });
 
-const Company = mongoose.model("Company", companySchema);
+const Company = mongoose.model("Company", companySchema, "companies1");
 export default Company;
 
