@@ -70,7 +70,19 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
     }
 
     // Legacy support: if old field onlineQuestion_solution exists, migrate it
-    const legacySolutions = company.get?.("onlineQuestions_solution");
+    const removeLegacySolutionField = () => {
+      const legacyKeys = ["onlineQuestion_solution", "onlineQuestion_solutions"];
+      legacyKeys.forEach((key) => {
+        if (typeof company.set === "function") {
+          company.set(key, undefined, { strict: false });
+        }
+        if (company._doc && Object.prototype.hasOwnProperty.call(company._doc, key)) {
+          delete company._doc[key];
+        }
+      });
+    };
+
+    const legacySolutions = company.get?.("onlineQuestion_solution");
     if (
       (!company.onlineQuestions_solution || company.onlineQuestions_solution.length === 0) &&
       Array.isArray(legacySolutions) &&
@@ -78,11 +90,9 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
     ) {
       company.onlineQuestions_solution = legacySolutions;
       company.markModified("onlineQuestions_solution");
-      // Remove legacy field to avoid duplication
-      if (typeof company.set === "function") {
-        company.set("onlineQuestion_solutions", undefined, { strict: false });
-      }
     }
+    // Always remove the legacy field (even if empty) to prevent new writes
+    removeLegacySolutionField();
 
     // Parse submission content
     let parsedContent;

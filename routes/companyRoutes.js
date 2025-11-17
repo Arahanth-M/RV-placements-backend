@@ -111,14 +111,22 @@ companyRouter.get("/:id", requireAuth, async (req, res) => {
       ctc: role.ctc instanceof Map ? Object.fromEntries(role.ctc) : role.ctc
     }));
 
-    // Legacy support: if onlineQuestions_solution missing, fallback to old field
+    // Legacy support: if onlineQuestions_solution missing, fallback to old field names
+    const legacySolutionsArrays = [
+      companyObj.onlineQuestions_solution,
+      companyObj.onlineQuestion_solution,
+      companyObj.onlineQuestion_solutions,
+    ].filter(Array.isArray);
+
     if (
       (!companyObj.onlineQuestions_solution || companyObj.onlineQuestions_solution.length === 0) &&
-      Array.isArray(companyObj.onlineQuestions_solution)
+      legacySolutionsArrays.length > 0
     ) {
-      companyObj.onlineQuestions_solution = companyObj.onlineQuestions_solution;
+      // Use the first available legacy array
+      companyObj.onlineQuestions_solution = legacySolutionsArrays.find(Array.isArray);
     }
-    delete companyObj.onlineQuestions_solution;
+    delete companyObj.onlineQuestion_solution;
+    delete companyObj.onlineQuestion_solutions;
 
     res.json({
       ...companyObj,
