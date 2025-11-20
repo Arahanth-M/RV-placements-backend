@@ -291,7 +291,7 @@ const companySchema = new mongoose.Schema(
       {
         type: String,
         trim: true,
-        maxlength: 200,
+      
         validate: {
           validator: (v) => !/<script.*?>.*?<\/script>/gi.test(v),
           message: "Malicious script detected in Must Do Topics",
@@ -306,6 +306,18 @@ const companySchema = new mongoose.Schema(
     },
     videoKey: { type: String, trim: true },
     logo: { type: String, trim: true },
+    interview_difficulty_level: { 
+      type: Number, 
+      default: 0, 
+      min: [0, "Difficulty level cannot be negative"],
+      max: [5, "Difficulty level cannot exceed 5"]
+    },
+    difficulty_ratings: [{ 
+      type: Number, 
+      min: [1, "Rating must be at least 1"],
+      max: [5, "Rating cannot exceed 5"]
+    }],
+    difficulty_rating_count: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true }
 );

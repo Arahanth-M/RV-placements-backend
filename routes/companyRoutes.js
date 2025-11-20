@@ -37,7 +37,7 @@ companyRouter.get("/", async (req, res) => {
     // Only expose approved companies to the public list to avoid 404s on details
     const companies = await Company.find(
       { status: "approved" },
-      "name type eligibility roles count business_model date_of_visit logo"
+      "name type eligibility roles count business_model date_of_visit logo interview_difficulty_level difficulty_rating_count"
     );
     return res.json(companies);
   } catch (e) {
@@ -45,6 +45,135 @@ companyRouter.get("/", async (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 });
+
+// Update company difficulty rating - MUST be before /:id route
+companyRouter.post("/:id/rate-difficulty", async (req, res) => {
+  try {
+    const { rating } = req.body;
+    const { id } = req.params;
+
+    console.log("📊 Rating request received:", { id, rating, ratingType: typeof rating, body: req.body });
+
+    // Validate rating exists
+    if (rating === undefined || rating === null || rating === '') {
+      return res.status(400).json({ error: "Rating is required" });
+    }
+
+    // Validate company ID format
+    if (!id || id.length < 10) {
+      return res.status(400).json({ error: "Invalid company ID format" });
+    }
+
+    // Convert rating to integer and validate
+    const ratingNum = parseInt(rating, 10);
+    if (isNaN(ratingNum)) {
+      return res.status(400).json({ error: `Rating must be a valid number. Received: ${rating} (${typeof rating})` });
+    }
+    
+    if (ratingNum < 1 || ratingNum > 5) {
+      return res.status(400).json({ error: `Rating must be between 1 and 5. Received: ${ratingNum}` });
+    }
+
+    const company = await Company.findById(id);
+    if (!company) {
+      console.error("❌ Company not found with ID:", id);
+      return res.status(404).json({ error: `Company not found with ID: ${id}` });
+    }
+
+    console.log("✅ Company found:", company.name);
+    console.log("📊 Current difficulty_ratings:", company.difficulty_ratings);
+
+    // Initialize arrays if they don't exist
+    if (!company.difficulty_ratings || !Array.isArray(company.difficulty_ratings)) {
+      company.difficulty_ratings = [];
+    }
+
+    // Clean existing ratings array - filter out invalid values and ensure all are valid integers between 1-5
+    const cleanedRatings = company.difficulty_ratings
+      .map(r => {
+        if (r === null || r === undefined) return null;
+        const num = parseInt(r, 10);
+        return isNaN(num) ? null : num;
+      })
+      .filter(r => r !== null && r >= 1 && r <= 5);
+    
+    company.difficulty_ratings = cleanedRatings;
+    console.log("📊 Cleaned ratings array:", cleanedRatings);
+
+    if (company.difficulty_rating_count === undefined || company.difficulty_rating_count === null) {
+      company.difficulty_rating_count = 0;
+    }
+
+    // Add the new rating (ensure it's a number)
+    company.difficulty_ratings.push(ratingNum);
+    company.difficulty_rating_count = company.difficulty_ratings.length;
+
+    // Calculate average
+    const sum = company.difficulty_ratings.reduce((acc, r) => acc + Number(r), 0);
+    company.interview_difficulty_level = Number((sum / company.difficulty_ratings.length).toFixed(2));
+
+    console.log("📊 Updated difficulty_ratings:", company.difficulty_ratings);
+    console.log("📊 Updated interview_difficulty_level:", company.interview_difficulty_level);
+
+    // Ensure interview_difficulty_level is within valid range
+    if (company.interview_difficulty_level < 0) {
+      company.interview_difficulty_level = 0;
+    }
+    if (company.interview_difficulty_level > 5) {
+      company.interview_difficulty_level = 5;
+    }
+
+    // Mark as modified to ensure Mongoose saves the changes
+    company.markModified('difficulty_ratings');
+    company.markModified('interview_difficulty_level');
+    company.markModified('difficulty_rating_count');
+
+    // Save with validation
+    await company.save();
+
+    res.json({
+      message: "Rating updated successfully",
+      interview_difficulty_level: company.interview_difficulty_level,
+      difficulty_rating_count: company.difficulty_rating_count,
+    });
+  } catch (error) {
+    console.error("❌ Error updating difficulty rating:", error.message);
+    console.error("❌ Error name:", error.name);
+    console.error("❌ Full error stack:", error.stack);
+    
+    if (error.errors) {
+      console.error("❌ Validation errors:", JSON.stringify(error.errors, null, 2));
+      // Log each validation error
+      const errorDetails = {};
+      Object.keys(error.errors).forEach(key => {
+        const err = error.errors[key];
+        console.error(`  - ${key}: ${err.message} (value: ${err.value})`);
+        errorDetails[key] = err.message;
+      });
+      
+      if (error.name === 'ValidationError') {
+        return res.status(400).json({ 
+          error: "Validation error",
+          message: error.message || "Data validation failed",
+          details: errorDetails
+        });
+      }
+    }
+    
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ 
+        error: "Validation error",
+        message: error.message || "Data validation failed"
+      });
+    }
+    
+    res.status(500).json({ 
+      error: "Server error",
+      message: error.message || "Failed to update rating"
+    });
+  }
+});
+
 // companyRouter.get("/:id", requireAuth, async (req, res) => {
 //   try {
 //     const company = await Company.findOne({
