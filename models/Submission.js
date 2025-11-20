@@ -19,9 +19,17 @@ const submissionSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  status: {
+    type: String,
+    enum: ["pending", "approved"],
+    default: "pending",
+  },
   submittedAt: {
     type: Date,
     default: Date.now,
+  },
+  approvedAt: {
+    type: Date,
   },
 });
 

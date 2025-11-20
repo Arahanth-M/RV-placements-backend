@@ -284,7 +284,7 @@ const companySchema = new mongoose.Schema(
         },
       },
     ],
-    interviewProcess: { type: String, trim: true },
+    interviewProcess: [{ type: String, trim: true }],
     count: { type: String},
     selectedCandidates: [selectedCandidateSchema],
     Must_Do_Topics: [

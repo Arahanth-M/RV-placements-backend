@@ -20,10 +20,13 @@ adminRouter.get("/stats/users", async (req, res) => {
   }
 });
 
-// Get all submissions
+// Get all submissions (with optional status filter)
 adminRouter.get("/submissions", async (req, res) => {
   try {
-    const submissions = await Submission.find()
+    const { status } = req.query;
+    const query = status ? { status } : {};
+    
+    const submissions = await Submission.find(query)
       .populate("companyId", "name")
       .sort({ submittedAt: -1 });
     
@@ -39,12 +42,16 @@ adminRouter.get("/stats", async (req, res) => {
   try {
     const totalUsers = await User.countDocuments();
     const totalSubmissions = await Submission.countDocuments();
+    const pendingSubmissions = await Submission.countDocuments({ status: "pending" });
+    const approvedSubmissions = await Submission.countDocuments({ status: "approved" });
     const totalCompanies = await Company.countDocuments({ status: "approved" });
     const pendingCompanies = await Company.countDocuments({ status: "pending" });
     
     res.json({
       totalUsers,
       totalSubmissions,
+      pendingSubmissions,
+      approvedSubmissions,
       totalCompanies,
       pendingCompanies,
     });
@@ -215,13 +222,19 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
       if (processText) {
         const sanitizedProcess = sanitizeText(processText);
         if (sanitizedProcess.length > 0) {
-          if (company.interviewProcess) {
-            const separator = "\n\n";
-            company.interviewProcess = `${company.interviewProcess}${separator}${sanitizedProcess}`;
-          } else {
-            company.interviewProcess = sanitizedProcess;
+          // Initialize array if it doesn't exist
+          if (!company.interviewProcess || !Array.isArray(company.interviewProcess)) {
+            company.interviewProcess = [];
           }
-          console.log('✅ Updated interview process for company:', company._id);
+          
+          // Append the new process to the array (avoid duplicates)
+          if (!company.interviewProcess.includes(sanitizedProcess)) {
+            company.interviewProcess.push(sanitizedProcess);
+            company.markModified('interviewProcess');
+            console.log('✅ Added interview process to company:', company._id);
+          } else {
+            console.log('⚠️ Interview process already exists in company');
+          }
         }
       }
     }
@@ -244,8 +257,21 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
         .filter((q) => q && q.length > 0);
       company.markModified('interviewQuestions');
     }
-    if (company.interviewProcess && typeof company.interviewProcess === 'string') {
-      company.interviewProcess = sanitizeText(company.interviewProcess);
+    if (company.interviewProcess) {
+      // Handle both array and legacy string format
+      if (Array.isArray(company.interviewProcess)) {
+        company.interviewProcess = company.interviewProcess
+          .map((p) => sanitizeText(p))
+          .filter((p) => p && p.length > 0);
+        company.markModified('interviewProcess');
+      } else if (typeof company.interviewProcess === 'string') {
+        // Convert legacy string to array
+        const sanitized = sanitizeText(company.interviewProcess);
+        if (sanitized && sanitized.length > 0) {
+          company.interviewProcess = [sanitized];
+          company.markModified('interviewProcess');
+        }
+      }
     }
     
     // Truncate Must_Do_Topics to max 200 characters
@@ -409,12 +435,15 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
       throw saveError;
     }
 
-    // Optionally delete the submission after approval
-    await Submission.findByIdAndDelete(req.params.id);
+    // Mark submission as approved instead of deleting
+    submission.status = "approved";
+    submission.approvedAt = new Date();
+    await submission.save();
 
     res.json({ 
       message: "Submission approved and company updated successfully",
-      company: company 
+      company: company,
+      submission: submission
     });
   } catch (error) {
     console.error("❌ Error approving submission:", error.message);
