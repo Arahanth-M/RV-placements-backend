@@ -6,7 +6,6 @@ import { s3 } from "../utils/s3.js";
 import requireAuth from "../middleware/requireAuth.js";
 import dotenv from "dotenv";
 import Submission from "../models/Submission.js";
-import { sendKnowMoreWebhook } from "../services/webhookService.js";
 dotenv.config();
 
 const companyRouter = express.Router();
@@ -162,27 +161,6 @@ companyRouter.post("/", async (req, res) => {
     res.status(500).json({ error: "Error saving submission" });
   }
 });
-
-// Get "Know More" information from webhook
-companyRouter.post("/know-more", async (req, res) => {
-  try {
-    const { companyName } = req.body;
-
-    if (!companyName) {
-      return res.status(400).json({ error: "Company name is required" });
-    }
-
-    const data = await sendKnowMoreWebhook(companyName);
-    res.json(data);
-  } catch (error) {
-    console.error("❌ Error fetching Know More webhook:", error.message);
-    res.status(500).json({ 
-      error: error.message || "Failed to fetch company information. Please try again later." 
-    });
-  }
-});
-
-
 
 
 export default companyRouter;

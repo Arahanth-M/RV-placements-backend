@@ -1,6 +1,7 @@
 import express from "express";
 import passport from "passport";
-import { config, urls, messages } from "../config/constants.js";
+import { config, urls, messages, ADMIN_EMAIL } from "../config/constants.js";
+import requireAuth from "../middleware/requireAuth.js";
 
 const router = express.Router();
 
@@ -47,7 +48,6 @@ router.get(
 
       // Check if admin login and verify admin email
       if (isAdminLogin) {
-        const ADMIN_EMAIL = "arahanthm.cs22@rvce.edu.in";
         if (user.email?.toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
           req.logout(() => {
             return res.redirect(`${urls.CLIENT_URL}/auth/callback?login=failed&reason=not_admin`);
@@ -82,6 +82,17 @@ router.get("/current_user", (req, res) => {
     return res.status(401).json({ error: messages.ERROR.NOT_AUTHENTICATED });
   }
   res.json(req.user);
+});
+
+// Check if current user is admin
+router.get("/is_admin", requireAuth, (req, res) => {
+  try {
+    const isAdmin = req.user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+    res.json({ isAdmin });
+  } catch (error) {
+    console.error("❌ Error checking admin status:", error);
+    res.status(500).json({ error: "Server error", isAdmin: false });
+  }
 });
 
 // Get available accounts (for account switching)

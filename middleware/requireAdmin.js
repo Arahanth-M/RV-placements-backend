@@ -1,4 +1,4 @@
-const ADMIN_EMAIL = "arahanthm.cs22@rvce.edu.in";
+import { ADMIN_EMAIL } from "../config/constants.js";
 
 export default (req, res, next) => {
   if (!req.user) {

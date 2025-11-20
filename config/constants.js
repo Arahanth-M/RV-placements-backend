@@ -101,6 +101,9 @@ export const sessionConfig = {
   },
 };
 
+// Admin Configuration
+export const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "arahanthm.cs22@rvce.edu.in";
+
 // Default values
 export const defaults = {
   PAGINATION: {

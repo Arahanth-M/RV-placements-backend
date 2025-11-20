@@ -2,8 +2,7 @@ import express from "express";
 import Comment from "../models/Comment.js";
 import Company from "../models/Company.js";
 import requireAuth from "../middleware/requireAuth.js";
-
-const ADMIN_EMAIL = "arahanthm.cs22@rvce.edu.in";
+import { ADMIN_EMAIL } from "../config/constants.js";
 
 const commentRouter = express.Router();
 
