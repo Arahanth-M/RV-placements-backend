@@ -237,6 +237,30 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
           }
         }
       }
+    } else if (submission.type === "mustDoTopics") {
+      // Ensure we get a string value
+      let topicText = parsedContent.question || parsedContent.content || parsedContent.topic || submission.content;
+      if (topicText && typeof topicText !== 'string') {
+        topicText = String(topicText);
+      }
+      if (topicText) {
+        const sanitizedTopic = sanitizeText(topicText);
+        if (sanitizedTopic.length > 0) {
+          // Initialize array if it doesn't exist
+          if (!company.Must_Do_Topics || !Array.isArray(company.Must_Do_Topics)) {
+            company.Must_Do_Topics = [];
+          }
+          
+          // Append the new topic to the array (avoid duplicates)
+          if (!company.Must_Do_Topics.includes(sanitizedTopic)) {
+            company.Must_Do_Topics.push(sanitizedTopic);
+            company.markModified('Must_Do_Topics');
+            console.log('✅ Added must do topic to company:', company._id);
+          } else {
+            console.log('⚠️ Must do topic already exists in company');
+          }
+        }
+      }
     }
 
     // Final validation: ensure all array values don't exceed their max lengths

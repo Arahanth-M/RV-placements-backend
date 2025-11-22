@@ -8,7 +8,7 @@ const submissionSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ["onlineQuestions", "interviewQuestions", "interviewProcess"],
+    enum: ["onlineQuestions", "interviewQuestions", "interviewProcess", "mustDoTopics"],
     required: true,
   },
   submittedBy: {
