@@ -195,21 +195,61 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
         questionText = String(questionText);
       }
       if (questionText) {
-        // Initialize array if it doesn't exist
+        // Initialize arrays if they don't exist
         if (!company.interviewQuestions) {
           company.interviewQuestions = [];
         }
+        if (!company.interviewQuestions_solution) {
+          company.interviewQuestions_solution = [];
+        }
+        const ensureSolutionArraySync = () => {
+          while (company.interviewQuestions_solution.length < company.interviewQuestions.length) {
+            company.interviewQuestions_solution.push("");
+          }
+        };
         
         const sanitizedQuestion = sanitizeText(questionText);
         
         if (sanitizedQuestion.length > 0) {
-          if (!company.interviewQuestions.includes(sanitizedQuestion)) {
+          const existingIndex = company.interviewQuestions.findIndex(
+            (q) => typeof q === "string" && q.trim() === sanitizedQuestion.trim()
+          );
+
+          const getSanitizedSolution = () => {
+            if (!parsedContent.solution) return "";
+            return sanitizeText(parsedContent.solution);
+          };
+
+          if (existingIndex === -1) {
             company.interviewQuestions.push(sanitizedQuestion);
-            // Mark array as modified for Mongoose
             company.markModified('interviewQuestions');
+
+            ensureSolutionArraySync();
+            const newIndex = company.interviewQuestions.length - 1;
+
+            const sanitizedSolution = getSanitizedSolution();
+            company.interviewQuestions_solution[newIndex] = sanitizedSolution || "";
+            company.markModified('interviewQuestions_solution');
+            
             console.log('✅ Added interview question to company:', company._id);
           } else {
-            console.log('⚠️ Interview question already exists in company');
+            console.log('ℹ️ Question already exists, updating solution text');
+            ensureSolutionArraySync();
+            const sanitizedSolution = getSanitizedSolution();
+            if (sanitizedSolution) {
+              const existingSolution = company.interviewQuestions_solution[existingIndex] || "";
+              const combined = existingSolution
+                ? `${existingSolution}\n\n${sanitizedSolution}`
+                : sanitizedSolution;
+              company.interviewQuestions_solution[existingIndex] = combined;
+              company.markModified('interviewQuestions_solution');
+            } else if (
+              !company.interviewQuestions_solution[existingIndex] ||
+              typeof company.interviewQuestions_solution[existingIndex] !== "string"
+            ) {
+              company.interviewQuestions_solution[existingIndex] = "";
+              company.markModified('interviewQuestions_solution');
+            }
           }
         }
       }
@@ -280,6 +320,10 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
         .map((q) => sanitizeText(q))
         .filter((q) => q && q.length > 0);
       company.markModified('interviewQuestions');
+    }
+    if (company.interviewQuestions_solution) {
+      company.interviewQuestions_solution = company.interviewQuestions_solution.map((s) => sanitizeText(s));
+      company.markModified('interviewQuestions_solution');
     }
     if (company.interviewProcess) {
       // Handle both array and legacy string format
