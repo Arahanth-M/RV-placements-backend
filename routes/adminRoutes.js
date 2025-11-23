@@ -486,6 +486,63 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
   }
 });
 
+// Get all companies (with optional status filter)
+adminRouter.get("/companies", async (req, res) => {
+  try {
+    const { status } = req.query;
+    const query = status ? { status } : {};
+    
+    const companies = await Company.find(query)
+      .sort({ createdAt: -1 });
+    
+    res.json(companies);
+  } catch (error) {
+    console.error("❌ Error fetching companies:", error.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Approve a company
+adminRouter.post("/companies/:id/approve", async (req, res) => {
+  try {
+    const company = await Company.findById(req.params.id);
+    
+    if (!company) {
+      return res.status(404).json({ error: "Company not found" });
+    }
+
+    company.status = "approved";
+    company.approvedAt = new Date();
+    await company.save();
+
+    res.json({ 
+      message: "Company approved successfully",
+      company: company
+    });
+  } catch (error) {
+    console.error("❌ Error approving company:", error.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Reject a company (delete it from database)
+adminRouter.delete("/companies/:id/reject", async (req, res) => {
+  try {
+    const company = await Company.findById(req.params.id);
+    
+    if (!company) {
+      return res.status(404).json({ error: "Company not found" });
+    }
+
+    await Company.findByIdAndDelete(req.params.id);
+
+    res.json({ message: "Company rejected and deleted successfully" });
+  } catch (error) {
+    console.error("❌ Error rejecting company:", error.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 // Reject submission (delete it from database)
 adminRouter.delete("/submissions/:id/reject", async (req, res) => {
   try {
