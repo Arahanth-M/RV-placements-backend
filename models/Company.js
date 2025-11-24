@@ -309,6 +309,8 @@ const companySchema = new mongoose.Schema(
     },
     videoKey: { type: String, trim: true },
     logo: { type: String, trim: true },
+    helpfulCount: { type: Number, default: 0, min: 0 },
+    helpfulUsers: [{ type: String }], // Array of user emails who have upvoted
   },
   { timestamps: true }
 );

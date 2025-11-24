@@ -36,7 +36,7 @@ companyRouter.get("/", async (req, res) => {
     // Only expose approved companies to the public list to avoid 404s on details
     const companies = await Company.find(
       { status: "approved" },
-      "name type eligibility roles count business_model date_of_visit logo"
+      "name type eligibility roles count business_model date_of_visit logo helpfulCount"
     );
     return res.json(companies);
   } catch (e) {
@@ -144,6 +144,77 @@ companyRouter.get("/:id", requireAuth, async (req, res) => {
 
 
 
+
+// Increment helpful count for a company (one vote per user)
+companyRouter.post("/:id/helpful", async (req, res) => {
+  try {
+    // Check if user is authenticated
+    if (!req.user || !req.user.email) {
+      return res.status(401).json({ error: "You must be logged in to upvote" });
+    }
+
+    const company = await Company.findById(req.params.id);
+    
+    if (!company) {
+      return res.status(404).json({ error: "Company not found" });
+    }
+
+    // Initialize helpfulUsers array if it doesn't exist
+    if (!company.helpfulUsers) {
+      company.helpfulUsers = [];
+    }
+
+    const userEmail = req.user.email;
+
+    // Check if user has already upvoted
+    if (company.helpfulUsers.includes(userEmail)) {
+      return res.status(400).json({ 
+        error: "You have already upvoted this company",
+        helpfulCount: company.helpfulCount,
+        hasUpvoted: true
+      });
+    }
+
+    // Add user email to helpfulUsers and increment count
+    company.helpfulUsers.push(userEmail);
+    company.helpfulCount = (company.helpfulCount || 0) + 1;
+    await company.save();
+
+    res.json({ 
+      message: "Helpful count updated",
+      helpfulCount: company.helpfulCount,
+      hasUpvoted: true
+    });
+  } catch (error) {
+    console.error("❌ Error updating helpful count:", error);
+    res.status(500).json({ error: "Error updating helpful count" });
+  }
+});
+
+// Check if current user has upvoted a company
+companyRouter.get("/:id/helpful/status", async (req, res) => {
+  try {
+    if (!req.user || !req.user.email) {
+      return res.json({ hasUpvoted: false });
+    }
+
+    const company = await Company.findById(req.params.id);
+    
+    if (!company) {
+      return res.status(404).json({ error: "Company not found" });
+    }
+
+    const hasUpvoted = company.helpfulUsers && company.helpfulUsers.includes(req.user.email);
+
+    res.json({ 
+      hasUpvoted: hasUpvoted || false,
+      helpfulCount: company.helpfulCount || 0
+    });
+  } catch (error) {
+    console.error("❌ Error checking helpful status:", error);
+    res.status(500).json({ error: "Error checking helpful status" });
+  }
+});
 
 companyRouter.post("/", async (req, res) => {
   try {
