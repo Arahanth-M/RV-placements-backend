@@ -3,6 +3,7 @@ import requireAdmin from "../middleware/requireAdmin.js";
 import User from "../models/User.js";
 import Submission from "../models/Submission.js";
 import Company from "../models/Company.js";
+import Notification from "../models/Notification.js";
 
 const adminRouter = express.Router();
 
@@ -557,6 +558,7 @@ adminRouter.post("/companies/:id/approve", async (req, res) => {
 
     company.status = "approved";
     company.approvedAt = new Date();
+    // Save will trigger the post-save hook which creates notifications
     await company.save();
 
     res.json({ 
@@ -565,6 +567,7 @@ adminRouter.post("/companies/:id/approve", async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error approving company:", error.message);
+    console.error("❌ Error stack:", error.stack);
     res.status(500).json({ error: "Server error" });
   }
 });

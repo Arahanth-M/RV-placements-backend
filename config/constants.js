@@ -66,6 +66,7 @@ export const routes = {
   EVENTS: '/api/events',
   YEAR_STATS: '/api/year-stats',
   COMMENTS: '/api',
+  NOTIFICATIONS: '/api/notifications',
 };
 
 // Messages

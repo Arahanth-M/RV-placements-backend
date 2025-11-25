@@ -180,6 +180,8 @@
 // export default Company;
 
 import mongoose from "mongoose";
+// Import models for notification creation (using lazy loading to avoid circular deps)
+let Notification, User;
 
 const selectedCandidateSchema = new mongoose.Schema(
   {
@@ -361,6 +363,64 @@ companySchema.pre("save", function (next) {
     });
   }
   next();
+});
+
+// Post-save hook to create notifications when company is approved
+companySchema.post("save", async function (doc) {
+  console.log(`🔔 Post-save hook triggered for company: ${doc.name}, status: ${doc.status}`);
+  
+  // Only create notifications if status is "approved"
+  if (doc.status === "approved") {
+    try {
+      // Lazy load models to avoid circular dependencies
+      if (!Notification) {
+        Notification = (await import("./Notification.js")).default;
+      }
+      if (!User) {
+        User = (await import("./User.js")).default;
+      }
+      
+      console.log(`🔍 Checking for existing notifications for company: ${doc._id}`);
+      
+      // Check if notifications already exist for this company to avoid duplicates
+      const existingNotification = await Notification.findOne({
+        companyId: doc._id,
+        type: "new_company",
+      });
+      
+      if (existingNotification) {
+        console.log(`⚠️ Notifications already exist for company: ${doc.name}`);
+        return;
+      }
+      
+      console.log(`👥 Fetching all users...`);
+      const allUsers = await User.find({}, "userId");
+      console.log(`📊 Found ${allUsers.length} users`);
+      
+      if (allUsers.length > 0) {
+        const notifications = allUsers.map((user) => ({
+          userId: user.userId,
+          type: "new_company",
+          title: "New Company Added",
+          message: `${doc.name} has been added to the platform. Check it out!`,
+          companyId: doc._id,
+          isSeen: false,
+        }));
+        
+        console.log(`📝 Creating ${notifications.length} notifications...`);
+        await Notification.insertMany(notifications);
+        console.log(`✅ Created ${notifications.length} notifications for new company: ${doc.name}`);
+      } else {
+        console.log(`⚠️ No users found to send notifications to`);
+      }
+    } catch (error) {
+      // Don't fail the save if notification creation fails
+      console.error("❌ Error creating notifications:", error);
+      console.error("❌ Error stack:", error.stack);
+    }
+  } else {
+    console.log(`⏭️ Skipping notification creation - company status is: ${doc.status}`);
+  }
 });
 
 const Company = mongoose.model("Company", companySchema, "companies1");
