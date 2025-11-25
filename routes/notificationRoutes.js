@@ -89,5 +89,49 @@ notificationRouter.put("/mark-all-seen", async (req, res) => {
   }
 });
 
+// Delete a single notification
+notificationRouter.delete("/:id", async (req, res) => {
+  try {
+    if (!req.user || !req.user.userId) {
+      return res.status(401).json({ error: "User not authenticated" });
+    }
+
+    const notification = await Notification.findOneAndDelete({
+      _id: req.params.id,
+      userId: req.user.userId,
+    });
+
+    if (!notification) {
+      return res.status(404).json({ error: "Notification not found" });
+    }
+
+    res.json({ message: "Notification deleted successfully" });
+  } catch (error) {
+    console.error("❌ Error deleting notification:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Clear all notifications for the current user
+notificationRouter.delete("/", async (req, res) => {
+  try {
+    if (!req.user || !req.user.userId) {
+      return res.status(401).json({ error: "User not authenticated" });
+    }
+
+    const result = await Notification.deleteMany({
+      userId: req.user.userId,
+    });
+
+    res.json({ 
+      message: "All notifications cleared successfully",
+      deletedCount: result.deletedCount 
+    });
+  } catch (error) {
+    console.error("❌ Error clearing notifications:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 export default notificationRouter;
 
