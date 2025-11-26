@@ -220,8 +220,6 @@ const roleSchema = new mongoose.Schema(
       type: Number,
       min: [0, "Stipend cannot be negative"],
     },
-    finalPayFirstYear: { type: String },
-    finalPayAnnual: { type: String },
   },
   { _id: false }
 );
@@ -324,41 +322,9 @@ companySchema.pre("save", function (next) {
       // Convert Map to plain object
       const ctcObj = role.ctc instanceof Map ? Object.fromEntries(role.ctc) : role.ctc || {};
 
-      // Helper function to safely convert value to number (only if it's a number)
-      const toNumber = (val) => {
-        if (typeof val === 'number') return val;
-        if (typeof val === 'string') {
-          const parsed = parseFloat(val);
-          return isNaN(parsed) ? 0 : parsed;
-        }
-        return 0;
-      };
-
-      // Total = sum of all numeric CTC components (skip string values)
-      const total = Object.values(ctcObj).reduce((acc, val) => {
-        if (typeof val === 'number') {
-          return acc + val;
-        }
-        // If it's a string that can be parsed as number, include it
-        if (typeof val === 'string') {
-          const numVal = parseFloat(val);
-          return acc + (isNaN(numVal) ? 0 : numVal);
-        }
-        return acc;
-      }, 0);
-
-      // Optional: First year pay and annual pay (only calculate if we have numeric values)
-      const stock = toNumber(ctcObj.stock);
-      const vestingYears = 4;
-      const firstYearPay = total - stock + (stock / vestingYears);
-      const bonus = toNumber(ctcObj.bonus);
-      const annualPay = total - bonus;
-
       return {
         ...role.toObject(),
-        ctc: { ...ctcObj, total }, // preserve all original keys + total (strings preserved as-is)
-        finalPayFirstYear: `${firstYearPay}`,
-        finalPayAnnual: `${annualPay}`,
+        ctc: { ...ctcObj }, // preserve all original keys (strings preserved as-is)
       };
     });
   }
