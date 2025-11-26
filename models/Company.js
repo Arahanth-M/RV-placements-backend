@@ -328,15 +328,26 @@ companySchema.pre("save", function (next) {
       };
     });
   }
+  
+  // Track if status is being modified to "approved" for notification creation
+  if (this.isModified('status') && this.status === 'approved') {
+    this._statusChangedToApproved = true;
+  } else if (this.isNew && this.status === 'approved') {
+    // For new documents, also track if status is approved
+    this._statusChangedToApproved = true;
+  } else {
+    this._statusChangedToApproved = false;
+  }
+  
   next();
 });
 
 // Post-save hook to create notifications when company is approved
 companySchema.post("save", async function (doc) {
-  console.log(`🔔 Post-save hook triggered for company: ${doc.name}, status: ${doc.status}`);
-  
-  // Only create notifications if status is "approved"
-  if (doc.status === "approved") {
+  // Only create notifications if status was changed to "approved" (not on every save)
+  if (doc.status === "approved" && doc._statusChangedToApproved) {
+    console.log(`🔔 Post-save hook triggered for company: ${doc.name}, status changed to approved`);
+    
     try {
       // Lazy load models to avoid circular dependencies
       if (!Notification) {
@@ -385,7 +396,7 @@ companySchema.post("save", async function (doc) {
       console.error("❌ Error stack:", error.stack);
     }
   } else {
-    console.log(`⏭️ Skipping notification creation - company status is: ${doc.status}`);
+    console.log(`⏭️ Skipping notification creation - status not changed to approved (status: ${doc.status}, changed: ${doc._statusChangedToApproved})`);
   }
 });
 
