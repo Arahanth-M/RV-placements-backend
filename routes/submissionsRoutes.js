@@ -8,14 +8,17 @@ const submissionRouter = express.Router();
 
 submissionRouter.post("/", requireAuth, async (req, res) => {
   try {
-    const { companyId, type, content } = req.body;
+    const { companyId, type, content, isAnonymous } = req.body;
 
     if (!companyId || !type || !content) {
       return res.status(400).json({ error: messages.ERROR.MISSING_FIELDS });
     }
 
     const newSubmission = new Submission({
-      ...req.body,
+      companyId,
+      type,
+      content,
+      isAnonymous: isAnonymous === true || isAnonymous === 'true',
       submittedBy: {
         name: req.user.username, 
         email: req.user.email,

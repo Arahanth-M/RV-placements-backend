@@ -19,6 +19,10 @@ const submissionSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  isAnonymous: {
+    type: Boolean,
+    default: false,
+  },
   status: {
     type: String,
     enum: ["pending", "approved"],

@@ -268,9 +268,33 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
             company.interviewProcess = [];
           }
           
-          // Append the new process to the array (avoid duplicates)
-          if (!company.interviewProcess.includes(sanitizedProcess)) {
-            company.interviewProcess.push(sanitizedProcess);
+          // Check if this process already exists (compare content)
+          // Handle both legacy string format and new JSON string format
+          const processExists = company.interviewProcess.some(process => {
+            try {
+              // Try to parse as JSON (new format with metadata)
+              const parsed = JSON.parse(process);
+              if (parsed && typeof parsed === 'object' && parsed.content) {
+                return parsed.content === sanitizedProcess;
+              }
+            } catch {
+              // Not JSON, treat as legacy string
+            }
+            // Legacy string format - direct comparison
+            return process === sanitizedProcess;
+          });
+          
+          if (!processExists) {
+            // Store as JSON string to preserve submitter info while keeping String type in schema
+            const processEntry = JSON.stringify({
+              content: sanitizedProcess,
+              submittedBy: {
+                name: submission.submittedBy.name,
+                email: submission.submittedBy.email
+              },
+              isAnonymous: submission.isAnonymous === true || submission.isAnonymous === 'true'
+            });
+            company.interviewProcess.push(processEntry);
             company.markModified('interviewProcess');
             console.log('✅ Added interview process to company:', company._id);
           } else {
@@ -590,6 +614,28 @@ adminRouter.delete("/companies/:id/reject", async (req, res) => {
   }
 });
 
+// Delete approved company (remove it from database)
+adminRouter.delete("/companies/:id/delete", async (req, res) => {
+  try {
+    const company = await Company.findById(req.params.id);
+    
+    if (!company) {
+      return res.status(404).json({ error: "Company not found" });
+    }
+
+    if (company.status !== 'approved') {
+      return res.status(400).json({ error: "Only approved companies can be deleted using this endpoint" });
+    }
+
+    await Company.findByIdAndDelete(req.params.id);
+
+    res.json({ message: "Approved company deleted successfully" });
+  } catch (error) {
+    console.error("❌ Error deleting approved company:", error.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 // Reject submission (delete it from database)
 adminRouter.delete("/submissions/:id/reject", async (req, res) => {
   try {
@@ -609,6 +655,36 @@ adminRouter.delete("/submissions/:id/reject", async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error rejecting submission:', error);
+    res.status(500).json({ 
+      error: "Server error", 
+      details: error.message
+    });
+  }
+});
+
+// Delete approved submission (remove it from database)
+adminRouter.delete("/submissions/:id/delete", async (req, res) => {
+  try {
+    const submission = await Submission.findById(req.params.id);
+    
+    if (!submission) {
+      return res.status(404).json({ error: "Submission not found" });
+    }
+
+    if (submission.status !== 'approved') {
+      return res.status(400).json({ error: "Only approved submissions can be deleted using this endpoint" });
+    }
+
+    // Delete the submission
+    await Submission.findByIdAndDelete(req.params.id);
+    
+    console.log('✅ Approved submission deleted:', req.params.id);
+    
+    res.json({ 
+      message: "Approved submission deleted successfully"
+    });
+  } catch (error) {
+    console.error('❌ Error deleting approved submission:', error);
     res.status(500).json({ 
       error: "Server error", 
       details: error.message
