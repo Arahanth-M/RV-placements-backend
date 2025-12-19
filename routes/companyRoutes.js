@@ -36,7 +36,7 @@ companyRouter.get("/", async (req, res) => {
     // Only expose approved companies to the public list to avoid 404s on details
     const companies = await Company.find(
       { status: "approved" },
-      "name type eligibility roles count business_model date_of_visit logo helpfulCount"
+      "name type eligibility roles count business_model date_of_visit logo helpfulCount cluster"
     );
     return res.json(companies);
   } catch (e) {

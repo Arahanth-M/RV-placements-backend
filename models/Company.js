@@ -311,6 +311,12 @@ const companySchema = new mongoose.Schema(
     logo: { type: String, trim: true },
     helpfulCount: { type: Number, default: 0, min: 0 },
     helpfulUsers: [{ type: String }], // Array of user emails who have upvoted
+    cluster: { 
+      type: String, 
+      trim: true,
+      enum: ["Computer Science and Engineering", "Electronics and Communication", "Mechanical Engineering"],
+      default: undefined
+    },
   },
   { timestamps: true }
 );
