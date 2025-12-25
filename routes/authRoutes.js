@@ -77,11 +77,20 @@ router.get(
 );
 
 
-router.get("/current_user", (req, res) => {
+router.get("/current_user", async (req, res) => {
   if (!req.user) {
     return res.status(401).json({ error: messages.ERROR.NOT_AUTHENTICATED });
   }
-  res.json(req.user);
+  
+  // Check if user is new (created within last 1 hour - first time login)
+  const user = req.user.toObject ? req.user.toObject() : req.user;
+  const isNewUser = user.createdAt && 
+    (Date.now() - new Date(user.createdAt).getTime()) < 60 * 60 * 1000; // 1 hour
+  
+  res.json({
+    ...user,
+    isNewUser: isNewUser || false
+  });
 });
 
 // Check if current user is admin

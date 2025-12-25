@@ -19,6 +19,8 @@ import eventRouter from "./routes/eventRoutes.js";
 import yearStatsRouter from "./routes/yearStatsRoutes.js";
 import commentRouter from "./routes/commentRoutes.js";
 import notificationRouter from "./routes/notificationRoutes.js";
+import studentRouter from "./routes/studentRoutes.js";
+import placementRouter from "./routes/placementRoutes.js";
 
 import "./services/passport.js";
 
@@ -81,6 +83,8 @@ app.use(routes.EVENTS, eventRouter);
 app.use(routes.YEAR_STATS, yearStatsRouter);
 app.use(routes.COMMENTS, commentRouter);
 app.use(routes.NOTIFICATIONS, notificationRouter);
+app.use(routes.STUDENTS, studentRouter);
+app.use(routes.PLACEMENT, placementRouter);
 
 connectDB(config.MONGO_URI).then(() => {
   app.listen(config.PORT, () =>

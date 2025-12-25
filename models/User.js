@@ -20,6 +20,10 @@ const userSchema = new Schema({
     type: String,
   },
   picture: String,
+  fillForm: {
+    type: Boolean,
+    default: false
+  },
   createdAt: {
     type: Date,
     default: Date.now

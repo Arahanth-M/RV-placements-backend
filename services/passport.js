@@ -50,6 +50,7 @@ passport.use(
           username: profile.displayName,
           email: primaryEmail,
           picture: profile.photos[0].value,
+          fillForm: false, // New users need to fill the placement form
         }).save();
 
         // Send welcome email webhook only for new users

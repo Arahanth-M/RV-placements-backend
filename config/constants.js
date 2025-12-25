@@ -67,6 +67,8 @@ export const routes = {
   YEAR_STATS: '/api/year-stats',
   COMMENTS: '/api',
   NOTIFICATIONS: '/api/notifications',
+  STUDENTS: '/api/students',
+  PLACEMENT: '/api/placement',
 };
 
 // Messages
