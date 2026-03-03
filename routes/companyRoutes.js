@@ -6,6 +6,7 @@ import { s3 } from "../utils/s3.js";
 import requireAuth from "../middleware/requireAuth.js";
 import dotenv from "dotenv";
 import Submission from "../models/Submission.js";
+import { getCompanyFocusTags } from "../utils/companyFocusTags.js";
 dotenv.config();
 
 const companyRouter = express.Router();
@@ -33,12 +34,19 @@ companyRouter.post("/", async (req, res) => {
 });
 companyRouter.get("/", async (req, res) => {
   try {
-    // Only expose approved companies to the public list to avoid 404s on details
+    // Fetch approved companies with card fields + text fields used only for focus tags (not sent to client)
     const companies = await Company.find(
       { status: "approved" },
-      "name type eligibility roles count business_model date_of_visit logo helpfulCount cluster"
-    );
-    return res.json(companies);
+      "name type eligibility roles count business_model date_of_visit logo helpfulCount cluster onlineQuestions interviewQuestions interviewProcess Must_Do_Topics"
+    ).lean();
+
+    const list = companies.map((c) => {
+      const focusTags = getCompanyFocusTags(c);
+      const { onlineQuestions, interviewQuestions, interviewProcess, Must_Do_Topics, ...rest } = c;
+      return { ...rest, focusTags };
+    });
+
+    return res.json(list);
   } catch (e) {
     console.error("❌ Error fetching companies:", e.message);
     return res.status(500).json({ error: "Server error" });
