@@ -10,6 +10,15 @@ const adminRouter = express.Router();
 // All admin routes require admin authentication
 adminRouter.use(requireAdmin);
 
+// Sanitize text for company content (remove script tags and dangerous HTML)
+function sanitizeText(text) {
+  if (text === undefined || text === null) return '';
+  let str = String(text);
+  str = str.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+  str = str.replace(/<[^>]+>/g, '');
+  return str.trim();
+}
+
 // Get total number of users
 adminRouter.get("/stats/users", async (req, res) => {
   try {
@@ -533,6 +542,20 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
     submission.approvedAt = new Date();
     await submission.save();
 
+    // Award leaderboard points: question = 5, interview experience = 10
+    const POINTS_QUESTION = 5;
+    const POINTS_INTERVIEW_EXPERIENCE = 10;
+    const pointsToAdd =
+      submission.type === "interviewProcess"
+        ? POINTS_INTERVIEW_EXPERIENCE
+        : POINTS_QUESTION; // onlineQuestions, interviewQuestions, mustDoTopics
+
+    const contributor = await User.findOne({ email: submission.submittedBy?.email });
+    if (contributor) {
+      contributor.points = (contributor.points || 0) + pointsToAdd;
+      await contributor.save();
+    }
+
     res.json({ 
       message: "Submission approved and company updated successfully",
       company: company,
@@ -632,6 +655,187 @@ adminRouter.delete("/companies/:id/delete", async (req, res) => {
     res.json({ message: "Approved company deleted successfully" });
   } catch (error) {
     console.error("❌ Error deleting approved company:", error.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ---------- Admin edit/delete OA questions, interview questions, interview process ----------
+adminRouter.put("/companies/:id/oa-questions/:index", async (req, res) => {
+  try {
+    const company = await Company.findById(req.params.id);
+    if (!company) return res.status(404).json({ error: "Company not found" });
+    const index = parseInt(req.params.index, 10);
+    if (isNaN(index) || index < 0) return res.status(400).json({ error: "Invalid index" });
+    const { question, solution } = req.body || {};
+    if (!company.onlineQuestions || index >= company.onlineQuestions.length)
+      return res.status(404).json({ error: "Question not found" });
+    if (question !== undefined && question !== null) {
+      company.onlineQuestions[index] = sanitizeText(question);
+      company.markModified("onlineQuestions");
+    }
+    if (company.onlineQuestions_solution) {
+      while (company.onlineQuestions_solution.length < company.onlineQuestions.length)
+        company.onlineQuestions_solution.push("");
+      if (solution !== undefined && solution !== null) {
+        company.onlineQuestions_solution[index] = sanitizeText(solution);
+        company.markModified("onlineQuestions_solution");
+      }
+    }
+    await company.save();
+    res.json({ message: "OA question updated", company });
+  } catch (error) {
+    console.error("❌ Error updating OA question:", error.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+adminRouter.delete("/companies/:id/oa-questions/:index", async (req, res) => {
+  try {
+    const company = await Company.findById(req.params.id);
+    if (!company) return res.status(404).json({ error: "Company not found" });
+    const index = parseInt(req.params.index, 10);
+    if (isNaN(index) || index < 0) return res.status(400).json({ error: "Invalid index" });
+    if (!company.onlineQuestions || index >= company.onlineQuestions.length)
+      return res.status(404).json({ error: "Question not found" });
+    company.onlineQuestions.splice(index, 1);
+    if (company.onlineQuestions_solution && index < company.onlineQuestions_solution.length)
+      company.onlineQuestions_solution.splice(index, 1);
+    company.markModified("onlineQuestions");
+    if (company.onlineQuestions_solution) company.markModified("onlineQuestions_solution");
+    await company.save();
+    res.json({ message: "OA question deleted", company });
+  } catch (error) {
+    console.error("❌ Error deleting OA question:", error.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+adminRouter.put("/companies/:id/interview-questions/:index", async (req, res) => {
+  try {
+    const company = await Company.findById(req.params.id);
+    if (!company) return res.status(404).json({ error: "Company not found" });
+    const index = parseInt(req.params.index, 10);
+    if (isNaN(index) || index < 0) return res.status(400).json({ error: "Invalid index" });
+    const { question, solution } = req.body || {};
+    if (!company.interviewQuestions || index >= company.interviewQuestions.length)
+      return res.status(404).json({ error: "Question not found" });
+    if (question !== undefined && question !== null) {
+      company.interviewQuestions[index] = sanitizeText(question);
+      company.markModified("interviewQuestions");
+    }
+    if (company.interviewQuestions_solution) {
+      while (company.interviewQuestions_solution.length < company.interviewQuestions.length)
+        company.interviewQuestions_solution.push("");
+      if (solution !== undefined && solution !== null) {
+        company.interviewQuestions_solution[index] = sanitizeText(solution);
+        company.markModified("interviewQuestions_solution");
+      }
+    }
+    await company.save();
+    res.json({ message: "Interview question updated", company });
+  } catch (error) {
+    console.error("❌ Error updating interview question:", error.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+adminRouter.delete("/companies/:id/interview-questions/:index", async (req, res) => {
+  try {
+    const company = await Company.findById(req.params.id);
+    if (!company) return res.status(404).json({ error: "Company not found" });
+    const index = parseInt(req.params.index, 10);
+    if (isNaN(index) || index < 0) return res.status(400).json({ error: "Invalid index" });
+    if (!company.interviewQuestions || index >= company.interviewQuestions.length)
+      return res.status(404).json({ error: "Question not found" });
+    company.interviewQuestions.splice(index, 1);
+    if (company.interviewQuestions_solution && index < company.interviewQuestions_solution.length)
+      company.interviewQuestions_solution.splice(index, 1);
+    company.markModified("interviewQuestions");
+    if (company.interviewQuestions_solution) company.markModified("interviewQuestions_solution");
+    await company.save();
+    res.json({ message: "Interview question deleted", company });
+  } catch (error) {
+    console.error("❌ Error deleting interview question:", error.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+adminRouter.put("/companies/:id/interview-process/:index", async (req, res) => {
+  try {
+    const company = await Company.findById(req.params.id);
+    if (!company) return res.status(404).json({ error: "Company not found" });
+    const index = parseInt(req.params.index, 10);
+    if (isNaN(index) || index < 0) return res.status(400).json({ error: "Invalid index" });
+    const arr = company.interviewProcess && Array.isArray(company.interviewProcess) ? company.interviewProcess : [];
+    if (index >= arr.length) return res.status(404).json({ error: "Entry not found" });
+    const { content } = req.body || {};
+    if (content === undefined || content === null) return res.status(400).json({ error: "content required" });
+    const sanitized = sanitizeText(content);
+    let newEntry = arr[index];
+    try {
+      const parsed = typeof newEntry === "string" ? JSON.parse(newEntry) : {};
+      if (parsed && typeof parsed === "object") {
+        newEntry = JSON.stringify({ ...parsed, content: sanitized });
+      } else newEntry = sanitized;
+    } catch {
+      newEntry = sanitized;
+    }
+    company.interviewProcess[index] = newEntry;
+    company.markModified("interviewProcess");
+    await company.save();
+    res.json({ message: "Interview process updated", company });
+  } catch (error) {
+    console.error("❌ Error updating interview process:", error.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+adminRouter.delete("/companies/:id/interview-process/:index", async (req, res) => {
+  try {
+    const company = await Company.findById(req.params.id);
+    if (!company) return res.status(404).json({ error: "Company not found" });
+    const index = parseInt(req.params.index, 10);
+    if (isNaN(index) || index < 0) return res.status(400).json({ error: "Invalid index" });
+    if (!company.interviewProcess || !Array.isArray(company.interviewProcess) || index >= company.interviewProcess.length)
+      return res.status(404).json({ error: "Entry not found" });
+    company.interviewProcess.splice(index, 1);
+    company.markModified("interviewProcess");
+    await company.save();
+    res.json({ message: "Interview process entry deleted", company });
+  } catch (error) {
+    console.error("❌ Error deleting interview process:", error.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// PUT /api/admin/companies/:id/stats - update placement stats (admin only)
+adminRouter.put("/companies/:id/stats", async (req, res) => {
+  try {
+    const company = await Company.findById(req.params.id);
+    if (!company) return res.status(404).json({ error: "Company not found" });
+    const { totalStudentsApplied, totalClearedOA, totalGotIn } = req.body || {};
+    if (totalStudentsApplied !== undefined) {
+      const n = parseInt(totalStudentsApplied, 10);
+      if (isNaN(n) || n < 0) return res.status(400).json({ error: "totalStudentsApplied must be a non-negative number" });
+      company.totalStudentsApplied = n;
+    }
+    if (totalClearedOA !== undefined) {
+      const n = parseInt(totalClearedOA, 10);
+      if (isNaN(n) || n < 0) return res.status(400).json({ error: "totalClearedOA must be a non-negative number" });
+      company.totalClearedOA = n;
+    }
+    if (totalGotIn !== undefined) {
+      const n = parseInt(totalGotIn, 10);
+      if (isNaN(n) || n < 0) return res.status(400).json({ error: "totalGotIn must be a non-negative number" });
+      company.totalGotIn = n;
+    }
+    company.markModified("totalStudentsApplied");
+    company.markModified("totalClearedOA");
+    company.markModified("totalGotIn");
+    await company.save();
+    res.json({ message: "Stats updated", company });
+  } catch (error) {
+    console.error("❌ Error updating company stats:", error.message);
     res.status(500).json({ error: "Server error" });
   }
 });

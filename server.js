@@ -21,6 +21,7 @@ import commentRouter from "./routes/commentRoutes.js";
 import notificationRouter from "./routes/notificationRoutes.js";
 import studentRouter from "./routes/studentRoutes.js";
 import placementRouter from "./routes/placementRoutes.js";
+import leaderboardRouter from "./routes/leaderboardRoutes.js";
 
 import "./services/passport.js";
 
@@ -85,6 +86,7 @@ app.use(routes.COMMENTS, commentRouter);
 app.use(routes.NOTIFICATIONS, notificationRouter);
 app.use(routes.STUDENTS, studentRouter);
 app.use(routes.PLACEMENT, placementRouter);
+app.use(routes.LEADERBOARD, leaderboardRouter);
 
 connectDB(config.MONGO_URI).then(() => {
   app.listen(config.PORT, () =>

@@ -69,6 +69,7 @@ export const routes = {
   NOTIFICATIONS: '/api/notifications',
   STUDENTS: '/api/students',
   PLACEMENT: '/api/placement',
+  LEADERBOARD: '/api/leaderboard',
 };
 
 // Messages
