@@ -1,6 +1,28 @@
 import dotenv from "dotenv";
 dotenv.config();
 
+const DEFAULT_CORS_ORIGINS = [
+  "http://localhost:5173",
+  "http://localhost:7779",
+  "http://lastminuteplacementprep.in",
+  "https://lastminuteplacementprep.in",
+  "http://www.lastminuteplacementprep.in",
+  "https://www.lastminuteplacementprep.in",
+];
+
+const parseCorsOrigins = (origins) => {
+  if (!origins) {
+    return DEFAULT_CORS_ORIGINS;
+  }
+
+  const envOrigins = origins
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  return [...new Set([...DEFAULT_CORS_ORIGINS, ...envOrigins])];
+};
+
 // Environment configuration
 export const config = {
   // Server
@@ -25,15 +47,7 @@ export const config = {
   SESSION_MAX_AGE: parseInt(process.env.SESSION_MAX_AGE) || 30 * 24 * 60 * 60 * 1000, // 30 days
   
   // CORS
-  CORS_ORIGINS: process.env.CORS_ORIGINS ? 
-    process.env.CORS_ORIGINS.split(',') : 
-    [
-      'http://localhost:5173', 
-      'http://lastminuteplacementprep.in', 
-      'https://lastminuteplacementprep.in',
-      'http://www.lastminuteplacementprep.in',
-      'https://www.lastminuteplacementprep.in'
-    ],
+  CORS_ORIGINS: parseCorsOrigins(process.env.CORS_ORIGINS),
   
   // AWS (if needed)
   AWS_REGION: process.env.AWS_REGION || 'us-east-1',
@@ -48,10 +62,7 @@ export const urls = {
   CLIENT_URL: config.NODE_ENV === 'production' 
     ? `https://${config.PRODUCTION_DOMAIN}` 
     : config.FRONTEND_URL,
-  
-  GOOGLE_CALLBACK_URL: config.NODE_ENV === 'production'
-    ? `https://${config.PRODUCTION_DOMAIN}/api/auth/google/callback`
-    : `${config.BACKEND_URL}/api/auth/google/callback`,
+  GOOGLE_CALLBACK_PATH: "/api/auth/google/callback",
 };
 
 // API Routes

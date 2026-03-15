@@ -1,9 +1,25 @@
 import express from "express";
 import passport from "passport";
-import { config, urls, messages, ADMIN_EMAIL } from "../config/constants.js";
+import { urls, messages, ADMIN_EMAIL } from "../config/constants.js";
 import requireAuth from "../middleware/requireAuth.js";
 
 const router = express.Router();
+
+const getClientBaseUrl = (req) => {
+  const host = req.get("x-forwarded-host") || req.get("host");
+  const proto = req.get("x-forwarded-proto") || req.protocol;
+
+  if (!host) {
+    return urls.CLIENT_URL;
+  }
+
+  return `${proto}://${host}`;
+};
+
+const redirectToAuthCallback = (req, res, query) => {
+  const clientUrl = getClientBaseUrl(req);
+  return res.redirect(`${clientUrl}/auth/callback?${query}`);
+};
 
 
 router.get("/google", passport.authenticate("google", {
@@ -33,14 +49,14 @@ router.get(
   (req, res, next) => {
     passport.authenticate("google", (err, user, info) => {
       if (err) {
-        return res.redirect(`${urls.CLIENT_URL}/auth/callback?login=failed`);
+        return redirectToAuthCallback(req, res, "login=failed");
       }
       if (!user) {
         // If domain is invalid, surface a specific code so UI can show a message
         if (info && info.reason === "domain") {
-          return res.redirect(`${urls.CLIENT_URL}/auth/callback?login=failed&reason=domain`);
+          return redirectToAuthCallback(req, res, "login=failed&reason=domain");
         }
-        return res.redirect(`${urls.CLIENT_URL}/auth/callback?login=failed`);
+        return redirectToAuthCallback(req, res, "login=failed");
       }
 
       const isAdminLogin = req.session.isAdminLogin || false;
@@ -50,7 +66,7 @@ router.get(
       if (isAdminLogin) {
         if (user.email?.toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
           req.logout(() => {
-            return res.redirect(`${urls.CLIENT_URL}/auth/callback?login=failed&reason=not_admin`);
+            return redirectToAuthCallback(req, res, "login=failed&reason=not_admin");
           });
           return;
         }
@@ -58,19 +74,19 @@ router.get(
 
       req.logIn(user, (loginErr) => {
         if (loginErr) {
-          return res.redirect(`${urls.CLIENT_URL}/auth/callback?login=failed`);
+          return redirectToAuthCallback(req, res, "login=failed");
         }
 
         const isSignup = req.session.signupFlow || false;
         req.session.signupFlow = false;
 
         if (isAdminLogin) {
-          return res.redirect(`${urls.CLIENT_URL}/auth/callback?login=success&admin=true`);
+          return redirectToAuthCallback(req, res, "login=success&admin=true");
         }
         if (isSignup) {
-          return res.redirect(`${urls.CLIENT_URL}/auth/callback?signup=success`);
+          return redirectToAuthCallback(req, res, "signup=success");
         }
-        return res.redirect(`${urls.CLIENT_URL}/auth/callback?login=success`);
+        return redirectToAuthCallback(req, res, "login=success");
       });
     })(req, res, next);
   }
@@ -138,7 +154,7 @@ router.get("/logout", (req, res) => {
       return res.status(500).json({ error: messages.ERROR.LOGOUT_FAILED });
     }
     res.clearCookie("connect.sid"); 
-    res.redirect(`${urls.CLIENT_URL}?logout=success`); 
+    res.redirect(`${getClientBaseUrl(req)}?logout=success`); 
   });
 });
 

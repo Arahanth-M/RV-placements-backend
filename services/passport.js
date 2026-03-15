@@ -23,7 +23,8 @@ passport.use(
     {
       clientID: keys.googleClientID,
       clientSecret: keys.googleClientSecret,
-      callbackURL: urls.GOOGLE_CALLBACK_URL,
+      // Use relative callback URL so it works for localhost, root domain, and www domain.
+      callbackURL: urls.GOOGLE_CALLBACK_PATH,
       proxy: true,
     },  
     async (accessToken, refreshToken, profile, done) => {
