@@ -1,11 +1,17 @@
 import express from "express";
 import passport from "passport";
-import { urls, messages, ADMIN_EMAIL } from "../config/constants.js";
+import { config, urls, messages, ADMIN_EMAIL } from "../config/constants.js";
 import requireAuth from "../middleware/requireAuth.js";
 
 const router = express.Router();
 
 const getClientBaseUrl = (req) => {
+  // Prefer origin captured when OAuth flow starts (from frontend referer).
+  const sessionOrigin = req.session?.oauthClientOrigin;
+  if (sessionOrigin && config.CORS_ORIGINS.includes(sessionOrigin)) {
+    return sessionOrigin;
+  }
+
   const host = req.get("x-forwarded-host") || req.get("host");
   const proto = req.get("x-forwarded-proto") || req.protocol;
 
@@ -13,35 +19,72 @@ const getClientBaseUrl = (req) => {
     return urls.CLIENT_URL;
   }
 
+  // Local dev split-port fallback: backend on 7779, frontend on 5173.
+  if (host.includes("localhost:7779") || host.includes("127.0.0.1:7779")) {
+    return config.FRONTEND_URL;
+  }
+
   return `${proto}://${host}`;
 };
 
 const redirectToAuthCallback = (req, res, query) => {
   const clientUrl = getClientBaseUrl(req);
+  if (req.session) {
+    req.session.oauthClientOrigin = null;
+  }
   return res.redirect(`${clientUrl}/auth/callback?${query}`);
 };
 
+const captureOAuthClientOrigin = (req, _res, next) => {
+  const referer = req.get("referer");
+  if (referer && req.session) {
+    try {
+      const origin = new URL(referer).origin;
+      if (config.CORS_ORIGINS.includes(origin)) {
+        req.session.oauthClientOrigin = origin;
+      }
+    } catch {
+      // Ignore invalid referer values.
+    }
+  }
+  next();
+};
 
-router.get("/google", passport.authenticate("google", {
-  scope: ["profile", "email"],
-}));
+
+router.get(
+  "/google",
+  captureOAuthClientOrigin,
+  passport.authenticate("google", {
+    scope: ["profile", "email"],
+  })
+);
 
 // Admin login route - same as regular login but will check email in callback
-router.get("/google/admin", (req, res, next) => {
-  req.session.isAdminLogin = true; // Set flag to indicate this is admin login
-  next();
-}, passport.authenticate("google", {
-  scope: ["profile", "email"],
-}));
+router.get(
+  "/google/admin",
+  captureOAuthClientOrigin,
+  (req, res, next) => {
+    req.session.isAdminLogin = true; // Set flag to indicate this is admin login
+    next();
+  },
+  passport.authenticate("google", {
+    scope: ["profile", "email"],
+  })
+);
 
 // Signup route - forces account selection
-router.get("/google/signup", (req, res, next) => {
-  req.session.signupFlow = true; // Set flag to indicate this is a signup
-  next();
-}, passport.authenticate("google", {
-  scope: ["profile", "email"],
-  prompt: "select_account", // This forces Google to show account selection
-}));
+router.get(
+  "/google/signup",
+  captureOAuthClientOrigin,
+  (req, res, next) => {
+    req.session.signupFlow = true; // Set flag to indicate this is a signup
+    next();
+  },
+  passport.authenticate("google", {
+    scope: ["profile", "email"],
+    prompt: "select_account", // This forces Google to show account selection
+  })
+);
 
 
 router.get(

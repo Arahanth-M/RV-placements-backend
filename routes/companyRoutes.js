@@ -10,6 +10,36 @@ import { getCompanyFocusTags } from "../utils/companyFocusTags.js";
 dotenv.config();
 
 const companyRouter = express.Router();
+const VIDEO_URL_TTL_MS = 9 * 60 * 1000;
+const videoUrlCache = new Map();
+
+const getSignedVideoUrl = async (videoKey) => {
+  if (!videoKey) return null;
+
+  const now = Date.now();
+  const cached = videoUrlCache.get(videoKey);
+  if (cached && cached.expiresAt > now) {
+    return cached.url;
+  }
+
+  const command = new GetObjectCommand({
+    Bucket: process.env.BUCKET_NAME,
+    Key: videoKey,
+  });
+  const url = await getSignedUrl(s3, command, { expiresIn: 600 });
+  videoUrlCache.set(videoKey, { url, expiresAt: now + VIDEO_URL_TTL_MS });
+
+  // Opportunistic cleanup to avoid unbounded growth.
+  if (videoUrlCache.size > 500) {
+    for (const [key, value] of videoUrlCache.entries()) {
+      if (value.expiresAt <= now) {
+        videoUrlCache.delete(key);
+      }
+    }
+  }
+
+  return url;
+};
 
 companyRouter.post("/", async (req, res) => {
   try {
@@ -99,14 +129,9 @@ companyRouter.get("/:id", requireAuth, async (req, res) => {
     }
 
     let videoUrl = null;
-
     if (company.videoKey) {
       try {
-        const command = new GetObjectCommand({
-          Bucket: process.env.BUCKET_NAME,
-          Key: company.videoKey,
-        });
-        videoUrl = await getSignedUrl(s3, command, { expiresIn: 600 });
+        videoUrl = await getSignedVideoUrl(company.videoKey);
       } catch (s3Err) {
         console.error("❌ S3 Signed URL Error:", s3Err.message);
       }
