@@ -10,12 +10,12 @@ const adminRouter = express.Router();
 // All admin routes require admin authentication
 adminRouter.use(requireAdmin);
 
-// Sanitize text for company content (remove script tags and dangerous HTML)
+// Sanitize text for company content (remove script tags; keep other text as-is)
 function sanitizeText(text) {
   if (text === undefined || text === null) return '';
   let str = String(text);
+  // Strip out any script tags and their contents completely
   str = str.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-  str = str.replace(/<[^>]+>/g, '');
   return str.trim();
 }
 
@@ -837,6 +837,83 @@ adminRouter.put("/companies/:id/stats", async (req, res) => {
   } catch (error) {
     console.error("❌ Error updating company stats:", error.message);
     res.status(500).json({ error: "Server error" });
+  }
+});
+
+// PUT /api/admin/companies/:id/roles - replace roles & CTC details (admin only)
+adminRouter.put("/companies/:id/roles", async (req, res) => {
+  try {
+    const { roles } = req.body || {};
+    if (!Array.isArray(roles)) {
+      return res.status(400).json({ error: "roles must be an array" });
+    }
+
+    const normalizedRoles = roles.map((role, index) => {
+      const rawName = role?.roleName ?? role?.name ?? "";
+      const roleName = sanitizeText(rawName);
+      if (!roleName) {
+        throw new Error(`Role at index ${index} is missing a valid roleName`);
+      }
+
+      const internshipStipend =
+        role.internshipStipend !== undefined && role.internshipStipend !== null
+          ? Number(role.internshipStipend)
+          : undefined;
+      if (
+        internshipStipend !== undefined &&
+        (Number.isNaN(internshipStipend) || internshipStipend < 0)
+      ) {
+        throw new Error(
+          `Role "${roleName}": internshipStipend must be a non‑negative number`
+        );
+      }
+
+      const rawCtc = role.ctc && typeof role.ctc === "object" ? role.ctc : {};
+      const ctc = {};
+      Object.entries(rawCtc).forEach(([key, value]) => {
+        if (value === null || value === undefined || value === "") {
+          return;
+        }
+        const cleanKey = sanitizeText(key);
+        if (!cleanKey) return;
+        // Allow both numeric and string CTC components (backend schema uses Mixed)
+        const numeric = Number(value);
+        // If it's a valid non‑NaN number, store as number; otherwise keep as trimmed string
+        ctc[cleanKey] = Number.isNaN(numeric)
+          ? String(value).trim()
+          : numeric;
+      });
+
+      return {
+        roleName,
+        ctc,
+        ...(internshipStipend !== undefined ? { internshipStipend } : {}),
+      };
+    });
+
+    const company = await Company.findByIdAndUpdate(
+      req.params.id,
+      { roles: normalizedRoles },
+      { new: true, runValidators: true }
+    );
+
+    if (!company) {
+      return res.status(404).json({ error: "Company not found" });
+    }
+
+    // Convert Map -> plain object for each role before sending back
+    const rolesResponse = (company.roles || []).map((role) => ({
+      ...(role.toObject ? role.toObject() : role),
+      ctc:
+        role.ctc instanceof Map
+          ? Object.fromEntries(role.ctc)
+          : role.ctc || {},
+    }));
+
+    res.json({ message: "Roles updated", roles: rolesResponse });
+  } catch (error) {
+    console.error("❌ Error updating company roles:", error.message);
+    res.status(500).json({ error: "Server error", details: error.message });
   }
 });
 

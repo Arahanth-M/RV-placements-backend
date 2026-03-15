@@ -37,7 +37,7 @@ companyRouter.get("/", async (req, res) => {
     // Fetch approved companies with card fields + text fields used only for focus tags (not sent to client)
     const companies = await Company.find(
       { status: "approved" },
-      "name type eligibility roles count business_model date_of_visit logo helpfulCount cluster onlineQuestions interviewQuestions interviewProcess Must_Do_Topics totalStudentsApplied totalClearedOA totalGotIn"
+      "name type eligibility roles count business_model date_of_visit logo domain helpfulCount cluster onlineQuestions interviewQuestions interviewProcess Must_Do_Topics totalStudentsApplied totalClearedOA totalGotIn"
     ).lean();
 
     const list = companies.map((c) => {
@@ -118,6 +118,14 @@ companyRouter.get("/:id", requireAuth, async (req, res) => {
       ...role,
       ctc: role.ctc instanceof Map ? Object.fromEntries(role.ctc) : role.ctc
     }));
+
+    // Ensure OA tab always has arrays (detail view expects these)
+    if (!Array.isArray(companyObj.onlineQuestions)) {
+      companyObj.onlineQuestions = [];
+    }
+    if (!Array.isArray(companyObj.onlineQuestions_solution)) {
+      companyObj.onlineQuestions_solution = [];
+    }
 
     // Legacy support: if onlineQuestions_solution missing, fallback to old field names
     const legacySolutionsArrays = [

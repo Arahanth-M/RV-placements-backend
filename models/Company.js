@@ -264,6 +264,9 @@ const companySchema = new mongoose.Schema(
     onlineQuestions_solution: [
       { type: String, trim: true },
     ],
+    prev_coding_ques: [
+      { type: mongoose.Schema.Types.Mixed },
+    ],
     mcqQuestions: [
       {
         question: { type: String, trim: true },
@@ -309,6 +312,7 @@ const companySchema = new mongoose.Schema(
     },
     videoKey: { type: String, trim: true },
     logo: { type: String, trim: true },
+    domain: { type: String, trim: true }, // e.g. "google.com" for logo.dev
     helpfulCount: { type: Number, default: 0, min: 0 },
     helpfulUsers: [{ type: String }], // Array of user emails who have upvoted
     cluster: { 

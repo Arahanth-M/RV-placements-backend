@@ -13,7 +13,7 @@ export const config = {
   PRODUCTION_DOMAIN: process.env.PRODUCTION_DOMAIN || 'lastminuteplacementprep.in',
   
   // Database
-  MONGO_URI: process.env.MONGO_URI || process.env.MONGODB_URL || 'mongodb://localhost:27017/rv-placements',
+  MONGO_URI: process.env.MONGO_URI || 'mongodb://localhost:27017/rv-placements',
   
   // OAuth
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
