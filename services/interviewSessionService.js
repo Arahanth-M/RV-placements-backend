@@ -72,7 +72,13 @@ export const startRound = async (sessionId) => {
   const question = await generateQuestion({
     companyContext,
     roundType: currentRound.type,
+    roundAbout: currentRound.about,
     difficulty: currentRound.difficulty,
+    previousQuestion: "",
+    previousAnswer: "",
+    previousFeedback: "",
+    previousScore: null,
+    roundHistory: [],
   });
 
   // 4) Store first question in round.questions

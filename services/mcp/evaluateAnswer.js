@@ -1,20 +1,157 @@
-const toSafeString = (value, fallback = "") => {
-  return typeof value === "string" && value.trim() ? value.trim() : fallback;
-};
+import cosineSimilarity from "compute-cosine-similarity";
 
-const tokenize = (text) => {
-  return toSafeString(text)
+/**
+ * Utils
+ */
+const toSafeString = (value, fallback = "") =>
+  typeof value === "string" && value.trim() ? value.trim() : fallback;
+
+const tokenize = (text) =>
+  toSafeString(text)
     .toLowerCase()
     .replace(/[^\w\s]/g, " ")
     .split(/\s+/)
-    .filter((token) => token.length >= 3);
-};
+    .filter((t) => t.length >= 3);
 
 const unique = (arr) => [...new Set(arr)];
 
+const extractReasoningHighlight = (reasoning) => {
+  const text = toSafeString(reasoning);
+  if (!text) return "";
+  const firstSentence = text.split(/[.!?]/)[0]?.trim() || "";
+  if (!firstSentence) return "";
+  return firstSentence.length > 140
+    ? `${firstSentence.slice(0, 137).trimEnd()}...`
+    : firstSentence;
+};
+
+const buildHumanFeedback = ({
+  type,
+  finalScore,
+  semantic,
+  clarity,
+  structure,
+  wordCount,
+  flags,
+  reasoningHighlight,
+}) => {
+  const lines = [];
+
+  if (finalScore >= 8) {
+    lines.push("Good answer. This felt confident and interview-ready overall.");
+  } else if (finalScore >= 6) {
+    lines.push("You're on the right track, and the core idea is there.");
+  } else {
+    lines.push("I can see your intent, but this would feel incomplete in a real interview.");
+  }
+
+  if (type === "coding") {
+    if (flags.codePresent) {
+      lines.push("I liked that you attempted implementation instead of staying purely theoretical.");
+    } else {
+      lines.push("For coding rounds, I need to see an actual implementation, not just explanation.");
+    }
+
+    if (flags.tooVerbose) {
+      lines.push("Keep it tighter: explain approach briefly, then move to clean code and complexity.");
+    }
+  } else if (type === "system_design") {
+    if (flags.hasComponents) {
+      lines.push("You covered meaningful system pieces, which is exactly what interviewers look for.");
+    } else {
+      lines.push("Anchor your design around concrete components like API, storage, cache, and scaling.");
+    }
+
+    if (!flags.goodDepth) {
+      lines.push("Go one level deeper into trade-offs and failure scenarios to make the design stronger.");
+    }
+  } else if (type === "behavioral") {
+    if (structure >= 0.6) {
+      lines.push("Your response had a clear flow, which helps in behavioral interviews.");
+    } else {
+      lines.push("Use a tighter STAR flow: situation, action you took, and measurable result.");
+    }
+  }
+
+  if (semantic < 0.45) {
+    lines.push("Stay closer to the exact question so your answer feels directly relevant.");
+  }
+  if (clarity < 0.6) {
+    lines.push("Shorter sentences and clearer sequencing would make this easier to follow.");
+  }
+  if (wordCount < 40) {
+    lines.push("Add one concrete example to give more depth and credibility.");
+  }
+
+  if (reasoningHighlight) {
+    lines.push(`What stood out to me: ${reasoningHighlight}.`);
+  }
+
+  return lines.slice(0, 5).join(" ");
+};
+
 /**
- * MCP tool: evaluateAnswer
- * Backend-controlled scoring using deterministic heuristics (no LLM scoring).
+ * Detect question type
+ */
+const detectQuestionType = (question) => {
+  const q = question.toLowerCase();
+
+  if (/design|architecture|scalable|system/.test(q)) return "system_design";
+  if (/tell me about|situation|experience|challenge|conflict/.test(q))
+    return "behavioral";
+  if (/array|function|return|code|algorithm/.test(q)) return "coding";
+
+  return "general";
+};
+
+/**
+ * Code detection
+ */
+const isCodeAnswer = (text) => {
+  return /{|}|;|=>|#include|function|return/.test(text);
+};
+
+/**
+ * Build vector
+ */
+const buildVector = (tokens, vocab) => {
+  const map = new Map();
+  tokens.forEach((t) => map.set(t, (map.get(t) || 0) + 1));
+  return vocab.map((word) => map.get(word) || 0);
+};
+
+/**
+ * Structure (STAR)
+ */
+const detectStructure = (text) => {
+  const lower = text.toLowerCase();
+
+  let score = 0;
+  if (/situation|context|problem/.test(lower)) score += 0.33;
+  if (/action|approach|implemented/.test(lower)) score += 0.34;
+  if (/result|impact|outcome/.test(lower)) score += 0.33;
+
+  return score;
+};
+
+/**
+ * Clarity
+ */
+const clarityScore = (text) => {
+  const sentences = text.split(/[.!?]+/).filter(Boolean);
+  const words = text.split(/\s+/).filter(Boolean);
+
+  if (!sentences.length) return 0;
+
+  const avg = words.length / sentences.length;
+
+  if (avg >= 12 && avg <= 20) return 1;
+  if (avg >= 8 && avg <= 25) return 0.7;
+  return 0.4;
+};
+
+/**
+ * MAIN FUNCTION
  */
 export const evaluateAnswer = async ({
   answer,
@@ -25,69 +162,118 @@ export const evaluateAnswer = async ({
   const safeAnswer = toSafeString(answer);
   const safeQuestion = toSafeString(question);
 
-  const answerTokens = unique(tokenize(safeAnswer));
-  const questionTokens = unique(tokenize(safeQuestion));
-  const contextTokens = unique(
-    tokenize(
-      [
-        ...(companyContext?.mustDoTopics || []),
-        ...(companyContext?.onlineQuestions || []),
-        ...(companyContext?.interviewQuestions || []),
-      ]
-        .slice(0, 12)
-        .join(" ")
-    )
-  );
-  const reasoningTokens = unique(tokenize(llmReasoning)).slice(0, 40);
+  const type = detectQuestionType(safeQuestion);
 
-  const referenceSet = new Set([
-    ...questionTokens,
-    ...contextTokens.slice(0, 40),
-    ...reasoningTokens,
-  ]);
+  const answerTokens = tokenize(safeAnswer);
+  const questionTokens = tokenize(safeQuestion);
+  const reasoningTokens = tokenize(llmReasoning);
 
-  let overlap = 0;
-  answerTokens.forEach((token) => {
-    if (referenceSet.has(token)) overlap += 1;
+  /**
+   * Semantic similarity
+   */
+  const vocab = unique([...answerTokens, ...questionTokens, ...reasoningTokens]);
+
+  const answerVec = buildVector(answerTokens, vocab);
+  const refVec = buildVector([...questionTokens, ...reasoningTokens], vocab);
+
+  let semantic = cosineSimilarity(answerVec, refVec) || 0;
+  semantic = Math.max(0, Math.min(1, semantic));
+
+  /**
+   * Common metrics
+   */
+  const clarity = clarityScore(safeAnswer);
+  const structure = detectStructure(safeAnswer);
+  const wordCount = safeAnswer.split(/\s+/).length;
+  const reasoningHighlight = extractReasoningHighlight(llmReasoning);
+
+  let score = 0;
+  const flags = {
+    codePresent: false,
+    tooVerbose: false,
+    hasComponents: false,
+    goodDepth: false,
+  };
+
+  /**
+   * =========================
+   * 🔹 CODING EVALUATION
+   * =========================
+   */
+  if (type === "coding") {
+    const codePresent = isCodeAnswer(safeAnswer);
+    flags.codePresent = codePresent;
+
+    let codeScore = codePresent ? 1 : 0.3;
+
+    // penalize too much explanation
+    if (wordCount > 150) {
+      codeScore *= 0.7;
+      flags.tooVerbose = true;
+    }
+
+    score =
+      semantic * 0.3 +
+      codeScore * 0.5 +
+      clarity * 0.2;
+
+  /**
+   * =========================
+   * 🔹 SYSTEM DESIGN
+   * =========================
+   */
+  } else if (type === "system_design") {
+    const hasComponents = /database|api|cache|load balancer|scaling/.test(
+      safeAnswer.toLowerCase()
+    );
+    flags.hasComponents = hasComponents;
+
+    let depthScore = wordCount > 120 ? 1 : 0.6;
+    flags.goodDepth = wordCount > 120;
+
+    score =
+      semantic * 0.3 +
+      clarity * 0.2 +
+      depthScore * 0.3 +
+      (hasComponents ? 1 : 0.5) * 0.2;
+
+  /**
+   * =========================
+   * 🔹 BEHAVIORAL (HR)
+   * =========================
+   */
+  } else if (type === "behavioral") {
+    score =
+      structure * 0.4 +
+      clarity * 0.3 +
+      semantic * 0.3;
+
+  /**
+   * =========================
+   * 🔹 DEFAULT
+   * =========================
+   */
+  } else {
+    score = semantic * 0.5 + clarity * 0.5;
+  }
+
+  const finalScore = Math.max(1, Math.min(10, Math.round(score * 10)));
+  const feedback = buildHumanFeedback({
+    type,
+    finalScore,
+    semantic,
+    clarity,
+    structure,
+    wordCount,
+    flags,
+    reasoningHighlight,
   });
 
-  const answerWordCount = safeAnswer.split(/\s+/).filter(Boolean).length;
-  const coverageRatio =
-    referenceSet.size > 0 ? Math.min(1, overlap / Math.max(8, referenceSet.size * 0.4)) : 0;
-
-  const lengthScore =
-    answerWordCount >= 120 ? 1 : answerWordCount >= 70 ? 0.85 : answerWordCount >= 35 ? 0.65 : 0.4;
-
-  const weighted = coverageRatio * 0.65 + lengthScore * 0.35;
-  const score = Math.max(1, Math.min(10, Math.round(weighted * 10)));
-
-  const feedbackParts = [];
-  if (score >= 8) {
-    feedbackParts.push("Strong answer with good coverage and structure.");
-  } else if (score >= 6) {
-    feedbackParts.push("Decent answer, but it can be sharper and more complete.");
-  } else {
-    feedbackParts.push("Answer needs more depth and clearer technical reasoning.");
-  }
-
-  if (answerWordCount < 40) {
-    feedbackParts.push("Try giving a more detailed and step-by-step explanation.");
-  }
-
-  if (coverageRatio < 0.45) {
-    feedbackParts.push("Connect your response more closely to the actual question requirements.");
-  }
-
-  const reasoningSummary = toSafeString(llmReasoning).slice(0, 280);
-  if (reasoningSummary) {
-    feedbackParts.push(`Reasoning note: ${reasoningSummary}`);
-  }
-
   return {
-    score,
-    feedback: feedbackParts.join(" "),
+    score: finalScore,
+    type,
+    feedback,
   };
 };
 
 export default evaluateAnswer;
-

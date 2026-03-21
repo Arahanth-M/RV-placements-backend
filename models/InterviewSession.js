@@ -40,6 +40,7 @@ const roundSchema = new mongoose.Schema(
   {
     roundNumber: { type: Number, required: true, min: 1 },
     type: { type: String, enum: ROUND_TYPES, required: true },
+    about: { type: String, trim: true },
     difficulty: { type: String, trim: true },
     questionCount: { type: Number, min: 3, max: 5, default: 3 },
     questions: { type: [roundQuestionSchema], default: [] },

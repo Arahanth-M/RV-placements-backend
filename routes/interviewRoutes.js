@@ -66,6 +66,8 @@ router.post("/start-interview", async (req, res) => {
       const plan = await generateInterviewPlan(companyData);
       await updateSession(session._id, {
         rounds: plan.rounds,
+        roundsPlan: plan.roundsPlan || [],
+        roundsDetails: plan.roundsDetails || [],
         totalRounds: plan.totalRounds,
         currentRound: 1,
         currentRoundIndex: 0,
@@ -117,10 +119,16 @@ router.get("/resume-interview", async (req, res) => {
 
     const session = await getInProgressSession(userId, companyId);
     if (!session) {
-      return res.status(404).json({ error: "No in-progress interview found" });
+      return res.json({
+        resumable: false,
+        sessionId: null,
+        question: null,
+        status: "idle",
+      });
     }
 
     return res.json({
+      resumable: true,
       sessionId: session._id,
       question: session.currentQuestion || null,
       status: session.status,
@@ -283,10 +291,25 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
 
     // 7) If more questions remain in the current round -> generate next
     if (nextQuestionIndex < questionCount) {
+      const roundHistory = Array.isArray(currentRound.questions)
+        ? currentRound.questions.slice(0, nextQuestionIndex).map((item) => ({
+            question: item?.question || "",
+            answer: item?.answer || "",
+            feedback: item?.feedback || "",
+            score: item?.score,
+          }))
+        : [];
+
       const nextQuestion = await generateQuestion({
         companyContext,
         roundType: currentRound.type,
+        roundAbout: currentRound.about,
         difficulty: currentRound.difficulty,
+        previousQuestion: currentQuestion,
+        previousAnswer: trimmedAnswer,
+        previousFeedback: evaluation.feedback,
+        previousScore: evaluation.score,
+        roundHistory,
       });
 
       if (!currentRound.questions[nextQuestionIndex]) {
@@ -458,7 +481,8 @@ router.delete("/discard/:sessionId", async (req, res) => {
 
     const deleted = await discardInProgressSession(sessionId);
     if (!deleted) {
-      return res.status(404).json({ error: "No in-progress session found to discard" });
+      // Idempotent discard: treat "already discarded/not found" as success.
+      return res.json({ success: true, message: "No in-progress interview found to discard" });
     }
 
     return res.json({ success: true, message: "In-progress interview discarded" });
@@ -486,6 +510,11 @@ router.get("/preview-plan/:companyId", async (req, res) => {
     }
 
     const plan = await generateInterviewPlan(companyData);
+    console.info("📋 Interview preview generated", {
+      companyId,
+      totalRounds: plan?.totalRounds || 0,
+      roundsPlanCount: Array.isArray(plan?.roundsPlan) ? plan.roundsPlan.length : 0,
+    });
     return res.json(plan);
   } catch (error) {
     console.error("❌ Error generating interview preview:", error.message);
