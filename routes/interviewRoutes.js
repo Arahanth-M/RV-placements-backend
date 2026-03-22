@@ -254,15 +254,34 @@ Company context: ${JSON.stringify(companyContext)}
 Give brief reasoning on answer quality, technical correctness, clarity, and gaps.`,
       },
     ];
-    const llmReasoning = await callLLM(reasoningMessages);
+    let llmReasoning = "";
+    try {
+      llmReasoning = await callLLM(reasoningMessages);
+    } catch (error) {
+      // Keep submit-answer resilient even if provider/network has transient issues.
+      console.warn("⚠️ LLM reasoning call failed, continuing with fallback reasoning:", error?.message || error);
+      llmReasoning = "";
+    }
 
     // 4) MCP evaluateAnswer
-    const evaluation = await evaluateAnswer({
-      answer: trimmedAnswer,
-      question: currentQuestion,
-      companyContext,
-      llmReasoning,
-    });
+    let evaluation;
+    try {
+      evaluation = await evaluateAnswer({
+        answer: trimmedAnswer,
+        question: currentQuestion,
+        companyContext,
+        llmReasoning,
+      });
+    } catch (error) {
+      console.warn("⚠️ evaluateAnswer failed, using fallback evaluation:", error?.message || error);
+      evaluation = {
+        score: 5,
+        type: "general",
+        feedback:
+          "Thanks for the response. I could not evaluate this answer fully right now, so this is a neutral score. Please continue to the next question.",
+        verdict: "partial",
+      };
+    }
 
     // 5) Save answer + score + feedback
     if (!Array.isArray(currentRound.questions)) {
@@ -301,6 +320,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
         : [];
 
       const nextQuestion = await generateQuestion({
+        userId: String(session.userId || ""),
         companyContext,
         roundType: currentRound.type,
         roundAbout: currentRound.about,
@@ -407,7 +427,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       report: hasNextRound ? null : refreshedSession.finalReport || null,
     });
   } catch (error) {
-    console.error("❌ Error submitting interview answer:", error.message);
+    console.error("❌ Error submitting interview answer:", error?.stack || error?.message || error);
     return res.status(500).json({ error: "Failed to submit answer" });
   }
 });
