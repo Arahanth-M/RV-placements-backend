@@ -2,12 +2,23 @@ const toSafeString = (value) => {
   return typeof value === "string" ? value.trim() : "";
 };
 
+const splitRoundLikeLines = (value) => {
+  const safe = toSafeString(value);
+  if (!safe) return [];
+
+  return safe
+    .split(/\n+|(?:\s*->\s*)/g)
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
+
 const summarizeRoundSegment = (value, fallbackText) => {
   const raw = toSafeString(value);
   if (!raw) return fallbackText;
 
   const cleaned = raw
     .replace(/^round\s*\d+\s*[:\-]?\s*/i, "")
+    .replace(/^[\)\]\-:\s]+/, "")
     .replace(/\s+/g, " ")
     .trim();
 
@@ -50,7 +61,7 @@ const extractNumberedRoundSegments = (text) => {
   if (!safeText) return [];
 
   const matches = [];
-  const regex = /round\s*(\d+)\s*[:\-]?/gi;
+  const regex = /\bround\s*(\d+)\s*[\):\-]?/gi;
   let match;
 
   while ((match = regex.exec(safeText)) !== null) {
@@ -119,20 +130,24 @@ export const getNumberOfRounds = async (companyData) => {
     }));
     return {
       totalRounds: numberedSegments.length,
-      roundSegments: numberedSegments,
+      roundSegments: numberedHints.map((hint) => hint.about),
       roundHints: numberedHints,
       source: "interviewProcess.numbered",
     };
   }
 
-  const listHints = processItems.map((item, index) => ({
+  const flattenedProcessItems = processItems.flatMap((item) => splitRoundLikeLines(item));
+  const roundLikeItems =
+    flattenedProcessItems.length > 1 ? flattenedProcessItems : processItems;
+
+  const listHints = roundLikeItems.map((item, index) => ({
     roundNumber: index + 1,
     about: summarizeRoundSegment(item, `Round ${index + 1}`),
   }));
 
   return {
-    totalRounds: processItems.length,
-    roundSegments: processItems,
+    totalRounds: listHints.length,
+    roundSegments: listHints.map((hint) => hint.about),
     roundHints: listHints,
     source: "interviewProcess.list",
   };

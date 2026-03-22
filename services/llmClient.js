@@ -1,6 +1,9 @@
 import Groq from "groq-sdk";
 
-const DEFAULT_MODEL = "llama-3.1-8b-instant";
+const DEFAULT_ORCHESTRATOR_MODEL =
+  process.env.GROQ_ORCHESTRATOR_MODEL ||
+  process.env.GROQ_MODEL ||
+  "llama-3.1-70b-versatile";
 
 let groqClient = null;
 
@@ -30,7 +33,7 @@ const getErrorMessage = (error) => {
   return "Unknown error while calling Groq LLM.";
 };
 
-export const callLLM = async (messages) => {
+export const callLLM = async (messages, options = {}) => {
   if (!Array.isArray(messages) || messages.length === 0) {
     throw new Error("callLLM requires a non-empty messages array.");
   }
@@ -51,9 +54,13 @@ export const callLLM = async (messages) => {
 
   try {
     const client = getGroqClient();
+    const selectedModel =
+      typeof options?.model === "string" && options.model.trim()
+        ? options.model.trim()
+        : DEFAULT_ORCHESTRATOR_MODEL;
 
     const completion = await client.chat.completions.create({
-      model: process.env.GROQ_MODEL || DEFAULT_MODEL,
+      model: selectedModel,
       messages,
     });
 

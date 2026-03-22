@@ -1,4 +1,8 @@
 import cosineSimilarity from "compute-cosine-similarity";
+import { callLLM } from "../llmClient.js";
+import { parseJSONResponse } from "../../utils/parseJSONResponse.js";
+
+const TOOL_EVAL_MODEL = process.env.GROQ_TOOL_MODEL || "llama-3.1-8b-instant";
 
 /**
  * Utils
@@ -257,10 +261,10 @@ export const evaluateAnswer = async ({
     score = semantic * 0.5 + clarity * 0.5;
   }
 
-  const finalScore = Math.max(1, Math.min(10, Math.round(score * 10)));
-  const feedback = buildHumanFeedback({
+  const ruleBasedFinalScore = Math.max(1, Math.min(10, Math.round(score * 10)));
+  const ruleBasedFeedback = buildHumanFeedback({
     type,
-    finalScore,
+    finalScore: ruleBasedFinalScore,
     semantic,
     clarity,
     structure,
@@ -269,10 +273,67 @@ export const evaluateAnswer = async ({
     reasoningHighlight,
   });
 
+  let adjustedScore = score;
+  let llmVerdict = "partial";
+  let llmInsight = "";
+  let llmImprovement = "";
+
+  try {
+    const llmEvalRaw = await callLLM(
+      [
+        {
+          role: "system",
+          content:
+            "You are a strict but fair technical interviewer. Evaluate answers like a real interviewer.",
+        },
+        {
+          role: "user",
+          content: `Question: ${safeQuestion}
+Candidate Answer: ${safeAnswer}
+Reference reasoning: ${toSafeString(llmReasoning)}
+
+Evaluate the answer.
+
+Return STRICT JSON:
+{
+  "verdict": "correct | partial | incorrect",
+  "insight": "What is good or wrong in the answer",
+  "improvement": "One clear actionable suggestion"
+}`,
+        },
+      ],
+      { model: TOOL_EVAL_MODEL }
+    );
+
+    const parsedEval = parseJSONResponse(llmEvalRaw);
+    const verdictCandidate = toSafeString(parsedEval?.verdict).toLowerCase();
+    if (
+      verdictCandidate === "correct" ||
+      verdictCandidate === "partial" ||
+      verdictCandidate === "incorrect"
+    ) {
+      llmVerdict = verdictCandidate;
+    }
+    llmInsight = toSafeString(parsedEval?.insight);
+    llmImprovement = toSafeString(parsedEval?.improvement);
+  } catch (error) {
+    // Keep evaluator resilient: rule-based path is always available.
+  }
+
+  if (llmVerdict === "correct") adjustedScore += 0.1;
+  if (llmVerdict === "incorrect") adjustedScore -= 0.2;
+
+  const finalScore = Math.max(1, Math.min(10, Math.round(adjustedScore * 10)));
+  const feedbackParts = [ruleBasedFeedback];
+  if (llmInsight) feedbackParts.push(llmInsight);
+  if (llmImprovement) feedbackParts.push(`Suggestion: ${llmImprovement}`);
+  const feedback = feedbackParts.join("\n\n").slice(0, 1200);
+
   return {
     score: finalScore,
     type,
     feedback,
+    verdict: llmVerdict,
   };
 };
 

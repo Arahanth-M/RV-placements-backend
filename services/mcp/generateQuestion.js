@@ -77,6 +77,7 @@ export const generateQuestion = async ({
     previousScore,
     difficulty,
   });
+
   const condensedHistory = Array.isArray(roundHistory)
     ? roundHistory
         .slice(-3)
@@ -96,12 +97,13 @@ export const generateQuestion = async ({
     {
       role: "system",
       content:
-        "You are an interviewer. Return strict JSON only. No markdown or extra text.",
+        "You are a real interviewer conducting a live interview. Speak naturally like a human interviewer. Return strict JSON only. No markdown or extra text.",
     },
     {
       role: "user",
-      content: `Generate one interview question for this round.
-The question should align with company pattern and be phrased naturally.
+      content: `You are in the middle of a live interview.
+
+Generate what you would SAY NEXT to the candidate.
 
 Company context: ${JSON.stringify(companyContext || {})}
 Round type: ${toSafeString(roundType, "DSA")}
@@ -110,19 +112,27 @@ Base difficulty: ${normalizeDifficulty(difficulty)}
 Target difficulty for this question: ${adaptiveFollowUp.targetDifficulty}
 Follow-up mode: ${adaptiveFollowUp.followUpMode}
 Interviewer intent: ${adaptiveFollowUp.interviewerIntent}
+
 Has previous answer in this round: ${hasPreviousAnswer ? "yes" : "no"}
 Previous question: ${truncateText(previousQuestion, 220)}
 Previous answer: ${truncateText(previousAnswer, 320)}
 Previous feedback: ${truncateText(previousFeedback, 220)}
-Previous score: ${Number.isFinite(Number(previousScore)) ? Number(previousScore) : "N/A"}
+Previous score: ${
+        Number.isFinite(Number(previousScore)) ? Number(previousScore) : "N/A"
+      }
+
 Recent round history: ${JSON.stringify(condensedHistory)}
 
 Rules:
-1) If previous answer exists, ask a true follow-up that probes depth, edge-cases, trade-offs, or clarity gaps.
-2) Avoid repeating the same question or asking an unrelated jump.
-3) Keep the question concise and interviewer-like.
-4) If no previous answer exists, ask a strong opening question for this round.
-5) Respect target difficulty and follow-up mode.
+1) Speak like a real interviewer, not like a question generator.
+2) Use natural conversational phrasing (e.g., "Can you walk me through...", "What would happen if...", "How would you approach...").
+3) If previous answer exists, your question MUST feel like a continuation of the conversation.
+4) If previous feedback highlights a gap or mistake, ask a follow-up targeting that gap.
+5) Avoid robotic phrasing like "Explain..." or "Describe...".
+6) Keep it concise (1–2 sentences max).
+7) Do NOT include explanations, only what the interviewer would say.
+8) Respect target difficulty and follow-up mode.
+9) Avoid repeating the same question or asking something unrelated.
 
 Return JSON:
 {
@@ -143,4 +153,3 @@ Return JSON:
 };
 
 export default generateQuestion;
-

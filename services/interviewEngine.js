@@ -2,6 +2,7 @@ import { callLLM } from "./llmClient.js";
 import { parseJSONResponse } from "../utils/parseJSONResponse.js";
 import { getCompanyContext } from "./mcp/getCompanyContext.js";
 import { getNumberOfRounds } from "./mcp/getNumberOfRounds.js";
+import { generateFinalFeedback } from "./mcp/generateFinalFeedback.js";
 
 const toSafeString = (value, fallback = "") => {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -90,6 +91,12 @@ const inferQuestionCount = (roundType) => {
   if (roundType === "DSA") return 4;
   if (roundType === "System Design") return 3;
   return 3;
+};
+
+const getRoundPreviewLabel = (roundType) => {
+  if (roundType === "System Design") return "System Design Round";
+  if (roundType === "HR") return "HR/Behavioral Round";
+  return "DSA/Coding Round";
 };
 
 const buildFallbackBlueprint = (companyContext, totalRounds, roundHints = []) => {
@@ -193,10 +200,7 @@ export const generateInterviewPlan = async (companyData) => {
     };
 
     const type = normalizeRoundType(aiRound.type || fallbackRound.type);
-    const about = sanitizeRoundAbout(
-      aiRound.about || fallbackRound.about,
-      `${type} Round`
-    );
+    const about = getRoundPreviewLabel(type);
     const difficulty = normalizeDifficultyValue(aiRound.difficulty || fallbackRound.difficulty);
     const questionCount = clampQuestionCount(
       aiRound.questionCount,
@@ -231,10 +235,10 @@ export const generateInterviewPlan = async (companyData) => {
           },
         ];
 
-  const roundsPlan = normalizedRounds.map((round) => round.about || round.type || "General");
+  const roundsPlan = normalizedRounds.map((round) => getRoundPreviewLabel(round.type));
   const roundsDetails = normalizedRounds.map((round) => ({
     round: `Round ${round.roundNumber}`,
-    questionType: round.about || round.type || "General Interview",
+    questionType: getRoundPreviewLabel(round.type),
   }));
 
   return {
@@ -285,38 +289,15 @@ export const generateFinalReport = async (session) => {
       .filter((score) => Number.isFinite(score))
       .reduce((sum, score, _, arr) => sum + score / arr.length, 0) || 0;
 
-  const messages = [
-    {
-      role: "system",
-      content:
-        "You are an interview coach. Return strict JSON only. No markdown. No extra text.",
-    },
-    {
-      role: "user",
-      content: `Generate detailed interview report:
-* strengths
-* weaknesses
-* improvement plan
-
-Interview transcript JSON: ${JSON.stringify(allRoundQuestions)}
-
-Return JSON:
-{
-  "strengths": ["string"],
-  "weaknesses": ["string"],
-  "improvementPlan": ["string"]
-}`,
-    },
-  ];
-
-  const llmText = await callLLM(messages);
-  const parsed = parseJSONResponse(llmText);
+  const finalFeedback = await generateFinalFeedback({
+    transcript: allRoundQuestions,
+  });
 
   return {
     overallScore: Math.round(toBoundedScore(avgScore) * 10) / 10,
-    strengths: normalizeStringArray(parsed?.strengths),
-    weaknesses: normalizeStringArray(parsed?.weaknesses),
-    improvementPlan: normalizeStringArray(parsed?.improvementPlan),
+    strengths: normalizeStringArray(finalFeedback?.strengths),
+    weaknesses: normalizeStringArray(finalFeedback?.weaknesses),
+    improvementPlan: normalizeStringArray(finalFeedback?.improvementPlan),
   };
 };
 
