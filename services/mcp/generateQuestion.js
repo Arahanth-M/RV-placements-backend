@@ -237,25 +237,16 @@ export const generateQuestion = async ({
     });
     const seenQuestionsKey = buildSeenQuestionsKey(userId);
 
-    let questionPool = [];
-    let seenLookup = new Set();
-    try {
-      questionPool = normalizeQuestionPool(await getJSON(cacheKey));
-      const seenQuestions = normalizeQuestionPool(await getSetMembers(seenQuestionsKey));
-      seenLookup = new Set(seenQuestions.map((question) => question.toLowerCase()));
-      if (questionPool.length > 0) {
-        console.log("[generateQuestion] Cache hit: using Redis pool");
-      } else {
-        console.log("[generateQuestion] Cache miss: Redis pool not found");
-      }
-      console.log(`[generateQuestion] Pool size after fetch: ${questionPool.length}`);
-      console.log(`[generateQuestion] Seen questions count: ${seenLookup.size}`);
-    } catch (error) {
-      // If Redis read path fails, continue with direct LLM refill path.
-      console.warn("[generateQuestion] Redis read failed, falling back to LLM:", error?.message || error);
-      questionPool = [];
-      seenLookup = new Set();
+    let questionPool = normalizeQuestionPool(await getJSON(cacheKey));
+    const seenQuestions = normalizeQuestionPool(await getSetMembers(seenQuestionsKey));
+    let seenLookup = new Set(seenQuestions.map((question) => question.toLowerCase()));
+    if (questionPool.length > 0) {
+      console.log("[generateQuestion] Cache hit: using Redis pool");
+    } else {
+      console.log("[generateQuestion] Cache miss: Redis pool not found");
     }
+    console.log(`[generateQuestion] Pool size after fetch: ${questionPool.length}`);
+    console.log(`[generateQuestion] Seen questions count: ${seenLookup.size}`);
 
     const refillQuestionPool = async (currentPool, requestedCount = MIN_POOL_SIZE) => {
       try {
@@ -297,11 +288,7 @@ export const generateQuestion = async ({
           return normalizeQuestionPool(currentPool);
         }
         console.log(`[generateQuestion] Pool size after refill: ${mergedPool.length}`);
-        try {
-          await setJSON(cacheKey, mergedPool, QUESTION_POOL_TTL_SECONDS);
-        } catch (error) {
-          console.warn("[generateQuestion] Redis write failed for pool cache:", error?.message || error);
-        }
+        await setJSON(cacheKey, mergedPool, QUESTION_POOL_TTL_SECONDS);
         return mergedPool;
       } catch (error) {
         // If LLM fails, keep existing pool (if any) and let caller use static fallback.
@@ -346,13 +333,9 @@ export const generateQuestion = async ({
         difficulty,
       });
 
-    try {
-      if (selectedQuestion) {
-        console.log("[generateQuestion] Recording selected question in seen set");
-        await addToSet(seenQuestionsKey, selectedQuestion, USER_SEEN_TTL_SECONDS);
-      }
-    } catch (error) {
-      console.warn("[generateQuestion] Redis write failed for seen questions:", error?.message || error);
+    if (selectedQuestion) {
+      console.log("[generateQuestion] Recording selected question in seen set");
+      await addToSet(seenQuestionsKey, selectedQuestion, USER_SEEN_TTL_SECONDS);
     }
 
     return question;

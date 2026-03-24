@@ -7,6 +7,7 @@ import requireAuth from "../middleware/requireAuth.js";
 import dotenv from "dotenv";
 import Submission from "../models/Submission.js";
 import { getCompanyFocusTags } from "../utils/companyFocusTags.js";
+import redis from "../utils/redis.js";
 dotenv.config();
 
 const companyRouter = express.Router();
@@ -118,27 +119,47 @@ companyRouter.get("/", async (req, res) => {
 //   }
 // });
 companyRouter.get("/:id", requireAuth, async (req, res) => {
+  const id = req.params.id;
+  const key = `company:${id}`;
   try {
-    const company = await Company.findOne({
-      _id: req.params.id,
+    let cached = null;
+    try {
+      cached = await redis.get(key);
+    } catch {
+      // Redis down or error — continue to MongoDB without logging
+    }
+    if (cached != null && cached !== "") {
+      try {
+        const parsed = JSON.parse(cached);
+        console.log("HIT — company found in Redis and served from cache:", id);
+        return res.json(parsed);
+      } catch {
+        // Bad cache payload — fall through to MongoDB
+      }
+    }
+
+    console.log("MISS — company not in Redis; fetched from MongoDB:", id);
+
+    const companyDoc = await Company.findOne({
+      _id: id,
       status: "approved", 
     });
 
-    if (!company) {
+    if (!companyDoc) {
       return res.status(404).json({ error: "Company not found" });
     }
 
     let videoUrl = null;
-    if (company.videoKey) {
+    if (companyDoc.videoKey) {
       try {
-        videoUrl = await getSignedVideoUrl(company.videoKey);
-      } catch (s3Err) {
-        console.error("❌ S3 Signed URL Error:", s3Err.message);
+        videoUrl = await getSignedVideoUrl(companyDoc.videoKey);
+      } catch {
+        // Signed URL optional; continue without videoUrl
       }
     }
 
     // Convert Map -> Object for each role
-    const companyObj = company.toObject();
+    const companyObj = companyDoc.toObject();
     companyObj.roles = (companyObj.roles || []).map(role => ({
       ...role,
       ctc: role.ctc instanceof Map ? Object.fromEntries(role.ctc) : role.ctc
@@ -169,12 +190,24 @@ companyRouter.get("/:id", requireAuth, async (req, res) => {
     delete companyObj.onlineQuestion_solution;
     delete companyObj.onlineQuestion_solutions;
 
-    res.json({
+    const company = {
       ...companyObj,
       videoUrl,
-    });
+    };
+
+    try {
+      await redis.set(key, JSON.stringify(company), {
+        EX: 3600,
+      });
+    } catch {
+      // Ignore Redis write failures; response already built from MongoDB
+    }
+
+    return res.json(company);
   } catch (err) {
-    console.error("❌ Company Fetch Error:", err.message);
+    if (err.name === "CastError") {
+      return res.status(404).json({ error: "Company not found" });
+    }
     res.status(500).json({ error: "Internal Server Error" });
   }
 });

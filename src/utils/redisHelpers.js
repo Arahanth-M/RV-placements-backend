@@ -1,38 +1,44 @@
 import redis from "./redisClient.js";
 
 export async function getJSON(key) {
+  let rawValue;
   try {
-    const rawValue = await redis.get(key);
-
-    if (rawValue == null) {
-      return null;
-    }
-
-    try {
-      return JSON.parse(rawValue);
-    } catch (error) {
-      console.error(`[Redis] Invalid JSON for key "${key}":`, error.message);
-      return null;
-    }
+    rawValue = await redis.get(key);
   } catch (error) {
-    console.error(`[Redis] Failed to get key "${key}":`, error.message);
+    console.error(`[Redis] get failed for key "${key}":`, error);
+    return null;
+  }
+
+  if (rawValue == null) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(rawValue);
+  } catch (error) {
+    console.error(`[Redis] Invalid JSON for key "${key}":`, error.message);
     return null;
   }
 }
 
 export async function setJSON(key, value, ttlSeconds) {
+  let payload;
   try {
-    const payload = JSON.stringify(value);
+    payload = JSON.stringify(value);
+  } catch (error) {
+    console.error(`[Redis] Failed to serialize value for key "${key}":`, error);
+    return false;
+  }
 
+  try {
     if (Number.isInteger(ttlSeconds) && ttlSeconds > 0) {
-      await redis.set(key, payload, "EX", ttlSeconds);
-      return true;
+      await redis.set(key, payload, { EX: ttlSeconds });
+    } else {
+      await redis.set(key, payload);
     }
-
-    await redis.set(key, payload);
     return true;
   } catch (error) {
-    console.error(`[Redis] Failed to set key "${key}":`, error.message);
+    console.error(`[Redis] set failed for key "${key}":`, error);
     return false;
   }
 }
@@ -40,23 +46,22 @@ export async function setJSON(key, value, ttlSeconds) {
 export async function addToSet(key, value, ttlSeconds) {
   try {
     if (Number.isInteger(ttlSeconds) && ttlSeconds > 0) {
-      await redis.multi().sadd(key, value).expire(key, ttlSeconds).exec();
-      return true;
+      await redis.multi().sAdd(key, value).expire(key, ttlSeconds).exec();
+    } else {
+      await redis.sAdd(key, value);
     }
-
-    await redis.sadd(key, value);
     return true;
   } catch (error) {
-    console.error(`[Redis] Failed to add to set "${key}":`, error.message);
+    console.error(`[Redis] addToSet failed for key "${key}":`, error);
     return false;
   }
 }
 
 export async function getSetMembers(key) {
   try {
-    return await redis.smembers(key);
+    return await redis.sMembers(key);
   } catch (error) {
-    console.error(`[Redis] Failed to get set members for "${key}":`, error.message);
+    console.error(`[Redis] sMembers failed for key "${key}":`, error);
     return [];
   }
 }

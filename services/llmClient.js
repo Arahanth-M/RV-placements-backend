@@ -3,7 +3,7 @@ import Groq from "groq-sdk";
 const DEFAULT_ORCHESTRATOR_MODEL =
   process.env.GROQ_ORCHESTRATOR_MODEL ||
   process.env.GROQ_MODEL ||
-  "llama-3.1-70b-versatile";
+  "llama-3.3-70b-versatile";
 
 let groqClient = null;
 

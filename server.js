@@ -5,6 +5,7 @@ import session from "express-session";
 import MongoStore from "connect-mongo";
 import passport from "passport";
 import { connectDB } from "./config/db.js";
+import { connectRedis } from "./src/utils/redisClient.js";
 import keys from "./config/keys.js";
 import { config, urls, routes, messages, sessionConfig } from "./config/constants.js";
 import companyRouter from "./routes/companyRoutes.js";
@@ -91,6 +92,9 @@ app.use(routes.LEADERBOARD, leaderboardRouter);
 app.use(routes.INTERVIEW, interviewRouter);
 
 connectDB(config.MONGO_URI).then(() => {
+  // Do not await Redis — if REDIS_URL is wrong or Redis is down, connect() can hang
+  // and block app.listen(), breaking OAuth and all routes. Cache uses fault-tolerant helpers.
+  connectRedis().catch(() => {});
   app.listen(config.PORT, () =>
     console.log(`🚀 Server running on ${config.BACKEND_URL}`)
   );
