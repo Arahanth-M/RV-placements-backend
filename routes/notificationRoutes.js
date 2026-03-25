@@ -1,11 +1,11 @@
 import express from "express";
 import Notification from "../models/Notification.js";
-import requireAuth from "../middleware/requireAuth.js";
+import authJWT from "../middleware/authJWT.js";
 
 const notificationRouter = express.Router();
 
 // All notification routes require authentication
-notificationRouter.use(requireAuth);
+notificationRouter.use(authJWT);
 
 // Get all notifications for the current user
 notificationRouter.get("/", async (req, res) => {

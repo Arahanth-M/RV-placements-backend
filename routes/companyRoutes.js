@@ -3,7 +3,7 @@ import Company from "../models/Company.js";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { s3 } from "../utils/s3.js";
-import requireAuth from "../middleware/requireAuth.js";
+import authJWT from "../middleware/authJWT.js";
 import dotenv from "dotenv";
 import Submission from "../models/Submission.js";
 import { getCompanyFocusTags } from "../utils/companyFocusTags.js";
@@ -42,12 +42,8 @@ const getSignedVideoUrl = async (videoKey) => {
   return url;
 };
 
-companyRouter.post("/", async (req, res) => {
+companyRouter.post("/", authJWT, async (req, res) => {
   try {
-    if (!req.user) {
-      return res.status(401).json({ message: "Not logged in" });
-    }
-
     const newCompany = new Company({  
       ...req.body,
       submittedBy: {
@@ -84,7 +80,7 @@ companyRouter.get("/", async (req, res) => {
   }
 });
 
-// companyRouter.get("/:id", requireAuth, async (req, res) => {
+// companyRouter.get("/:id", authJWT, async (req, res) => {
 //   try {
 //     const company = await Company.findOne({
 //       _id: req.params.id,
@@ -118,7 +114,7 @@ companyRouter.get("/", async (req, res) => {
 //     res.status(500).json({ error: "Internal Server Error" });
 //   }
 // });
-companyRouter.get("/:id", requireAuth, async (req, res) => {
+companyRouter.get("/:id", authJWT, async (req, res) => {
   const id = req.params.id;
   const key = `company:${id}`;
   try {
@@ -220,7 +216,7 @@ companyRouter.get("/:id", requireAuth, async (req, res) => {
 
 
 // Increment helpful count for a company (one vote per user)
-companyRouter.post("/:id/helpful", async (req, res) => {
+companyRouter.post("/:id/helpful", authJWT, async (req, res) => {
   try {
     // Check if user is authenticated
     if (!req.user || !req.user.email) {
@@ -266,7 +262,7 @@ companyRouter.post("/:id/helpful", async (req, res) => {
 });
 
 // Check if current user has upvoted a company
-companyRouter.get("/:id/helpful/status", async (req, res) => {
+companyRouter.get("/:id/helpful/status", authJWT, async (req, res) => {
   try {
     if (!req.user || !req.user.email) {
       return res.json({ hasUpvoted: false });

@@ -1,15 +1,26 @@
 import express from "express";
+import jwt from "jsonwebtoken";
 import passport from "passport";
 import { config, urls, messages, ADMIN_EMAIL } from "../config/constants.js";
-import requireAuth from "../middleware/requireAuth.js";
+import authJWT from "../middleware/authJWT.js";
+import { buildJwtPayloadFromUser } from "../utils/jwtUserClaims.js";
 
 const router = express.Router();
 
+const OAUTH_COOKIE_MAX_AGE_MS = 10 * 60 * 1000;
+
+const oauthCookieOptions = () => ({
+  httpOnly: true,
+  maxAge: OAUTH_COOKIE_MAX_AGE_MS,
+  sameSite: "lax",
+  path: "/",
+  secure: config.NODE_ENV === "production",
+});
+
 const getClientBaseUrl = (req) => {
-  // Prefer origin captured when OAuth flow starts (from frontend referer).
-  const sessionOrigin = req.session?.oauthClientOrigin;
-  if (sessionOrigin && config.CORS_ORIGINS.includes(sessionOrigin)) {
-    return sessionOrigin;
+  const cookieOrigin = req.cookies?.oauth_client_origin;
+  if (cookieOrigin && config.CORS_ORIGINS.includes(cookieOrigin)) {
+    return cookieOrigin;
   }
 
   const host = req.get("x-forwarded-host") || req.get("host");
@@ -29,19 +40,37 @@ const getClientBaseUrl = (req) => {
 
 const redirectToAuthCallback = (req, res, query) => {
   const clientUrl = getClientBaseUrl(req);
-  if (req.session) {
-    req.session.oauthClientOrigin = null;
-  }
+  res.clearCookie("oauth_client_origin", { path: "/" });
+  res.clearCookie("oauth_flow", { path: "/" });
   return res.redirect(`${clientUrl}/auth/callback?${query}`);
 };
 
-const captureOAuthClientOrigin = (req, _res, next) => {
+const JWT_COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+const setTokenCookie = (res, user) => {
+  if (!config.JWT_SECRET) {
+    console.warn("JWT_SECRET is not set; skipping token cookie");
+    return;
+  }
+  const payload = buildJwtPayloadFromUser(user);
+  const token = jwt.sign(payload, config.JWT_SECRET, { expiresIn: "7d" });
+  res.cookie("token", token, {
+    httpOnly: true,
+    secure: config.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: JWT_COOKIE_MAX_AGE_MS,
+    path: "/",
+  });
+  console.log("JWT issued for user");
+};
+
+const captureOAuthClientOrigin = (req, res, next) => {
   const referer = req.get("referer");
-  if (referer && req.session) {
+  if (referer) {
     try {
       const origin = new URL(referer).origin;
       if (config.CORS_ORIGINS.includes(origin)) {
-        req.session.oauthClientOrigin = origin;
+        res.cookie("oauth_client_origin", origin, oauthCookieOptions());
       }
     } catch {
       // Ignore invalid referer values.
@@ -50,39 +79,45 @@ const captureOAuthClientOrigin = (req, _res, next) => {
   next();
 };
 
+const setOAuthFlowCookie = (flow) => (req, res, next) => {
+  res.cookie("oauth_flow", flow, oauthCookieOptions());
+  next();
+};
+
+const clearOAuthFlow = (req, res, next) => {
+  res.clearCookie("oauth_flow", { path: "/" });
+  next();
+};
+
 
 router.get(
   "/google",
   captureOAuthClientOrigin,
+  clearOAuthFlow,
   passport.authenticate("google", {
+    session: false,
     scope: ["profile", "email"],
   })
 );
 
-// Admin login route - same as regular login but will check email in callback
 router.get(
   "/google/admin",
   captureOAuthClientOrigin,
-  (req, res, next) => {
-    req.session.isAdminLogin = true; // Set flag to indicate this is admin login
-    next();
-  },
+  setOAuthFlowCookie("admin"),
   passport.authenticate("google", {
+    session: false,
     scope: ["profile", "email"],
   })
 );
 
-// Signup route - forces account selection
 router.get(
   "/google/signup",
   captureOAuthClientOrigin,
-  (req, res, next) => {
-    req.session.signupFlow = true; // Set flag to indicate this is a signup
-    next();
-  },
+  setOAuthFlowCookie("signup"),
   passport.authenticate("google", {
+    session: false,
     scope: ["profile", "email"],
-    prompt: "select_account", // This forces Google to show account selection
+    prompt: "select_account",
   })
 );
 
@@ -90,70 +125,60 @@ router.get(
 router.get(
   "/google/callback",
   (req, res, next) => {
-    passport.authenticate("google", (err, user, info) => {
+    passport.authenticate("google", { session: false }, (err, user, info) => {
       if (err) {
         return redirectToAuthCallback(req, res, "login=failed");
       }
       if (!user) {
-        // If domain is invalid, surface a specific code so UI can show a message
         if (info && info.reason === "domain") {
           return redirectToAuthCallback(req, res, "login=failed&reason=domain");
         }
         return redirectToAuthCallback(req, res, "login=failed");
       }
 
-      const isAdminLogin = req.session.isAdminLogin || false;
-      req.session.isAdminLogin = false;
+      const flow = req.cookies?.oauth_flow || "";
+      const isAdminLogin = flow === "admin";
+      const isSignup = flow === "signup";
 
-      // Check if admin login and verify admin email
       if (isAdminLogin) {
         if (user.email?.toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
-          req.logout(() => {
-            return redirectToAuthCallback(req, res, "login=failed&reason=not_admin");
-          });
-          return;
+          return redirectToAuthCallback(req, res, "login=failed&reason=not_admin");
         }
       }
 
-      req.logIn(user, (loginErr) => {
-        if (loginErr) {
-          return redirectToAuthCallback(req, res, "login=failed");
-        }
+      setTokenCookie(res, user);
 
-        const isSignup = req.session.signupFlow || false;
-        req.session.signupFlow = false;
-
-        if (isAdminLogin) {
-          return redirectToAuthCallback(req, res, "login=success&admin=true");
-        }
-        if (isSignup) {
-          return redirectToAuthCallback(req, res, "signup=success");
-        }
-        return redirectToAuthCallback(req, res, "login=success");
-      });
+      if (isAdminLogin) {
+        return redirectToAuthCallback(req, res, "login=success&admin=true");
+      }
+      if (isSignup) {
+        return redirectToAuthCallback(req, res, "signup=success");
+      }
+      return redirectToAuthCallback(req, res, "login=success");
     })(req, res, next);
   }
 );
 
 
-router.get("/current_user", async (req, res) => {
+router.get("/current_user", authJWT, async (req, res) => {
   if (!req.user) {
     return res.status(401).json({ error: messages.ERROR.NOT_AUTHENTICATED });
   }
-  
-  // Check if user is new (created within last 1 hour - first time login)
-  const user = req.user.toObject ? req.user.toObject() : req.user;
-  const isNewUser = user.createdAt && 
-    (Date.now() - new Date(user.createdAt).getTime()) < 60 * 60 * 1000; // 1 hour
-  
+
+  const { iat, exp, ...claims } = req.user;
+  const createdAt = claims.createdAt ? new Date(claims.createdAt) : null;
+  const isNewUser =
+    createdAt &&
+    Date.now() - createdAt.getTime() < 60 * 60 * 1000;
+
   res.json({
-    ...user,
-    isNewUser: isNewUser || false
+    ...claims,
+    createdAt: createdAt || claims.createdAt,
+    isNewUser: isNewUser || false,
   });
 });
 
-// Check if current user is admin
-router.get("/is_admin", requireAuth, (req, res) => {
+router.get("/is_admin", authJWT, (req, res) => {
   try {
     const isAdmin = req.user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
     res.json({ isAdmin });
@@ -163,11 +188,8 @@ router.get("/is_admin", requireAuth, (req, res) => {
   }
 });
 
-// Get available accounts (for account switching)
-router.get("/accounts", async (req, res) => {
+router.get("/accounts", authJWT, async (req, res) => {
   try {
-    // This is a placeholder - in a real implementation, you might want to
-    // store multiple accounts per user or use Google's account discovery
     if (req.user) {
       res.json({
         accounts: [{
@@ -192,13 +214,8 @@ router.get("/accounts", async (req, res) => {
 });
 
 router.get("/logout", (req, res) => {
-  req.logout((err) => {
-    if (err) {
-      return res.status(500).json({ error: messages.ERROR.LOGOUT_FAILED });
-    }
-    res.clearCookie("connect.sid"); 
-    res.redirect(`${getClientBaseUrl(req)}?logout=success`); 
-  });
+  res.clearCookie("token", { path: "/" });
+  res.redirect(`${getClientBaseUrl(req)}?logout=success`);
 });
 
 export default router;

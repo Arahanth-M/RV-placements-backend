@@ -1,11 +1,11 @@
 import express from "express";
 import User from "../models/User.js";
-import requireAuth from "../middleware/requireAuth.js";
+import authJWT from "../middleware/authJWT.js";
 
 const leaderboardRouter = express.Router();
 
 // GET /api/leaderboard - top contributors by points (optional auth for visibility)
-leaderboardRouter.get("/", requireAuth, async (req, res) => {
+leaderboardRouter.get("/", authJWT, async (req, res) => {
   try {
     const users = await User.find({})
       .select("userId username picture points")

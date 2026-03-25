@@ -10,25 +10,26 @@
     "test:watch": "NODE_OPTIONS='--experimental-vm-modules' jest --watch",
     "test:coverage": "NODE_OPTIONS='--experimental-vm-modules' jest --coverage",
     "test:ci": "NODE_OPTIONS='--experimental-vm-modules' jest --ci --coverage --maxWorkers=2",
-    "add-sample-data": "node scripts/addSampleData.js"
+    "add-sample-data": "node scripts/addSampleData.js",
+    "db:drop-sessions": "node scripts/dropExpressSessionCollection.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1000.0",
     "@aws-sdk/s3-request-presigner": "^3.985.0",
     "compute-cosine-similarity": "^1.1.0",
-    "connect-mongo": "^5.1.0",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",
     "express": "^4.18.2",
-    "express-session": "^1.17.3",
     "groq-sdk": "^1.1.1",
-    "redis": "^4.7.0",
+    "jsonwebtoken": "^9.0.3",
     "mammoth": "^1.6.0",
     "mongodb": "^6.20.0",
     "mongoose": "^7.0.3",
     "passport": "^0.6.0",
     "passport-google-oauth20": "^2.0.0",
-    "razorpay": "^2.9.6"
+    "razorpay": "^2.9.6",
+    "redis": "^4.7.0"
   },
   "devDependencies": {
     "jest": "^30.2.0",

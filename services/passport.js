@@ -5,19 +5,6 @@ import User from "../models/User.js";
 import { urls } from "../config/constants.js";
 import { sendWelcomeEmailWebhook } from "./webhookService.js";
 
-passport.serializeUser((user, done) => {
-  done(null, user.id);
-});
-
-passport.deserializeUser(async (id, done) => {
-  try {
-    const user = await User.findById(id);
-    done(null, user);
-  } catch (err) {
-    done(err, null);
-  }
-});
-
 passport.use(
   new GoogleStrategy(
     {
@@ -26,7 +13,7 @@ passport.use(
       // Use relative callback URL so it works for localhost, root domain, and www domain.
       callbackURL: urls.GOOGLE_CALLBACK_PATH,
       proxy: true,
-    },  
+    },
     async (accessToken, refreshToken, profile, done) => {
       try {
         const primaryEmail = profile?.emails?.[0]?.value || "";

@@ -1,6 +1,6 @@
 import express from "express";
 import requireAdmin from "../middleware/requireAdmin.js";
-import requireAuth from "../middleware/requireAuth.js";
+import authJWT from "../middleware/authJWT.js";
 import Event from "../models/Event.js";
 
 const eventRouter = express.Router();
@@ -39,7 +39,7 @@ eventRouter.get("/:id", async (req, res) => {
 });
 
 // Admin routes - require authentication
-eventRouter.use(requireAuth);
+eventRouter.use(authJWT);
 eventRouter.use(requireAdmin);
 
 // Create new event (Admin only)

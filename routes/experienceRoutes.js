@@ -4,12 +4,12 @@ import mammoth from 'mammoth';
 import dotenv from 'dotenv';
 import { streamToBuffer } from '../utils/streamToBuffer.js';
 import { s3 } from '../utils/s3.js';
-import requireAuth from '../middleware/requireAuth.js';
+import authJWT from '../middleware/authJWT.js';
 
 dotenv.config();
 const router = express.Router();
 
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', authJWT, async (req, res) => {
   try {
     const params = { Bucket: process.env.BUCKET_NAME };
     const data = await s3.send(new ListObjectsV2Command(params));

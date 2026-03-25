@@ -1,4 +1,5 @@
 import express from "express";
+import authJWT from "../middleware/authJWT.js";
 import requireAdmin from "../middleware/requireAdmin.js";
 import User from "../models/User.js";
 import Submission from "../models/Submission.js";
@@ -7,7 +8,8 @@ import Notification from "../models/Notification.js";
 
 const adminRouter = express.Router();
 
-// All admin routes require admin authentication
+// All admin routes require JWT auth then admin check
+adminRouter.use(authJWT);
 adminRouter.use(requireAdmin);
 
 // Sanitize text for company content (remove script tags; keep other text as-is)

@@ -65,8 +65,7 @@ describe('Authentication Routes', () => {
     });
 
     it('should return user data for authenticated requests', async () => {
-      // This would require mocking the session/auth state
-      // For now, we'll just test that the endpoint exists
+      // Would require a valid JWT cookie; unauthenticated returns 401
       const response = await request(app)
         .get('/api/auth/current_user')
         .expect(401);
@@ -76,7 +75,7 @@ describe('Authentication Routes', () => {
   });
 
   describe('GET /api/auth/logout', () => {
-    it('should clear session and redirect', async () => {
+    it('should redirect (JWT cleared in browser via cookie)', async () => {
       const response = await request(app)
         .get('/api/auth/logout')
         .expect(302);
@@ -85,19 +84,9 @@ describe('Authentication Routes', () => {
     });
   });
 
-  describe('Session Management', () => {
-    it('should handle session creation properly', async () => {
-      // Test session creation logic
-      const userData = {
-        username: 'test_user',
-        email: 'test@example.com',
-        googleId: 'test123'
-      };
-
-      // Mock session creation
+  describe('JWT auth', () => {
+    it('should return 401 for protected routes without token', async () => {
       const agent = request.agent(app);
-      
-      // Attempt to access protected route without auth
       await agent
         .get('/api/auth/current_user')
         .expect(401);

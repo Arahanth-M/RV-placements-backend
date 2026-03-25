@@ -1,11 +1,11 @@
 import express from "express";
 import mongoose from "mongoose";
-import requireAuth from "../middleware/requireAuth.js";
+import authJWT from "../middleware/authJWT.js";
 
 const router = express.Router();
 
 // Get student data by USN from student-data-2026-cse collection
-router.get("/student-data/:usn", requireAuth, async (req, res) => {
+router.get("/student-data/:usn", authJWT, async (req, res) => {
   try {
     const { usn } = req.params;
     
@@ -38,7 +38,7 @@ router.get("/student-data/:usn", requireAuth, async (req, res) => {
 });
 
 // Get student data by username/name from student-data-2026-cse collection
-router.get("/student-data-by-name/:username", requireAuth, async (req, res) => {
+router.get("/student-data-by-name/:username", authJWT, async (req, res) => {
   try {
     const { username } = req.params;
     

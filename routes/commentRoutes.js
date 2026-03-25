@@ -1,7 +1,7 @@
 import express from "express";
 import Comment from "../models/Comment.js";
 import Company from "../models/Company.js";
-import requireAuth from "../middleware/requireAuth.js";
+import authJWT from "../middleware/authJWT.js";
 import { ADMIN_EMAIL } from "../config/constants.js";
 
 const commentRouter = express.Router();
@@ -65,7 +65,7 @@ commentRouter.get("/companies/:companyId/comments", async (req, res) => {
 });
 
 // Create a new comment (requires authentication)
-commentRouter.post("/companies/:companyId/comments", requireAuth, async (req, res) => {
+commentRouter.post("/companies/:companyId/comments", authJWT, async (req, res) => {
   try {
     const { companyId } = req.params;
     const { comment } = req.body;
@@ -121,7 +121,7 @@ commentRouter.post("/companies/:companyId/comments", requireAuth, async (req, re
 });
 
 // Delete a comment (by the user who created it, or by admin)
-commentRouter.delete("/comments/:commentId", requireAuth, async (req, res) => {
+commentRouter.delete("/comments/:commentId", authJWT, async (req, res) => {
   try {
     const { commentId } = req.params;
 

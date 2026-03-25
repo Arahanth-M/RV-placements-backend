@@ -1,11 +1,20 @@
 import express from "express";
+import authJWT from "../middleware/authJWT.js";
 import { createYearStatsModel } from "../models/YearStats.js";
 
 const yearStatsRouter = express.Router();
 
+const requireAuthForRestrictedYears = (req, res, next) => {
+  const yearNum = parseInt(req.params.year, 10);
+  if (yearNum === 2024 || yearNum === 2025) {
+    return authJWT(req, res, next);
+  }
+  next();
+};
+
 // Get stats for a specific year
 // Require authentication for 2024 and 2025, but allow public access for other years
-yearStatsRouter.get("/:year", async (req, res) => {
+yearStatsRouter.get("/:year", requireAuthForRestrictedYears, async (req, res) => {
   try {
     const { year } = req.params;
     
@@ -13,13 +22,6 @@ yearStatsRouter.get("/:year", async (req, res) => {
     const yearNum = parseInt(year);
     if (isNaN(yearNum) || yearNum < 2020 || yearNum > 2030) {
       return res.status(400).json({ error: "Invalid year. Must be between 2020 and 2030." });
-    }
-
-    // Require authentication for 2024 and 2025
-    if (yearNum === 2024 || yearNum === 2025) {
-      if (!req.user) {
-        return res.status(401).json({ error: "You must be logged in to view this year's statistics." });
-      }
     }
 
     // Create model for the specific year

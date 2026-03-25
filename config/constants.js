@@ -41,11 +41,9 @@ export const config = {
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
   GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
   
-  // Session
-  SESSION_SECRET: process.env.SESSION_SECRET || 'default-session-secret-change-in-production',
-  SESSION_TOUCH_AFTER: parseInt(process.env.SESSION_TOUCH_AFTER) || 24 * 3600, // 24 hours
-  SESSION_MAX_AGE: parseInt(process.env.SESSION_MAX_AGE) || 30 * 24 * 60 * 60 * 1000, // 30 days
-  
+  // JWT (set JWT_SECRET in env; used when signing tokens)
+  JWT_SECRET: process.env.JWT_SECRET,
+
   // CORS
   CORS_ORIGINS: parseCorsOrigins(process.env.CORS_ORIGINS),
   
@@ -101,19 +99,6 @@ export const messages = {
   VALIDATION: {
     COMPANY_NAME_REGEX: /^[a-zA-Z0-9\s]{2,50}$/,
     POSITIVE_INTEGER_REGEX: /^\d+$/,
-  },
-};
-
-// Session Configuration
-export const sessionConfig = {
-  secret: config.SESSION_SECRET,
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    secure: config.NODE_ENV === 'production',
-    sameSite: config.NODE_ENV === 'production' ? 'none' : 'lax',
-    maxAge: config.SESSION_MAX_AGE,
   },
 };
 

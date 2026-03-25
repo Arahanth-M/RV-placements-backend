@@ -1,13 +1,11 @@
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
-import session from "express-session";
-import MongoStore from "connect-mongo";
 import passport from "passport";
 import { connectDB } from "./config/db.js";
 import { connectRedis } from "./src/utils/redisClient.js";
-import keys from "./config/keys.js";
-import { config, urls, routes, messages, sessionConfig } from "./config/constants.js";
+import { config, routes, messages } from "./config/constants.js";
 import companyRouter from "./routes/companyRoutes.js";
 import experienceRouter from "./routes/experienceRoutes.js";
 import authRouter from "./routes/authRoutes.js";
@@ -61,18 +59,9 @@ app.use(
 );
 
 app.use(express.json());
-app.use(
-  session({
-    ...sessionConfig,
-    store: MongoStore.create({
-      mongoUrl: config.MONGO_URI,
-      touchAfter: config.SESSION_TOUCH_AFTER, 
-    }),
-  })
-);
+app.use(cookieParser());
 
 app.use(passport.initialize());
-app.use(passport.session());
 app.use(routes.AUTH, authRouter);
 app.use(routes.COMPANIES, companyRouter);
 app.use(routes.EXPERIENCES, experienceRouter);

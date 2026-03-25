@@ -1,12 +1,12 @@
 import express from "express";
 import Submission from "../models/Submission.js";
-import requireAuth from "../middleware/requireAuth.js";
+import authJWT from "../middleware/authJWT.js";
 import { messages } from "../config/constants.js";
 
 
 const submissionRouter = express.Router();
 
-submissionRouter.post("/", requireAuth, async (req, res) => {
+submissionRouter.post("/", authJWT, async (req, res) => {
   try {
     const { companyId, type, content, isAnonymous } = req.body;
 
