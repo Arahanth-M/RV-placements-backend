@@ -61,4 +61,5 @@ export async function connectRedis() {
   return connectingPromise;
 }
 
+export { redisUrl };
 export default redis;

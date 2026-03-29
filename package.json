@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
+    "worker:interview": "node workers/interviewWorker.js",
     "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
     "test:watch": "NODE_OPTIONS='--experimental-vm-modules' jest --watch",
     "test:coverage": "NODE_OPTIONS='--experimental-vm-modules' jest --coverage",
@@ -16,6 +17,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1000.0",
     "@aws-sdk/s3-request-presigner": "^3.985.0",
+    "bullmq": "^5.71.1",
     "compute-cosine-similarity": "^1.1.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",

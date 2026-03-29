@@ -80,13 +80,36 @@ app.use(routes.PLACEMENT, placementRouter);
 app.use(routes.LEADERBOARD, leaderboardRouter);
 app.use(routes.INTERVIEW, interviewRouter);
 
-connectDB(config.MONGO_URI).then(() => {
+connectDB(config.MONGO_URI).then(async () => {
   // Do not await Redis — if REDIS_URL is wrong or Redis is down, connect() can hang
   // and block app.listen(), breaking OAuth and all routes. Cache uses fault-tolerant helpers.
   connectRedis().catch(() => {});
   app.listen(config.PORT, () =>
     console.log(`🚀 Server running on ${config.BACKEND_URL}`)
   );
+
+  const skipEmbeddedWorker =
+    process.env.NODE_ENV === "test" ||
+    process.env.DISABLE_EMBEDDED_INTERVIEW_WORKER === "1";
+
+  if (skipEmbeddedWorker) {
+    if (process.env.DISABLE_EMBEDDED_INTERVIEW_WORKER === "1") {
+      console.log(
+        "[interview] Embedded BullMQ worker disabled. Run `npm run worker:interview` (same REDIS_URL) or a dedicated worker container."
+      );
+    }
+    return;
+  }
+
+  try {
+    await import("./workers/interviewWorker.js");
+    console.log("[interview] BullMQ interview worker started in-process (same Node as API).");
+  } catch (err) {
+    console.error(
+      "[interview] Failed to start embedded interview worker — AI submit will queue jobs but they will not run:",
+      err?.message || err
+    );
+  }
 });
 
 // Export app for testing

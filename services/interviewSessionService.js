@@ -21,6 +21,11 @@ export const getSession = async (sessionId) => {
   return InterviewSession.findById(sessionId);
 };
 
+/** Plain object (JSON-safe) for read-only status endpoints. */
+export const getSessionLean = async (sessionId) => {
+  return InterviewSession.findById(sessionId).lean();
+};
+
 export const getInProgressSession = async (userId, companyId) => {
   return InterviewSession.findOne({
     userId,
@@ -99,6 +104,7 @@ export const startRound = async (sessionId) => {
   session.roundStatus = "IN_PROGRESS";
   session.interviewStatus = "IN_PROGRESS";
   session.currentRound = roundNumber;
+  session.currentRoundIndex = roundIndex;
   session.currentQuestion = question;
 
   session.markModified("rounds");

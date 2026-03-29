@@ -3,20 +3,40 @@ import Company from "../models/Company.js";
 import {
   createSession,
   getSession,
+  getSessionLean,
   getInProgressSession,
   getUserSessions,
   updateSession,
   discardInProgressSession,
-  generateRoundFeedback as generateRoundFeedbackForRound,
   startRound,
 } from "../services/interviewSessionService.js";
-import { generateFinalReport, generateInterviewPlan } from "../services/interviewEngine.js";
-import { callLLM } from "../services/llmClient.js";
-import { getCompanyContext } from "../services/mcp/getCompanyContext.js";
-import { generateQuestion } from "../services/mcp/generateQuestion.js";
-import { evaluateAnswer } from "../services/mcp/evaluateAnswer.js";
+import { generateInterviewPlan } from "../services/interviewEngine.js";
+import { interviewQueue } from "../services/queues/interviewQueue.js";
+import { EVALUATE_ANSWER } from "../services/queues/jobTypes.js";
+import { tipsByRoundType, defaultTips } from "../utils/interviewTips.js";
 
 const router = express.Router();
+
+/** 0-based index into `session.rounds`; `currentRound` (1-based) is the source of truth. */
+function roundIndexFromCurrentRound(session) {
+  const rounds = Array.isArray(session.rounds) ? session.rounds : [];
+  const currentRoundNumber = Number(session.currentRound) || 1;
+  return Math.max(0, Math.min(rounds.length - 1, currentRoundNumber - 1));
+}
+
+/** True if a BullMQ evaluate-answer job exists for this session (waiting, active, or delayed). */
+async function isInterviewAnswerProcessing(sessionId) {
+  try {
+    const id = String(sessionId);
+    const jobs = await interviewQueue.getJobs(["waiting", "active", "delayed"], 0, 200);
+    return jobs.some(
+      (job) => job.name === EVALUATE_ANSWER && String(job.data?.sessionId || "") === id
+    );
+  } catch (err) {
+    console.warn("[interview-status] isInterviewAnswerProcessing check failed:", err?.message || err);
+    return false;
+  }
+}
 
 router.post("/start-interview", async (req, res) => {
   try {
@@ -59,7 +79,7 @@ router.post("/start-interview", async (req, res) => {
         roundsPlan: session.roundsPlan || [],
         roundsDetails: session.roundsDetails || [],
         totalRounds: session.totalRounds || 0,
-        currentRoundIndex: session.currentRoundIndex || 0,
+        currentRoundIndex: roundIndexFromCurrentRound(session),
         difficultyLevel: session.difficultyLevel || null,
       };
     } else {
@@ -90,7 +110,7 @@ router.post("/start-interview", async (req, res) => {
         roundsPlan: refreshedSession?.roundsPlan || [],
         roundsDetails: refreshedSession?.roundsDetails || [],
         totalRounds: refreshedSession?.totalRounds || plan.totalRounds || 0,
-        currentRoundIndex: refreshedSession?.currentRoundIndex || 0,
+        currentRoundIndex: refreshedSession ? roundIndexFromCurrentRound(refreshedSession) : 0,
         difficultyLevel:
           refreshedSession?.rounds?.[0]?.difficulty || refreshedSession?.difficultyLevel || null,
       };
@@ -140,7 +160,7 @@ router.get("/resume-interview", async (req, res) => {
       roundsPlan: session.roundsPlan || [],
       roundsDetails: session.roundsDetails || [],
       totalRounds: session.totalRounds || 0,
-      currentRoundIndex: session.currentRoundIndex || 0,
+      currentRoundIndex: roundIndexFromCurrentRound(session),
       difficultyLevel: session.difficultyLevel || null,
       historyCount: Array.isArray(session.history) ? session.history.length : 0,
     });
@@ -175,7 +195,7 @@ router.get("/sessions/:userId", async (req, res) => {
         roundsPlan: session.roundsPlan || [],
         roundsDetails: session.roundsDetails || [],
         totalRounds: session.totalRounds || 0,
-        currentRoundIndex: session.currentRoundIndex || 0,
+        currentRoundIndex: roundIndexFromCurrentRound(session),
         difficultyLevel: session.difficultyLevel || "",
         currentQuestion: session.currentQuestion || null,
         status: session.status,
@@ -200,235 +220,135 @@ router.post("/submit-answer", async (req, res) => {
       });
     }
 
-    // 1) Fetch session
-    const session = await getSession(sessionId);
-    if (!session) {
-      return res.status(404).json({ error: "Session not found" });
-    }
-    if (session.interviewStatus === "COMPLETED") {
-      return res.status(400).json({ error: "Interview already completed" });
-    }
-    if (!Array.isArray(session.rounds) || session.rounds.length === 0) {
-      return res.status(400).json({ error: "Interview rounds are not initialized" });
-    }
-
-    // 2) Identify current round and current question
-    const roundNumber = Number(session.currentRound) || 1;
-    const roundIndex = Math.max(0, Math.min(session.rounds.length - 1, roundNumber - 1));
-    const currentRound = session.rounds[roundIndex];
-    if (!currentRound) {
-      return res.status(400).json({ error: "Current round not found" });
-    }
-
-    const currentQuestionIndex = Number(session.currentQuestionIndex) || 0;
-    const currentQuestionEntry = currentRound.questions?.[currentQuestionIndex];
-    const currentQuestion = currentQuestionEntry?.question || session.currentQuestion;
-    if (!currentQuestion) {
-      return res.status(400).json({ error: "Current question not found for this round" });
-    }
-
-    const trimmedAnswer = answer.trim();
-
-    // Company context for MCP tools
-    const companyData = await Company.findById(session.companyId)
-      .select(
-        "name onlineQuestions interviewQuestions interviewProcess Must_Do_Topics interview_questions prev_coding_ques"
-      )
-      .lean();
-    const companyContext = await getCompanyContext(companyData || {});
-
-    // 3) Call LLM to get reasoning ONLY (no scoring / no flow decisions)
-    const reasoningMessages = [
-      {
-        role: "system",
-        content: "Return reasoning text only. Do not provide score or control-flow decisions.",
-      },
-      {
-        role: "user",
-        content: `Question: ${currentQuestion}
-Candidate answer: ${trimmedAnswer}
-Round type: ${currentRound.type}
-Difficulty: ${currentRound.difficulty}
-Company context: ${JSON.stringify(companyContext)}
-
-Give brief reasoning on answer quality, technical correctness, clarity, and gaps.`,
-      },
-    ];
-    let llmReasoning = "";
     try {
-      llmReasoning = await callLLM(reasoningMessages);
-    } catch (error) {
-      // Keep submit-answer resilient even if provider/network has transient issues.
-      console.warn("⚠️ LLM reasoning call failed, continuing with fallback reasoning:", error?.message || error);
-      llmReasoning = "";
-    }
-
-    // 4) MCP evaluateAnswer
-    let evaluation;
-    try {
-      evaluation = await evaluateAnswer({
-        answer: trimmedAnswer,
-        question: currentQuestion,
-        companyContext,
-        llmReasoning,
+      const job = await interviewQueue.add(EVALUATE_ANSWER, {
+        sessionId,
+        answer: answer.trim(),
       });
-    } catch (error) {
-      console.warn("⚠️ evaluateAnswer failed, using fallback evaluation:", error?.message || error);
-      evaluation = {
-        score: 5,
-        type: "general",
-        feedback:
-          "Thanks for the response. I could not evaluate this answer fully right now, so this is a neutral score. Please continue to the next question.",
-        verdict: "partial",
-      };
-    }
-
-    // 5) Save answer + score + feedback
-    if (!Array.isArray(currentRound.questions)) {
-      currentRound.questions = [];
-    }
-    if (!currentRound.questions[currentQuestionIndex]) {
-      currentRound.questions[currentQuestionIndex] = {
-        question: currentQuestion,
-        answer: "",
-        score: null,
-        feedback: "",
-      };
-    }
-    currentRound.questions[currentQuestionIndex].answer = trimmedAnswer;
-    currentRound.questions[currentQuestionIndex].score = evaluation.score;
-    currentRound.questions[currentQuestionIndex].feedback = evaluation.feedback;
-
-    // 6) Increment currentQuestionIndex
-    const nextQuestionIndex = currentQuestionIndex + 1;
-    session.currentQuestionIndex = nextQuestionIndex;
-    session.roundStatus = "IN_PROGRESS";
-    session.interviewStatus = "IN_PROGRESS";
-    currentRound.status = "IN_PROGRESS";
-
-    const questionCount = Math.min(5, Math.max(3, Number(currentRound.questionCount) || 3));
-
-    // 7) If more questions remain in the current round -> generate next
-    if (nextQuestionIndex < questionCount) {
-      const roundHistory = Array.isArray(currentRound.questions)
-        ? currentRound.questions.slice(0, nextQuestionIndex).map((item) => ({
-            question: item?.question || "",
-            answer: item?.answer || "",
-            feedback: item?.feedback || "",
-            score: item?.score,
-          }))
-        : [];
-
-      const nextQuestion = await generateQuestion({
-        userId: String(session.userId || ""),
-        companyContext,
-        roundType: currentRound.type,
-        roundAbout: currentRound.about,
-        difficulty: currentRound.difficulty,
-        previousQuestion: currentQuestion,
-        previousAnswer: trimmedAnswer,
-        previousFeedback: evaluation.feedback,
-        previousScore: evaluation.score,
-        roundHistory,
+      console.log("[submit-answer] BullMQ job enqueued", {
+        jobId: job.id,
+        name: EVALUATE_ANSWER,
+        sessionId,
       });
-
-      if (!currentRound.questions[nextQuestionIndex]) {
-        currentRound.questions[nextQuestionIndex] = {
-          question: nextQuestion,
-          answer: "",
-          score: null,
-          feedback: "",
-        };
-      } else {
-        currentRound.questions[nextQuestionIndex].question = nextQuestion;
-        currentRound.questions[nextQuestionIndex].answer = "";
-        currentRound.questions[nextQuestionIndex].score = null;
-        currentRound.questions[nextQuestionIndex].feedback = "";
-      }
-
-      session.currentQuestion = nextQuestion;
-      session.markModified("rounds");
-      await session.save();
-
-      return res.json({
-        question: nextQuestion,
-        feedback: evaluation.feedback,
-        score: evaluation.score,
-        status: "in_progress",
-        interviewStatus: session.interviewStatus,
-        roundStatus: session.roundStatus,
-        currentRound: session.currentRound,
-        currentQuestionIndex: session.currentQuestionIndex,
-      });
+    } catch (queueError) {
+      console.warn("[submit-answer] BullMQ enqueue failed:", queueError?.message || queueError);
+      return res.status(503).json({ error: "Interview queue unavailable" });
     }
-
-    // 8) Round completed -> persist completion, then generate round feedback
-    currentRound.status = "COMPLETED";
-    session.roundStatus = "COMPLETED";
-    session.currentQuestion = null;
-    session.markModified("rounds");
-    await session.save();
-
-    const roundFeedback = await generateRoundFeedbackForRound(
-      sessionId,
-      currentRound.roundNumber
-    );
-
-    // Reload to avoid version conflicts after the service saves the same document.
-    const refreshedSession = await getSession(sessionId);
-    if (!refreshedSession) {
-      return res.status(404).json({ error: "Session not found" });
-    }
-
-    const refreshedRoundIndex = Math.max(
-      0,
-      Math.min(refreshedSession.rounds.length - 1, roundNumber - 1)
-    );
-    const refreshedRound = refreshedSession.rounds[refreshedRoundIndex];
-    const answeredScores = (refreshedRound?.questions || [])
-      .map((item) => Number(item?.score))
-      .filter((value) => Number.isFinite(value));
-    const roundAverageScore =
-      answeredScores.length > 0
-        ? Math.round(
-            (answeredScores.reduce((sum, value) => sum + value, 0) /
-              answeredScores.length) *
-              10
-          ) / 10
-        : 0;
-
-    refreshedRound.feedback = {
-      ...roundFeedback,
-      score: roundAverageScore,
-    };
-
-    const hasNextRound = refreshedRoundIndex + 1 < refreshedSession.rounds.length;
-    if (!hasNextRound) {
-      refreshedSession.interviewStatus = "COMPLETED";
-      refreshedSession.status = "completed";
-      refreshedSession.finalReport = await generateFinalReport(refreshedSession);
-    }
-
-    refreshedSession.markModified("rounds");
-    await refreshedSession.save();
 
     return res.json({
-      question: null,
-      feedback: evaluation.feedback,
-      score: evaluation.score,
-      status: refreshedSession.status || "in_progress",
-      interviewStatus: refreshedSession.interviewStatus,
-      roundStatus: refreshedSession.roundStatus,
-      currentRound: refreshedSession.currentRound,
-      currentQuestionIndex: refreshedSession.currentQuestionIndex,
-      roundCompleted: true,
-      roundFeedback: refreshedRound.feedback || {},
-      nextRoundAvailable: hasNextRound,
-      report: hasNextRound ? null : refreshedSession.finalReport || null,
+      status: "processing",
+      sessionId,
     });
   } catch (error) {
     console.error("❌ Error submitting interview answer:", error?.stack || error?.message || error);
     return res.status(500).json({ error: "Failed to submit answer" });
+  }
+});
+
+router.get("/interview-status/:sessionId", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    if (!sessionId) {
+      return res.status(400).json({ error: "sessionId is required" });
+    }
+
+    const session = await getSessionLean(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    const rounds = Array.isArray(session.rounds) ? session.rounds : [];
+    const currentRoundNumber = Number(session.currentRound) || 1;
+    const currentRoundIndex = Math.max(0, Math.min(rounds.length - 1, currentRoundNumber - 1));
+    const currentQuestionIndex = Number(session.currentQuestionIndex) || 0;
+    const currentRoundDoc = rounds[currentRoundIndex];
+    const prevQuestion =
+      currentQuestionIndex > 0 && currentRoundDoc?.questions
+        ? currentRoundDoc.questions[currentQuestionIndex - 1]
+        : null;
+
+    const slotQuestion = currentRoundDoc?.questions?.[currentQuestionIndex]?.question;
+    const rawCurrentQ = session.currentQuestion;
+    const effectiveCurrentQuestion =
+      (typeof rawCurrentQ === "string" && rawCurrentQ.trim() !== ""
+        ? rawCurrentQ.trim()
+        : null) ||
+      (typeof slotQuestion === "string" && slotQuestion.trim() !== ""
+        ? slotQuestion.trim()
+        : null) ||
+      null;
+    const hasActiveQuestion = Boolean(effectiveCurrentQuestion);
+
+    const roundType = session.rounds[currentRoundIndex]?.type;
+    const tips = tipsByRoundType[roundType] || defaultTips;
+    const selectedTips = tips.slice(0, 3);
+
+    const sessionInterviewStatus = session.interviewStatus;
+    const roundCompleted =
+      sessionInterviewStatus === "IN_PROGRESS" &&
+      session.roundStatus === "COMPLETED" &&
+      !hasActiveQuestion;
+    const nextRoundAvailable =
+      roundCompleted && currentRoundIndex + 1 < rounds.length;
+    const fb = currentRoundDoc?.feedback;
+    const roundFeedback =
+      roundCompleted && fb
+        ? {
+            score: typeof fb.score === "number" ? fb.score : null,
+            strengths: Array.isArray(fb.strengths) ? fb.strengths : [],
+            weaknesses: Array.isArray(fb.weaknesses) ? fb.weaknesses : [],
+            summary: fb.summary || "",
+          }
+        : null;
+    const report =
+      session.status === "completed" ? session.finalReport || null : null;
+
+    if (
+      !effectiveCurrentQuestion &&
+      Number(currentQuestionIndex) > 0 &&
+      session.status === "in_progress"
+    ) {
+      console.warn("[interview-status] anomaly: in_progress, question index > 0, but no effective question", {
+        sessionTail: String(sessionId).slice(-8),
+        currentQuestionIndex,
+        rawRootLen: typeof session.currentQuestion === "string" ? session.currentQuestion.length : 0,
+        slotLen: typeof slotQuestion === "string" ? slotQuestion.length : 0,
+        roundIndex: currentRoundIndex,
+      });
+    }
+    if (process.env.DEBUG_INTERVIEW_STATUS === "1") {
+      console.info("[interview-status] trace", {
+        sessionTail: String(sessionId).slice(-8),
+        currentQuestionIndex,
+        effectiveLen: effectiveCurrentQuestion ? effectiveCurrentQuestion.length : 0,
+        roundCompleted,
+        status: session.status,
+      });
+    }
+
+    const isProcessing = await isInterviewAnswerProcessing(sessionId);
+
+    return res.json({
+      status: session.status,
+      currentRound: session.currentRound,
+      currentQuestion: effectiveCurrentQuestion,
+      currentQuestionIndex: session.currentQuestionIndex,
+      lastScore: prevQuestion?.score ?? null,
+      lastFeedback: prevQuestion?.feedback ?? null,
+      roundStatus: currentRoundDoc?.status ?? session.roundStatus ?? null,
+      interviewStatus: session.status,
+      roundType: roundType ?? null,
+      isProcessing,
+      tips: selectedTips,
+      totalRounds: session.totalRounds || 0,
+      roundCompleted,
+      nextRoundAvailable,
+      roundFeedback,
+      report,
+    });
+  } catch (error) {
+    console.error("❌ Error fetching interview status:", error?.message || error);
+    return res.status(500).json({ error: "Failed to fetch interview status" });
   }
 });
 
@@ -453,21 +373,21 @@ router.post("/move-to-next-round", async (req, res) => {
     }
 
     const currentRoundNumber = Number(session.currentRound) || 1;
-    const currentIndex = Math.max(0, Math.min(rounds.length - 1, currentRoundNumber - 1));
-    const currentRound = rounds[currentIndex];
+    const currentRoundIndex = Math.max(0, Math.min(rounds.length - 1, currentRoundNumber - 1));
+    const currentRound = rounds[currentRoundIndex];
     if (!currentRound || currentRound.status !== "COMPLETED") {
       return res.status(400).json({
         error: "Current round is not completed. Cannot move to next round.",
       });
     }
 
-    const nextIndex = currentIndex + 1;
-    if (nextIndex >= rounds.length) {
+    const nextRoundIndex = currentRoundIndex + 1;
+    if (nextRoundIndex >= rounds.length) {
       return res.status(400).json({ error: "No further rounds available" });
     }
 
-    session.currentRound = nextIndex + 1;
-    session.currentRoundIndex = nextIndex;
+    session.currentRound = nextRoundIndex + 1;
+    session.currentRoundIndex = nextRoundIndex;
     session.currentQuestionIndex = 0;
     session.roundStatus = "IN_PROGRESS";
     session.interviewStatus = "IN_PROGRESS";
