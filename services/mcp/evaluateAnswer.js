@@ -1,23 +1,19 @@
-import cosineSimilarity from "compute-cosine-similarity";
+import { getEmbedding, cosineSimilarity } from "../../utils/embedding.js";
 import { callLLM } from "../llmClient.js";
 import { parseJSONResponse } from "../../utils/parseJSONResponse.js";
 
 const TOOL_EVAL_MODEL = process.env.GROQ_TOOL_MODEL || "llama-3.1-8b-instant";
+
+const safeCosine = (a, b) => {
+  const v = cosineSimilarity(a, b);
+  return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;
+};
 
 /**
  * Utils
  */
 const toSafeString = (value, fallback = "") =>
   typeof value === "string" && value.trim() ? value.trim() : fallback;
-
-const tokenize = (text) =>
-  toSafeString(text)
-    .toLowerCase()
-    .replace(/[^\w\s]/g, " ")
-    .split(/\s+/)
-    .filter((t) => t.length >= 3);
-
-const unique = (arr) => [...new Set(arr)];
 
 const extractReasoningHighlight = (reasoning) => {
   const text = toSafeString(reasoning);
@@ -116,15 +112,6 @@ const isCodeAnswer = (text) => {
 };
 
 /**
- * Build vector
- */
-const buildVector = (tokens, vocab) => {
-  const map = new Map();
-  tokens.forEach((t) => map.set(t, (map.get(t) || 0) + 1));
-  return vocab.map((word) => map.get(word) || 0);
-};
-
-/**
  * Structure (STAR)
  */
 const detectStructure = (text) => {
@@ -139,20 +126,40 @@ const detectStructure = (text) => {
 };
 
 /**
- * Clarity
+ * Clarity (penalize extremely short / effort-free answers)
  */
 const clarityScore = (text) => {
-  const sentences = text.split(/[.!?]+/).filter(Boolean);
-  const words = text.split(/\s+/).filter(Boolean);
+  const trimmed = String(text || "").trim();
+  if (!trimmed) return 0;
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length <= 1) return 0.05;
+  if (words.length <= 3) return 0.15;
+  if (words.length <= 8) return 0.28;
 
-  if (!sentences.length) return 0;
+  const sentences = text.split(/[.!?]+/).filter(Boolean);
+  if (!sentences.length) return 0.2;
 
   const avg = words.length / sentences.length;
 
   if (avg >= 12 && avg <= 20) return 1;
-  if (avg >= 8 && avg <= 25) return 0.7;
-  return 0.4;
+  if (avg >= 8 && avg <= 25) return 0.65;
+  return 0.35;
 };
+
+/** Applied to combined rule score — vague one-liners should not land in the 5–6 band. */
+const effortMultiplier = (wordCount) => {
+  if (wordCount <= 0) return 0.28;
+  if (wordCount <= 1) return 0.35;
+  if (wordCount <= 3) return 0.45;
+  if (wordCount <= 8) return 0.62;
+  if (wordCount <= 15) return 0.78;
+  if (wordCount <= 25) return 0.88;
+  return 1;
+};
+
+/** Map cosine similarity to 0–1 with a mid threshold (stricter than binary 0.7 hit). */
+const similarityToPointScore = (sim) =>
+  Math.max(0, Math.min(1, (sim - 0.4) / 0.38));
 
 /**
  * MAIN FUNCTION
@@ -162,25 +169,41 @@ export const evaluateAnswer = async ({
   question,
   companyContext,
   llmReasoning,
+  expectedPoints = [],
 }) => {
   const safeAnswer = toSafeString(answer);
   const safeQuestion = toSafeString(question);
 
   const type = detectQuestionType(safeQuestion);
 
-  const answerTokens = tokenize(safeAnswer);
-  const questionTokens = tokenize(safeQuestion);
-  const reasoningTokens = tokenize(llmReasoning);
+  const [userEmbedding, questionEmbedding] = await Promise.all([
+    getEmbedding(safeAnswer),
+    safeQuestion ? getEmbedding(safeQuestion) : Promise.resolve(null),
+  ]);
+  let questionRelevance = questionEmbedding
+    ? Math.max(0, Math.min(1, safeCosine(questionEmbedding, userEmbedding)))
+    : 0.3;
 
-  /**
-   * Semantic similarity
-   */
-  const vocab = unique([...answerTokens, ...questionTokens, ...reasoningTokens]);
+  const rubricPoints = Array.isArray(expectedPoints) ? expectedPoints : [];
+  let rubricCoverage = 0;
+  let rubricSimCount = 0;
 
-  const answerVec = buildVector(answerTokens, vocab);
-  const refVec = buildVector([...questionTokens, ...reasoningTokens], vocab);
+  for (let point of rubricPoints) {
+    if (!point.embedding || point.embedding.length === 0) continue;
+    const sim = safeCosine(point.embedding, userEmbedding);
+    rubricCoverage += similarityToPointScore(sim);
+    rubricSimCount += 1;
+  }
 
-  let semantic = cosineSimilarity(answerVec, refVec) || 0;
+  const rubricMean =
+    rubricSimCount > 0 ? rubricCoverage / rubricSimCount : null;
+
+  /** With rubric: blend rubric match + question relevance so off-topic fillers don't score high. */
+  let semantic =
+    rubricMean != null
+      ? Math.max(0, Math.min(1, 0.62 * rubricMean + 0.38 * questionRelevance))
+      : questionRelevance;
+
   semantic = Math.max(0, Math.min(1, semantic));
 
   /**
@@ -232,14 +255,16 @@ export const evaluateAnswer = async ({
     );
     flags.hasComponents = hasComponents;
 
-    let depthScore = wordCount > 120 ? 1 : 0.6;
-    flags.goodDepth = wordCount > 120;
+    const depthScore = Math.min(1, wordCount / 95);
+    const depthCapped =
+      wordCount < 22 ? Math.min(depthScore, 0.22) : depthScore;
+    flags.goodDepth = wordCount >= 95;
 
     score =
-      semantic * 0.3 +
-      clarity * 0.2 +
-      depthScore * 0.3 +
-      (hasComponents ? 1 : 0.5) * 0.2;
+      semantic * 0.38 +
+      clarity * 0.22 +
+      depthCapped * 0.28 +
+      (hasComponents ? 1 : 0.28) * 0.12;
 
   /**
    * =========================
@@ -248,8 +273,8 @@ export const evaluateAnswer = async ({
    */
   } else if (type === "behavioral") {
     score =
-      structure * 0.4 +
-      clarity * 0.3 +
+      structure * 0.38 +
+      clarity * 0.32 +
       semantic * 0.3;
 
   /**
@@ -258,8 +283,10 @@ export const evaluateAnswer = async ({
    * =========================
    */
   } else {
-    score = semantic * 0.5 + clarity * 0.5;
+    score = semantic * 0.55 + clarity * 0.45;
   }
+
+  score *= effortMultiplier(wordCount);
 
   const ruleBasedFinalScore = Math.max(1, Math.min(10, Math.round(score * 10)));
   const ruleBasedFeedback = buildHumanFeedback({
@@ -284,7 +311,7 @@ export const evaluateAnswer = async ({
         {
           role: "system",
           content:
-            "You are a strict but fair technical interviewer. Evaluate answers like a real interviewer.",
+            "You are a strict technical interviewer. Use verdict \"incorrect\" when the answer is empty, nonsense, clearly off-topic, or far too short to address the question. Reserve \"correct\" for answers that genuinely address what was asked.",
         },
         {
           role: "user",
@@ -320,8 +347,11 @@ Return STRICT JSON:
     // Keep evaluator resilient: rule-based path is always available.
   }
 
-  if (llmVerdict === "correct") adjustedScore += 0.1;
-  if (llmVerdict === "incorrect") adjustedScore -= 0.2;
+  if (llmVerdict === "correct") adjustedScore += 0.08;
+  if (llmVerdict === "incorrect") adjustedScore -= 0.32;
+  if (llmVerdict === "partial" && wordCount <= 10 && semantic < 0.42) {
+    adjustedScore -= 0.1;
+  }
 
   const finalScore = Math.max(1, Math.min(10, Math.round(adjustedScore * 10)));
   const feedbackParts = [ruleBasedFeedback];

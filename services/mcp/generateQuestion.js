@@ -44,9 +44,35 @@ const buildSeenQuestionsKey = (userId) => {
   return `user:${normalizedUserId}:seen_questions`;
 };
 
+const normalizeExpectedPointsStrings = (value) => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((p) => toSafeString(typeof p === "string" ? p : p?.text))
+    .filter(Boolean);
+};
+
+const normalizePoolItem = (item) => {
+  if (item && typeof item === "object" && !Array.isArray(item)) {
+    const question = toSafeString(item.question);
+    if (!question) return null;
+    return {
+      question,
+      expectedPoints: normalizeExpectedPointsStrings(item.expectedPoints),
+    };
+  }
+  const question = toSafeString(item);
+  if (!question) return null;
+  return { question, expectedPoints: [] };
+};
+
 const normalizeQuestionPool = (value) => {
   if (!Array.isArray(value)) return [];
-  return value.map((item) => toSafeString(item)).filter(Boolean);
+  return value.map(normalizePoolItem).filter(Boolean);
+};
+
+const parseLLMQuestionEntries = (raw) => {
+  if (!Array.isArray(raw)) return [];
+  return raw.map(normalizePoolItem).filter(Boolean);
 };
 
 const mergeUniqueQuestions = (...questionLists) => {
@@ -56,12 +82,12 @@ const mergeUniqueQuestions = (...questionLists) => {
   questionLists
     .flatMap((list) => (Array.isArray(list) ? list : []))
     .forEach((item) => {
-      const safe = toSafeString(item);
-      if (!safe) return;
-      const normalized = safe.toLowerCase();
-      if (seen.has(normalized)) return;
-      seen.add(normalized);
-      merged.push(safe);
+      const entry = normalizePoolItem(item);
+      if (!entry) return;
+      const key = entry.question.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      merged.push(entry);
     });
 
   return merged;
@@ -122,19 +148,25 @@ Rules:
 8) Respect target difficulty and follow-up mode.
 9) Avoid repeating the same question or asking something unrelated.
 10) Return exactly ${requestedCount} questions.
+11) For each question, include 3–5 concise expectedPoints: key ideas or rubric bullets a strong answer should cover (not the answer itself).
 
 Return JSON:
 {
-  "questions": ["string", "string", "..."]
+  "questions": [
+    {
+      "question": "...",
+      "expectedPoints": ["point1", "point2", "point3"]
+    }
+  ]
 }`,
     },
   ];
 };
 
 const getRandomItem = (array) => {
-  if (!Array.isArray(array) || array.length === 0) return "";
+  if (!Array.isArray(array) || array.length === 0) return null;
   const randomIndex = Math.floor(Math.random() * array.length);
-  return array[randomIndex] || "";
+  return array[randomIndex] ?? null;
 };
 
 const buildBasicFallbackQuestion = ({ roundType, roundAbout, difficulty }) => {
@@ -142,15 +174,16 @@ const buildBasicFallbackQuestion = ({ roundType, roundAbout, difficulty }) => {
   const safeTopic = toSafeString(roundAbout, "this topic");
   const level = normalizeDifficulty(difficulty);
 
+  let question;
   if (safeRoundType.includes("hr") || safeRoundType.includes("behavior")) {
-    return `Can you share a situation where you handled a challenge related to ${safeTopic}, and what result you achieved?`;
+    question = `Can you share a situation where you handled a challenge related to ${safeTopic}, and what result you achieved?`;
+  } else if (safeRoundType.includes("system")) {
+    question = `How would you design a ${safeTopic} system at ${level} difficulty, and what trade-offs would you consider first?`;
+  } else {
+    question = `Can you walk me through your approach to solving a ${level} ${safeTopic} problem, including edge cases?`;
   }
 
-  if (safeRoundType.includes("system")) {
-    return `How would you design a ${safeTopic} system at ${level} difficulty, and what trade-offs would you consider first?`;
-  }
-
-  return `Can you walk me through your approach to solving a ${level} ${safeTopic} problem, including edge cases?`;
+  return { question, expectedPoints: [] };
 };
 
 const getAdaptiveFollowUp = ({ hasPreviousAnswer, previousScore, difficulty }) => {
@@ -193,7 +226,8 @@ const getAdaptiveFollowUp = ({ hasPreviousAnswer, previousScore, difficulty }) =
 
 /**
  * MCP tool: generateQuestion
- * Generates one interview question for the given round context.
+ * Generates one interview question (and expectedPoints rubric) for the given round context.
+ * @returns {{ question: string, expectedPoints: string[] }}
  */
 export const generateQuestion = async ({
   userId,
@@ -238,8 +272,10 @@ export const generateQuestion = async ({
     const seenQuestionsKey = buildSeenQuestionsKey(userId);
 
     let questionPool = normalizeQuestionPool(await getJSON(cacheKey));
-    const seenQuestions = normalizeQuestionPool(await getSetMembers(seenQuestionsKey));
-    let seenLookup = new Set(seenQuestions.map((question) => question.toLowerCase()));
+    const seenQuestionTexts = await getSetMembers(seenQuestionsKey);
+    const seenLookup = new Set(
+      seenQuestionTexts.map((q) => toSafeString(q).toLowerCase()).filter(Boolean)
+    );
     if (questionPool.length > 0) {
       console.log("[generateQuestion] Cache hit: using Redis pool");
     } else {
@@ -270,7 +306,7 @@ export const generateQuestion = async ({
         });
         const llmText = await callLLM(messages);
         const parsed = parseJSONResponse(llmText);
-        const generatedQuestions = normalizeQuestionPool(parsed?.questions);
+        const generatedQuestions = parseLLMQuestionEntries(parsed?.questions);
         console.log(
           `[generateQuestion] LLM returned ${generatedQuestions.length} questions`
         );
@@ -307,7 +343,7 @@ export const generateQuestion = async ({
     }
 
     let availableQuestions = questionPool.filter(
-      (question) => !seenLookup.has(question.toLowerCase())
+      (item) => !seenLookup.has(item.question.toLowerCase())
     );
     console.log(
       `[generateQuestion] Available unseen questions: ${availableQuestions.length}`
@@ -317,28 +353,39 @@ export const generateQuestion = async ({
       console.log("[generateQuestion] No unseen questions left, refilling pool...");
       questionPool = await refillQuestionPool(questionPool, MIN_POOL_SIZE);
       availableQuestions = questionPool.filter(
-        (question) => !seenLookup.has(question.toLowerCase())
+        (item) => !seenLookup.has(item.question.toLowerCase())
       );
       console.log(
         `[generateQuestion] Available unseen questions after refill: ${availableQuestions.length}`
       );
     }
 
-    const selectedQuestion = toSafeString(getRandomItem(availableQuestions));
-    const question =
-      selectedQuestion ||
-      buildBasicFallbackQuestion({
-        roundType,
-        roundAbout,
-        difficulty,
-      });
+    const picked = getRandomItem(availableQuestions);
+    const selectedQuestion =
+      picked && picked.question
+        ? {
+            question: picked.question,
+            expectedPoints: Array.isArray(picked.expectedPoints)
+              ? picked.expectedPoints
+              : [],
+          }
+        : buildBasicFallbackQuestion({
+            roundType,
+            roundAbout,
+            difficulty,
+          });
 
-    if (selectedQuestion) {
+    if (picked && picked.question) {
       console.log("[generateQuestion] Recording selected question in seen set");
-      await addToSet(seenQuestionsKey, selectedQuestion, USER_SEEN_TTL_SECONDS);
+      await addToSet(seenQuestionsKey, picked.question, USER_SEEN_TTL_SECONDS);
     }
 
-    return question;
+    return {
+      question: selectedQuestion.question,
+      expectedPoints: Array.isArray(selectedQuestion.expectedPoints)
+        ? selectedQuestion.expectedPoints
+        : [],
+    };
   } catch (error) {
     console.warn("[generateQuestion] Unexpected failure, returning basic fallback question:", error?.message || error);
     return buildBasicFallbackQuestion({

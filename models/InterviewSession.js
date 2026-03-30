@@ -16,12 +16,24 @@ const historyItemSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const expectedPointSchema = new mongoose.Schema(
+  {
+    text: { type: String, trim: true },
+    embedding: { type: [Number] },
+  },
+  { _id: false }
+);
+
 const roundQuestionSchema = new mongoose.Schema(
   {
     question: { type: String, trim: true },
     answer: { type: String, trim: true },
     score: { type: Number },
     feedback: { type: String, trim: true },
+    expectedPoints: {
+      type: [expectedPointSchema],
+      default: [],
+    },
   },
   { _id: false }
 );

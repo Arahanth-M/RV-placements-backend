@@ -9,6 +9,11 @@ const updateOptions = {
   runValidators: true,
 };
 
+const expectedPointsFromStrings = (points) =>
+  (Array.isArray(points) ? points : [])
+    .filter((text) => typeof text === "string" && text.trim())
+    .map((text) => ({ text: text.trim(), embedding: [] }));
+
 export const createSession = async (userId, companyId) => {
   return InterviewSession.create({
     userId,
@@ -74,7 +79,8 @@ export const startRound = async (sessionId) => {
     )
     .lean();
   const companyContext = await getCompanyContext(companyData || {});
-  const question = await generateQuestion({
+  const { question, expectedPoints } = await generateQuestion({
+    userId: String(session.userId || ""),
     companyContext,
     roundType: currentRound.type,
     roundAbout: currentRound.about,
@@ -93,6 +99,7 @@ export const startRound = async (sessionId) => {
       answer: "",
       score: null,
       feedback: "",
+      expectedPoints: expectedPointsFromStrings(expectedPoints),
     },
   ];
 

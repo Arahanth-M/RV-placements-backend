@@ -16,6 +16,7 @@ import {
 import { generateFinalReport } from "../services/interviewEngine.js";
 import { callLLM } from "../services/llmClient.js";
 import { getCompanyContext } from "../services/mcp/getCompanyContext.js";
+import { getEmbedding } from "../utils/embedding.js";
 
 await connectDB(config.MONGO_URI);
 await connectRedis().catch(() => {});
@@ -108,6 +109,21 @@ async function processEvaluateAnswerJob(sessionId, answer) {
     .lean();
   const companyContext = await getCompanyContext(companyData || {});
 
+  const questionSlot = currentRound.questions[currentQuestionIndex];
+  if (questionSlot && Array.isArray(questionSlot.expectedPoints)) {
+    let didGenerateEmbeddings = false;
+    for (let point of questionSlot.expectedPoints) {
+      if (!point.embedding || point.embedding.length === 0) {
+        point.embedding = await getEmbedding(point.text);
+        didGenerateEmbeddings = true;
+      }
+    }
+    if (didGenerateEmbeddings) {
+      session.markModified("rounds");
+      await session.save();
+    }
+  }
+
   // 3) Call LLM to get reasoning ONLY (no scoring / no flow decisions)
   const reasoningMessages = [
     {
@@ -138,6 +154,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
   }
 
   // 4) MCP evaluateAnswer
+  const questionObj = currentRound.questions[currentQuestionIndex];
   let evaluation;
   try {
     evaluation = await evaluateAnswer({
@@ -145,6 +162,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       question: currentQuestion,
       companyContext,
       llmReasoning,
+      expectedPoints: questionObj?.expectedPoints,
     });
   } catch (error) {
     console.warn("⚠️ evaluateAnswer failed, using fallback evaluation:", error?.message || error);
@@ -167,6 +185,9 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       answer: "",
       score: null,
       feedback: "",
+      expectedPoints: Array.isArray(currentQuestionEntry?.expectedPoints)
+        ? currentQuestionEntry.expectedPoints
+        : [],
     };
   }
   currentRound.questions[currentQuestionIndex].answer = trimmedAnswer;
@@ -193,7 +214,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
         }))
       : [];
 
-    let nextQuestion = await generateQuestion({
+    let { question, expectedPoints } = await generateQuestion({
       userId: String(session.userId || ""),
       companyContext,
       roundType: currentRound.type,
@@ -205,25 +226,35 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       previousScore: evaluation.score,
       roundHistory,
     });
-    if (!nextQuestion || !String(nextQuestion).trim()) {
-      nextQuestion = `Let's go deeper — how would you refine or extend your approach for this ${currentRound.type || "technical"} question?`;
+    if (!question || !String(question).trim()) {
+      question = `Let's go deeper — how would you refine or extend your approach for this ${currentRound.type || "technical"} question?`;
+      expectedPoints = [];
     }
+
+    const nextExpectedPointsStored = (Array.isArray(expectedPoints) ? expectedPoints : []).map(
+      (p) => ({
+        text: p,
+        embedding: [],
+      })
+    );
 
     if (!currentRound.questions[nextQuestionIndex]) {
       currentRound.questions[nextQuestionIndex] = {
-        question: nextQuestion,
+        question,
         answer: "",
         score: null,
         feedback: "",
+        expectedPoints: nextExpectedPointsStored,
       };
     } else {
-      currentRound.questions[nextQuestionIndex].question = nextQuestion;
+      currentRound.questions[nextQuestionIndex].question = question;
       currentRound.questions[nextQuestionIndex].answer = "";
       currentRound.questions[nextQuestionIndex].score = null;
       currentRound.questions[nextQuestionIndex].feedback = "";
+      currentRound.questions[nextQuestionIndex].expectedPoints = nextExpectedPointsStored;
     }
 
-    session.currentQuestion = nextQuestion;
+    session.currentQuestion = question;
     syncStoredRoundIndexFromCurrentRound(session);
     session.markModified("rounds");
     session.markModified("currentQuestion");
@@ -236,13 +267,13 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
     console.info("[interviewWorker] saved next question", {
       sessionTail: String(sessionId).slice(-8),
       currentQuestionIndex: session.currentQuestionIndex,
-      nextQuestionLen: String(nextQuestion || "").length,
+      nextQuestionLen: String(question || "").length,
     });
 
     return {
       httpStatus: 200,
       body: {
-        question: nextQuestion,
+        question,
         feedback: evaluation.feedback,
         score: evaluation.score,
         status: "in_progress",
