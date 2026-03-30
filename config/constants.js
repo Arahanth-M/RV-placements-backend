@@ -102,8 +102,12 @@ export const messages = {
   },
 };
 
-// Admin Configuration
-export const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "arahanthm.cs22@rvce.edu.in";
+// Login allowlist (temporary): only this Google account may sign in as student or admin.
+export const ALLOWED_LOGIN_EMAIL =
+  process.env.ALLOWED_LOGIN_EMAIL || "arahanthm.cs22@rvce.edu.in";
+
+// Admin Configuration (defaults to same as allowlist when unset)
+export const ADMIN_EMAIL = process.env.ADMIN_EMAIL || ALLOWED_LOGIN_EMAIL;
 
 // Default values
 export const defaults = {

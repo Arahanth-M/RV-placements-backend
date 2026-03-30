@@ -145,6 +145,10 @@ const interviewSessionSchema = new mongoose.Schema(
       strengths: [{ type: String }],
       weaknesses: [{ type: String }],
       improvementPlan: [{ type: String }],
+      overallStrength: { type: String, trim: true },
+      overallWeakness: { type: String, trim: true },
+      summaryFeedback: { type: String, trim: true },
+      companyRoadmap: [{ type: String, trim: true }],
     },
   },
   { timestamps: true }

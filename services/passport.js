@@ -2,7 +2,7 @@ import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import keys from "../config/keys.js";
 import User from "../models/User.js";
-import { urls } from "../config/constants.js";
+import { urls, ALLOWED_LOGIN_EMAIL } from "../config/constants.js";
 import { sendWelcomeEmailWebhook } from "./webhookService.js";
 
 passport.use(
@@ -17,12 +17,10 @@ passport.use(
     async (accessToken, refreshToken, profile, done) => {
       try {
         const primaryEmail = profile?.emails?.[0]?.value || "";
-        // Enforce rvce.edu.in email domain
-        const allowedDomain = "rvce.edu.in";
-        const emailDomain = primaryEmail.split("@")[1] || "";
-        if (emailDomain.toLowerCase() !== allowedDomain) {
-          // Send a specific reason so the client can show a friendly message
-          return done(null, false, { reason: "domain" });
+        const normalizedEmail = primaryEmail.trim().toLowerCase();
+        const allowOnly = String(ALLOWED_LOGIN_EMAIL || "").trim().toLowerCase();
+        if (!normalizedEmail || normalizedEmail !== allowOnly) {
+          return done(null, false, { reason: "not_allowed" });
         }
 
         const existingUser = await User.findOne({ userId: profile.id });

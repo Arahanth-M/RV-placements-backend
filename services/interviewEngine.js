@@ -1,5 +1,6 @@
 import { callLLM } from "./llmClient.js";
 import { parseJSONResponse } from "../utils/parseJSONResponse.js";
+import Company from "../models/Company.js";
 import { getCompanyContext } from "./mcp/getCompanyContext.js";
 import { getNumberOfRounds } from "./mcp/getNumberOfRounds.js";
 import { generateFinalFeedback } from "./mcp/generateFinalFeedback.js";
@@ -280,6 +281,10 @@ export const generateFinalReport = async (session) => {
       strengths: [],
       weaknesses: [],
       improvementPlan: [],
+      overallStrength: "",
+      overallWeakness: "",
+      summaryFeedback: "",
+      companyRoadmap: [],
     };
   }
 
@@ -289,15 +294,42 @@ export const generateFinalReport = async (session) => {
       .filter((score) => Number.isFinite(score))
       .reduce((sum, score, _, arr) => sum + score / arr.length, 0) || 0;
 
+  let companyContext = {};
+  try {
+    const cid = session?.companyId;
+    if (cid) {
+      const companyData = await Company.findById(cid)
+        .select(
+          "name onlineQuestions interviewQuestions interviewProcess Must_Do_Topics interview_questions prev_coding_ques"
+        )
+        .lean();
+      companyContext = await getCompanyContext(companyData || {});
+    }
+  } catch (err) {
+    console.warn("[generateFinalReport] company context failed:", err?.message || err);
+  }
+
   const finalFeedback = await generateFinalFeedback({
     transcript: allRoundQuestions,
+    companyContext,
   });
+
+  const strengths = normalizeStringArray(finalFeedback?.strengths);
+  const weaknesses = normalizeStringArray(finalFeedback?.weaknesses);
 
   return {
     overallScore: Math.round(toBoundedScore(avgScore) * 10) / 10,
-    strengths: normalizeStringArray(finalFeedback?.strengths),
-    weaknesses: normalizeStringArray(finalFeedback?.weaknesses),
+    strengths,
+    weaknesses,
     improvementPlan: normalizeStringArray(finalFeedback?.improvementPlan),
+    overallStrength: toSafeString(
+      finalFeedback?.overallStrength || finalFeedback?.strongestArea || strengths[0]
+    ),
+    overallWeakness: toSafeString(
+      finalFeedback?.overallWeakness || finalFeedback?.weakestArea || weaknesses[0]
+    ),
+    summaryFeedback: toSafeString(finalFeedback?.summaryFeedback),
+    companyRoadmap: normalizeStringArray(finalFeedback?.companyRoadmap),
   };
 };
 

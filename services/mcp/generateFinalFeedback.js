@@ -31,7 +31,7 @@ const safeString = (value) => (typeof value === "string" ? value.trim() : "");
  * MCP tool: generateFinalFeedback
  * Generates final strengths/weaknesses/improvement plan from interview transcript.
  */
-export const generateFinalFeedback = async ({ transcript }) => {
+export const generateFinalFeedback = async ({ transcript, companyContext = {} }) => {
   const safeTranscript = Array.isArray(transcript) ? transcript : [];
 
   if (safeTranscript.length === 0) {
@@ -43,6 +43,10 @@ export const generateFinalFeedback = async ({ transcript }) => {
       verdict: "needs_improvement",
       strongestArea: "",
       weakestArea: "",
+      overallStrength: "",
+      overallWeakness: "",
+      summaryFeedback: "",
+      companyRoadmap: [],
     };
   }
 
@@ -68,6 +72,16 @@ export const generateFinalFeedback = async ({ transcript }) => {
 
 Average score: ${avgScore}/10
 
+Company context (use for company-specific roadmap; do not invent roles or guarantees):
+${JSON.stringify({
+  name: companyContext?.name || companyContext?.companyName,
+  rounds: companyContext?.rounds || [],
+  mustDoTopics: companyContext?.mustDoTopics || [],
+  interviewQuestions: (companyContext?.interviewQuestions || []).slice?.(0, 5),
+  onlineQuestions: (companyContext?.onlineQuestions || []).slice?.(0, 5),
+  prevCodingQuestions: (companyContext?.prevCodingQuestions || []).slice?.(0, 5),
+})}
+
 Interview transcript JSON:
 ${JSON.stringify(safeTranscript)}
 
@@ -81,6 +95,10 @@ Output MUST include:
 5) verdict ("not_ready" | "needs_improvement" | "ready")
 6) strongestArea (one short phrase)
 7) weakestArea (one short phrase)
+8) overallStrength — ONE clear sentence: headline strength for this candidate
+9) overallWeakness — ONE clear sentence: headline gap or risk area
+10) summaryFeedback — 2–4 sentences of cohesive narrative feedback (second person, professional)
+11) companyRoadmap — array of 5–7 short actionable strings: concrete prep steps for interviewing at THIS company (topics, skills, practice focus). Tie to company context when possible; if context is thin, give realistic generic prep for their round types.
 
 Guidelines:
 - Base analysis on scores, answers, and feedback patterns
@@ -88,6 +106,7 @@ Guidelines:
 - Avoid generic advice
 - Be concise but insightful
 - Improvement plan must be practical and executable
+- Roadmap must be specific enough to act on this week
 
 Scoring guidance:
 - avgScore < 6 → not_ready
@@ -102,7 +121,11 @@ Return STRICT JSON:
   "patterns": ["string"],
   "verdict": "string",
   "strongestArea": "string",
-  "weakestArea": "string"
+  "weakestArea": "string",
+  "overallStrength": "string",
+  "overallWeakness": "string",
+  "summaryFeedback": "string",
+  "companyRoadmap": ["string"]
 }`,
     },
   ];
@@ -133,17 +156,39 @@ Return STRICT JSON:
           : "ready",
       strongestArea: "",
       weakestArea: "",
+      overallStrength: "",
+      overallWeakness: "",
+      summaryFeedback: "",
+      companyRoadmap: [],
     };
   }
 
+  const strengths = normalizeStringArray(parsed?.strengths).slice(0, 4);
+  const weaknesses = normalizeStringArray(parsed?.weaknesses).slice(0, 4);
+  const companyRoadmap = normalizeStringArray(parsed?.companyRoadmap).slice(0, 8);
+  const overallStrength =
+    safeString(parsed?.overallStrength) ||
+    safeString(parsed?.strongestArea) ||
+    strengths[0] ||
+    "";
+  const overallWeakness =
+    safeString(parsed?.overallWeakness) ||
+    safeString(parsed?.weakestArea) ||
+    weaknesses[0] ||
+    "";
+
   return {
-    strengths: normalizeStringArray(parsed?.strengths).slice(0, 4),
-    weaknesses: normalizeStringArray(parsed?.weaknesses).slice(0, 4),
+    strengths,
+    weaknesses,
     improvementPlan: normalizeStringArray(parsed?.improvementPlan).slice(0, 4),
     patterns: normalizeStringArray(parsed?.patterns).slice(0, 4),
     verdict: safeString(parsed?.verdict) || "needs_improvement",
     strongestArea: safeString(parsed?.strongestArea),
     weakestArea: safeString(parsed?.weakestArea),
+    overallStrength,
+    overallWeakness,
+    summaryFeedback: safeString(parsed?.summaryFeedback),
+    companyRoadmap,
   };
 };
 
