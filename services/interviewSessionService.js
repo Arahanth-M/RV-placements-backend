@@ -222,6 +222,7 @@ export const generateRoundFeedback = async (sessionId, roundNumber) => {
 /** Average scores by round type + one progress point per session (chronological) for analytics UI. */
 export const buildUserInterviewAnalytics = async (userId) => {
   const sessions = await InterviewSession.find({ userId })
+    .populate("companyId", "name")
     .sort({ updatedAt: 1 })
     .lean();
 
@@ -230,6 +231,7 @@ export const buildUserInterviewAnalytics = async (userId) => {
 
   for (const session of sessions) {
     const rounds = Array.isArray(session.rounds) ? session.rounds : [];
+    const companyName = session.companyId?.name || "Unknown Company";
 
     for (const round of rounds) {
       const type = round.type || "General";
@@ -271,7 +273,10 @@ export const buildUserInterviewAnalytics = async (userId) => {
     }
 
     if (sessionScore != null) {
-      progress.push({ score: Math.round(sessionScore * 10) / 10 });
+      progress.push({ 
+        score: Math.round(sessionScore * 10) / 10,
+        companyName 
+      });
     }
   }
 

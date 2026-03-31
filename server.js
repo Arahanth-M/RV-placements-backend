@@ -3,14 +3,23 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
 import passport from "passport";
+import helmet from "helmet";
 import { connectDB } from "./config/db.js";
 import { connectRedis } from "./src/utils/redisClient.js";
 import { config, routes, messages } from "./config/constants.js";
+import {
+  globalLimiter,
+  authLimiter,
+  adminLimiter,
+  submissionLimiter,
+  aiStartLimiter,
+  aiAnswerLimiter,
+} from "./middleware/rateLimiter.js";
+
 import companyRouter from "./routes/companyRoutes.js";
 import experienceRouter from "./routes/experienceRoutes.js";
 import authRouter from "./routes/authRoutes.js";
 import submissionRoutes from "./routes/submissionsRoutes.js";
-// PAYMENT GATEWAY INTEGRATION - COMMENTED OUT
 import paymentRouter from "./routes/payment.js";
 import leetcodeRouter from "./routes/leetcodeRoutes.js";
 import adminRouter from "./routes/adminRoutes.js";
@@ -25,50 +34,98 @@ import interviewRouter from "./routes/interviewRoutes.js";
 
 import "./services/passport.js";
 
-
-
-
 dotenv.config();
 const app = express();
 
-
+// Trust proxy for rate limiting behind load balancers/proxies
 app.set("trust proxy", 1);
+
 const allowedOrigins = config.CORS_ORIGINS;
 
+/**
+ * 1. CORS Configuration
+ * Applied early to ensure all cross-origin requests are handled first.
+ */
 app.use(
   cors({
     origin: function (origin, callback) {
-      // Allow requests with no origin (like mobile apps or curl requests)
-      if (!origin) {
-        return callback(null, true);
-      }
-      
-      // Check if origin is in allowed list
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-      
-      // Log the rejected origin for debugging
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
       console.log('🚫 CORS rejected origin:', origin);
-      console.log('✅ Allowed origins:', allowedOrigins);
-      
       callback(new Error(messages.ERROR.CORS_ERROR));
     },
     credentials: true,
   })
 );
 
+/**
+ * 2. Security Headers (Helmet)
+ * Configured with a custom Content Security Policy (CSP) to allow external integrations 
+ * like Voiceflow and Google profile images while maintaining high security.
+ */
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: [
+          "'self'", 
+          "'unsafe-inline'", 
+          "https://cdn.voiceflow.com",
+          "https://*.voiceflow.com"
+        ],
+        connectSrc: [
+          "'self'", 
+          "https://general-runtime.voiceflow.com",
+          "https://*.voiceflow.com"
+        ],
+        imgSrc: [
+          "'self'", 
+          "data:", 
+          "https://*.googleusercontent.com",
+          "https://cdn.voiceflow.com",
+          "https://*.voiceflow.com"
+        ],
+        frameSrc: ["'self'", "https://*.voiceflow.com"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      },
+    },
+  })
+);
+
+/**
+ * 3. Rate Limiting
+ * Applied globally to prevent DoS, with route-specific overrides below.
+ */
+if (process.env.NODE_ENV !== "test") {
+  app.use(globalLimiter);
+}
+
 app.use(express.json());
 app.use(cookieParser());
-
 app.use(passport.initialize());
+
+/**
+ * 4. Route-Specific Rate Limiters
+ */
+if (process.env.NODE_ENV !== "test") {
+  app.use(routes.AUTH, authLimiter);
+  app.use(routes.ADMIN, adminLimiter);
+  app.use(routes.SUBMISSIONS, submissionLimiter);
+  app.use("/api/interviews/start-interview", aiStartLimiter);
+  app.use("/api/interviews/submit-answer", aiAnswerLimiter);
+}
+
+/**
+ * 5. Application Routes
+ */
 app.use(routes.AUTH, authRouter);
 app.use(routes.COMPANIES, companyRouter);
 app.use(routes.EXPERIENCES, experienceRouter);
 app.use(routes.SUBMISSIONS, submissionRoutes);
-// PAYMENT GATEWAY INTEGRATION - COMMENTED OUT
-// app.use(routes.PAYMENT, paymentRouter);
-app.use(routes.PAYMENT, paymentRouter); // Router exists but all routes are commented out
+app.use(routes.PAYMENT, paymentRouter);
 app.use(routes.LEETCODE, leetcodeRouter);
 app.use(routes.ADMIN, adminRouter);
 app.use(routes.EVENTS, eventRouter);
@@ -80,37 +137,32 @@ app.use(routes.PLACEMENT, placementRouter);
 app.use(routes.LEADERBOARD, leaderboardRouter);
 app.use(routes.INTERVIEW, interviewRouter);
 
-connectDB(config.MONGO_URI).then(async () => {
-  // Do not await Redis — if REDIS_URL is wrong or Redis is down, connect() can hang
-  // and block app.listen(), breaking OAuth and all routes. Cache uses fault-tolerant helpers.
-  connectRedis().catch(() => {});
-  app.listen(config.PORT, () =>
-    console.log(`🚀 Server running on ${config.BACKEND_URL}`)
-  );
-
-  const skipEmbeddedWorker =
-    process.env.NODE_ENV === "test" ||
-    process.env.DISABLE_EMBEDDED_INTERVIEW_WORKER === "1";
-
-  if (skipEmbeddedWorker) {
-    if (process.env.DISABLE_EMBEDDED_INTERVIEW_WORKER === "1") {
-      console.log(
-        "[interview] Embedded BullMQ worker disabled. Run `npm run worker:interview` (same REDIS_URL) or a dedicated worker container."
-      );
-    }
-    return;
-  }
-
-  try {
-    await import("./workers/interviewWorker.js");
-    console.log("[interview] BullMQ interview worker started in-process (same Node as API).");
-  } catch (err) {
-    console.error(
-      "[interview] Failed to start embedded interview worker — AI submit will queue jobs but they will not run:",
-      err?.message || err
+/**
+ * 6. Server Initialization
+ * Wrapped in NODE_ENV check to prevent port/connection conflicts during tests.
+ */
+if (process.env.NODE_ENV !== "test") {
+  connectDB(config.MONGO_URI).then(async () => {
+    connectRedis().catch(() => {});
+    app.listen(config.PORT, () =>
+      console.log(`🚀 Server running on ${config.BACKEND_URL}`)
     );
-  }
-});
 
-// Export app for testing
+    const skipEmbeddedWorker = process.env.DISABLE_EMBEDDED_INTERVIEW_WORKER === "1";
+
+    if (skipEmbeddedWorker) {
+      console.log("[interview] Embedded BullMQ worker disabled.");
+      return;
+    }
+
+    try {
+      await import("./workers/interviewWorker.js");
+      console.log("[interview] BullMQ interview worker started.");
+    } catch (err) {
+      console.error("[interview] Failed to start embedded worker:", err?.message || err);
+    }
+  });
+}
+
+// Export for Supertest
 export default app;
