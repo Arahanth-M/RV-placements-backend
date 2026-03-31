@@ -6,6 +6,7 @@ import {
   getSessionLean,
   getInProgressSession,
   getUserSessions,
+  buildUserInterviewAnalytics,
   updateSession,
   discardInProgressSession,
   startRound,
@@ -207,6 +208,21 @@ router.get("/sessions/:userId", async (req, res) => {
   } catch (error) {
     console.error("❌ Error fetching interview sessions:", error.message);
     return res.status(500).json({ error: "Failed to fetch interview history" });
+  }
+});
+
+router.get("/analytics/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) {
+      return res.status(400).json({ error: "userId is required" });
+    }
+
+    const data = await buildUserInterviewAnalytics(userId);
+    return res.json(data);
+  } catch (error) {
+    console.error("❌ Error fetching interview analytics:", error.message);
+    return res.status(500).json({ error: "Failed to fetch interview analytics" });
   }
 });
 

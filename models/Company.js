@@ -190,7 +190,6 @@ const selectedCandidateSchema = new mongoose.Schema(
       required: [true, "Candidate name is required"],
       trim: true,
       minlength: [2, "Name must be at least 2 characters"],
-      maxlength: [50, "Name cannot exceed 50 characters"],
     },
     emailId: {
       type: String,
@@ -209,7 +208,6 @@ const roleSchema = new mongoose.Schema(
       required: [true, "Role name is required"],
       trim: true,
       minlength: [2, "Role name must be at least 2 characters"],
-      maxlength: [50, "Role name cannot exceed 50 characters"],
     },
     ctc: {
       type: Map,
@@ -231,18 +229,17 @@ const companySchema = new mongoose.Schema(
       required: [true, "Company name is required"],
       trim: true,
       minlength: [2, "Company name must be at least 2 characters"],
-      maxlength: [50, "Company name cannot exceed 50 characters"],
     },
     type: {
       type: String,
       required: [true, "Company type is required"],
     },
-    business_model: { type: String, trim: true, maxlength: 100 },
-    eligibility: { type: String, trim: true, maxlength: 500 },
+    business_model: { type: String, trim: true },
+    eligibility: { type: String, trim: true },
     roles: [roleSchema],
     jobDescription: [
       {
-        title: { type: String, required: true, trim: true, maxlength: 100 },
+        title: { type: String, required: true, trim: true },
         fileUrl: { type: String, required: true, trim: true },
         fileType: {
           type: String,
@@ -270,11 +267,11 @@ const companySchema = new mongoose.Schema(
     mcqQuestions: [
       {
         question: { type: String, trim: true },
-        optionA: { type: String, trim: true, maxlength: 100 },
-        optionB: { type: String, trim: true, maxlength: 100 },
-        optionC: { type: String, trim: true, maxlength: 100 },
-        optionD: { type: String, trim: true, maxlength: 100 },
-        answer: { type: String, trim: true, maxlength: 100 },
+        optionA: { type: String, trim: true },
+        optionB: { type: String, trim: true },
+        optionC: { type: String, trim: true },
+        optionD: { type: String, trim: true },
+        answer: { type: String, trim: true },
       },
     ],
     interviewQuestions: [

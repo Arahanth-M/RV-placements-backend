@@ -7,6 +7,7 @@ import authJWT from "../middleware/authJWT.js";
 import dotenv from "dotenv";
 import Submission from "../models/Submission.js";
 import { getCompanyFocusTags } from "../utils/companyFocusTags.js";
+import { attachPlacementCategoryToCompany } from "../utils/ctcCategory.js";
 import redis from "../utils/redis.js";
 dotenv.config();
 
@@ -70,7 +71,7 @@ companyRouter.get("/", async (req, res) => {
     const list = companies.map((c) => {
       const focusTags = getCompanyFocusTags(c);
       const { onlineQuestions, interviewQuestions, interviewProcess, Must_Do_Topics, ...rest } = c;
-      return { ...rest, focusTags };
+      return attachPlacementCategoryToCompany({ ...rest, focusTags });
     });
 
     return res.json(list);
@@ -128,7 +129,7 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
       try {
         const parsed = JSON.parse(cached);
         console.log("HIT — company found in Redis and served from cache:", id);
-        return res.json(parsed);
+        return res.json(attachPlacementCategoryToCompany(parsed));
       } catch {
         // Bad cache payload — fall through to MongoDB
       }
@@ -186,10 +187,10 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
     delete companyObj.onlineQuestion_solution;
     delete companyObj.onlineQuestion_solutions;
 
-    const company = {
+    const company = attachPlacementCategoryToCompany({
       ...companyObj,
       videoUrl,
-    };
+    });
 
     try {
       await redis.set(key, JSON.stringify(company), {

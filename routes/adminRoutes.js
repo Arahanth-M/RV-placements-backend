@@ -675,19 +675,26 @@ adminRouter.put("/companies/:id/oa-questions/:index", async (req, res) => {
       company.onlineQuestions[index] = sanitizeText(question);
       company.markModified("onlineQuestions");
     }
-    if (company.onlineQuestions_solution) {
-      while (company.onlineQuestions_solution.length < company.onlineQuestions.length)
-        company.onlineQuestions_solution.push("");
-      if (solution !== undefined && solution !== null) {
-        company.onlineQuestions_solution[index] = sanitizeText(solution);
-        company.markModified("onlineQuestions_solution");
-      }
+    // Ensure solution array exists and matches length
+    if (!company.onlineQuestions_solution) company.onlineQuestions_solution = [];
+    while (company.onlineQuestions_solution.length < company.onlineQuestions.length) {
+      company.onlineQuestions_solution.push("");
+      company.markModified("onlineQuestions_solution");
     }
+
+    if (solution !== undefined && solution !== null) {
+      company.onlineQuestions_solution[index] = sanitizeText(solution);
+      company.markModified("onlineQuestions_solution");
+    }
+    
     await company.save();
     res.json({ message: "OA question updated", company });
   } catch (error) {
     console.error("❌ Error updating OA question:", error.message);
-    res.status(500).json({ error: "Server error" });
+    if (error.name === "ValidationError") {
+      return res.status(400).json({ error: "Validation failed", details: error.errors });
+    }
+    res.status(500).json({ error: "Server error", details: error.message });
   }
 });
 
@@ -725,19 +732,26 @@ adminRouter.put("/companies/:id/interview-questions/:index", async (req, res) =>
       company.interviewQuestions[index] = sanitizeText(question);
       company.markModified("interviewQuestions");
     }
-    if (company.interviewQuestions_solution) {
-      while (company.interviewQuestions_solution.length < company.interviewQuestions.length)
-        company.interviewQuestions_solution.push("");
-      if (solution !== undefined && solution !== null) {
-        company.interviewQuestions_solution[index] = sanitizeText(solution);
-        company.markModified("interviewQuestions_solution");
-      }
+    // Ensure solution array exists and matches length
+    if (!company.interviewQuestions_solution) company.interviewQuestions_solution = [];
+    while (company.interviewQuestions_solution.length < company.interviewQuestions.length) {
+      company.interviewQuestions_solution.push("");
+      company.markModified("interviewQuestions_solution");
     }
+
+    if (solution !== undefined && solution !== null) {
+      company.interviewQuestions_solution[index] = sanitizeText(solution);
+      company.markModified("interviewQuestions_solution");
+    }
+
     await company.save();
     res.json({ message: "Interview question updated", company });
   } catch (error) {
     console.error("❌ Error updating interview question:", error.message);
-    res.status(500).json({ error: "Server error" });
+    if (error.name === "ValidationError") {
+      return res.status(400).json({ error: "Validation failed", details: error.errors });
+    }
+    res.status(500).json({ error: "Server error", details: error.message });
   }
 });
 
@@ -788,7 +802,10 @@ adminRouter.put("/companies/:id/interview-process/:index", async (req, res) => {
     res.json({ message: "Interview process updated", company });
   } catch (error) {
     console.error("❌ Error updating interview process:", error.message);
-    res.status(500).json({ error: "Server error" });
+    if (error.name === "ValidationError") {
+      return res.status(400).json({ error: "Validation failed", details: error.errors });
+    }
+    res.status(500).json({ error: "Server error", details: error.message });
   }
 });
 
@@ -918,6 +935,37 @@ adminRouter.put("/companies/:id/roles", async (req, res) => {
     res.status(500).json({ error: "Server error", details: error.message });
   }
 });
+
+// Update general company info (eligibility, business model)
+adminRouter.put("/companies/:id/general", async (req, res) => {
+  try {
+    const { eligibility, business_model } = req.body || {};
+
+    const updateData = {};
+    if (eligibility !== undefined) updateData.eligibility = sanitizeText(eligibility);
+    if (business_model !== undefined) updateData.business_model = sanitizeText(business_model);
+
+    // Use findByIdAndUpdate with $set to bypass unrelated legacy validation
+    const company = await Company.findByIdAndUpdate(
+      req.params.id,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    );
+
+    if (!company) {
+      return res.status(404).json({ error: "Company not found" });
+    }
+
+    res.json({ message: "Company general info updated successfully", company });
+  } catch (error) {
+    console.error("❌ Error updating company general info:", error.message);
+    if (error.name === "ValidationError") {
+      return res.status(400).json({ error: "Validation failed", details: error.errors });
+    }
+    res.status(500).json({ error: "Server error", details: error.message });
+  }
+});
+
 
 // Reject submission (delete it from database)
 adminRouter.delete("/submissions/:id/reject", async (req, res) => {

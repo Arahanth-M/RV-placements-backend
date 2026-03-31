@@ -219,6 +219,72 @@ export const generateRoundFeedback = async (sessionId, roundNumber) => {
   };
 };
 
+/** Average scores by round type + one progress point per session (chronological) for analytics UI. */
+export const buildUserInterviewAnalytics = async (userId) => {
+  const sessions = await InterviewSession.find({ userId })
+    .sort({ updatedAt: 1 })
+    .lean();
+
+  const skillTotals = {};
+  const progress = [];
+
+  for (const session of sessions) {
+    const rounds = Array.isArray(session.rounds) ? session.rounds : [];
+
+    for (const round of rounds) {
+      const type = round.type || "General";
+      const questions = Array.isArray(round.questions) ? round.questions : [];
+      for (const q of questions) {
+        const s = Number(q?.score);
+        if (Number.isFinite(s)) {
+          if (!skillTotals[type]) skillTotals[type] = { sum: 0, count: 0 };
+          skillTotals[type].sum += s;
+          skillTotals[type].count += 1;
+        }
+      }
+    }
+
+    let sessionScore = null;
+    const fr = session.finalReport;
+    if (
+      fr &&
+      typeof fr.overallScore === "number" &&
+      Number.isFinite(fr.overallScore)
+    ) {
+      sessionScore = fr.overallScore;
+    } else {
+      const scores = [];
+      for (const round of rounds) {
+        for (const q of round.questions || []) {
+          const s = Number(q?.score);
+          if (Number.isFinite(s)) scores.push(s);
+        }
+      }
+      const hist = Array.isArray(session.history) ? session.history : [];
+      for (const h of hist) {
+        const s = Number(h?.score);
+        if (Number.isFinite(s)) scores.push(s);
+      }
+      if (scores.length > 0) {
+        sessionScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+      }
+    }
+
+    if (sessionScore != null) {
+      progress.push({ score: Math.round(sessionScore * 10) / 10 });
+    }
+  }
+
+  const skillBreakdown = {};
+  for (const [type, { sum, count }] of Object.entries(skillTotals)) {
+    if (count > 0) {
+      skillBreakdown[type] = Math.round((sum / count) * 10) / 10;
+    }
+  }
+
+  return { skillBreakdown, progress };
+};
+
 export const updateSession = async (sessionId, data) => {
   return InterviewSession.findByIdAndUpdate(
     sessionId,
