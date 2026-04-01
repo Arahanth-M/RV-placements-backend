@@ -1,8 +1,9 @@
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import keys from "../config/keys.js";
+import mongoose from "mongoose";
 import User from "../models/User.js";
-import { urls, ALLOWED_LOGIN_EMAIL } from "../config/constants.js";
+import { urls, ADMIN_EMAIL } from "../config/constants.js";
 import { sendWelcomeEmailWebhook } from "./webhookService.js";
 
 passport.use(
@@ -18,9 +19,18 @@ passport.use(
       try {
         const primaryEmail = profile?.emails?.[0]?.value || "";
         const normalizedEmail = primaryEmail.trim().toLowerCase();
-        const allowOnly = String(ALLOWED_LOGIN_EMAIL || "").trim().toLowerCase();
-        if (!normalizedEmail || normalizedEmail !== allowOnly) {
+        const adminEmail = String(ADMIN_EMAIL || "").trim().toLowerCase();
+        
+        if (!normalizedEmail || (!normalizedEmail.endsWith("@rvce.edu.in") && normalizedEmail !== adminEmail)) {
           return done(null, false, { reason: "not_allowed" });
+        }
+
+        const db = mongoose.connection.db;
+        const studentCollection = db.collection("users_2026");
+        const studentRecord = await studentCollection.findOne({ emailId: normalizedEmail });
+        
+        if (!studentRecord && normalizedEmail !== adminEmail) {
+          return done(null, false, { reason: "not_found" });
         }
 
         const existingUser = await User.findOne({ userId: profile.id });

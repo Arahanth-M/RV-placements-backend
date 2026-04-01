@@ -92,5 +92,35 @@ router.get("/student-data-by-name/:username", authJWT, async (req, res) => {
   }
 });
 
-export default router;
+// Get student profile by logged-in user email
+router.get("/profile", authJWT, async (req, res) => {
+  try {
+    if (!req.user || !req.user.email) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
+    const email = req.user.email.toLowerCase();
+
+    if (!email.endsWith("@rvce.edu.in")) {
+      return res.status(403).json({ error: "Use college email only" });
+    }
+
+    // Connect to the users_2026 collection
+    const db = mongoose.connection.db;
+    const usersCollection = db.collection("users_2026");
+
+    const studentData = await usersCollection.findOne({ emailId: email });
+
+    if (!studentData) {
+      return res.status(404).json({ error: "Profile not found" });
+    }
+
+    // Return student data (read-only)
+    res.json(studentData);
+  } catch (error) {
+    console.error("❌ Error fetching student profile:", error.message);
+    res.status(500).json({ error: "Server error while fetching student profile" });
+  }
+});
+
+export default router;

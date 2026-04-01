@@ -136,6 +136,9 @@ router.get(
         if (info && info.reason === "not_allowed") {
           return redirectToAuthCallback(req, res, "login=failed&reason=not_allowed");
         }
+        if (info && info.reason === "not_found") {
+          return redirectToAuthCallback(req, res, "login=failed&reason=not_found");
+        }
         return redirectToAuthCallback(req, res, "login=failed");
       }
 
