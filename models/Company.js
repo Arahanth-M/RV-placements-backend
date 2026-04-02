@@ -288,6 +288,12 @@ const companySchema = new mongoose.Schema(
       { type: String, trim: true },
     ],
     interviewProcess: [{ type: String, trim: true }],
+    internshipExperience: [
+      {
+        type: String,
+        trim: true
+      }
+    ],
     count: { type: String},
     selectedCandidates: [selectedCandidateSchema],
     Must_Do_Topics: [
