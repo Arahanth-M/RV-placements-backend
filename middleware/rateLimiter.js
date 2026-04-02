@@ -1,4 +1,16 @@
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
+
+const rateLimitExceededHandler = (req, res) => {
+  console.warn("Rate limit exceeded", {
+    userId: req.user?.id,
+    ip: ipKeyGenerator(req),
+  });
+
+  return res.status(429).json({
+    success: false,
+    message: "Too many requests",
+  });
+};
 
 /**
  * Global Rate Limiter: Applies to all incoming requests from a single IP.
@@ -10,6 +22,7 @@ export const globalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: "Too many requests from this IP, please try again after 15 minutes",
+  handler: rateLimitExceededHandler,
 });
 
 /**
@@ -22,7 +35,8 @@ export const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: "Too many authentication attempts, please try again after 15 minutes",
-  skipSuccessfulRequests: false, 
+  skipSuccessfulRequests: false,
+  handler: rateLimitExceededHandler,
 });
 
 /**
@@ -34,6 +48,7 @@ export const adminLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: "Too many administrative attempts, please try again after 15 minutes",
+  handler: rateLimitExceededHandler,
 });
 
 /**
@@ -45,6 +60,7 @@ export const submissionLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: "Too many submission attempts, please try again later",
+  handler: rateLimitExceededHandler,
 });
 
 /**
@@ -54,9 +70,15 @@ export const aiStartLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 5, // 5 sessions per 15 minutes
   message: "Too many interview sessions started. Please try again later.",
-  keyGenerator: (req) => req.user?._id?.toString() || req.ip,
+  keyGenerator: (req) => {
+    if (req.user?.id) return req.user.id;
+    if (req.user?.userId) return req.user.userId;
+    if (req.user?._id) return String(req.user._id);
+    return ipKeyGenerator(req);
+  },
   standardHeaders: true,
   legacyHeaders: false,
+  handler: rateLimitExceededHandler,
 });
 
 /**
@@ -66,7 +88,13 @@ export const aiAnswerLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 50, // 50 answers per 15 minutes
   message: "Too many responses submitted. Please slow down.",
-  keyGenerator: (req) => req.user?._id?.toString() || req.ip,
+  keyGenerator: (req) => {
+    if (req.user?.id) return req.user.id;
+    if (req.user?.userId) return req.user.userId;
+    if (req.user?._id) return String(req.user._id);
+    return ipKeyGenerator(req);
+  },
   standardHeaders: true,
   legacyHeaders: false,
+  handler: rateLimitExceededHandler,
 });
