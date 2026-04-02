@@ -13,9 +13,9 @@ router.get("/student-data/:usn", authJWT, async (req, res) => {
       return res.status(400).json({ error: "USN is required" });
     }
 
-    // Connect to the student data collection
+    // Connect to the student data collection (users_2026)
     const db = mongoose.connection.db;
-    const studentDataCollection = db.collection("student-data-2026-cse");
+    const studentDataCollection = db.collection("users_2026");
     
     // Escape special regex characters in USN
     const escapedUSN = usn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -37,59 +37,10 @@ router.get("/student-data/:usn", authJWT, async (req, res) => {
   }
 });
 
-// Get student data by username/name from student-data-2026-cse collection
-router.get("/student-data-by-name/:username", authJWT, async (req, res) => {
-  try {
-    const { username } = req.params;
-    
-    if (!username) {
-      return res.status(400).json({ error: "Username is required" });
-    }
-
-    // Connect to the student data collection
-    const db = mongoose.connection.db;
-    const studentDataCollection = db.collection("student-data-2026-cse");
-    
-    // Escape special regex characters in username
-    const escapedUsername = username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    
-    // Normalize username for comparison (trim, lowercase)
-    const normalizeName = (name) => {
-      if (!name) return '';
-      return name.trim().toLowerCase().replace(/\s+/g, ' ');
-    };
-    
-    const normalizedSearchName = normalizeName(username);
-    
-    // Find student by Name field (case-insensitive, flexible matching)
-    // Try exact match first, then partial match
-    let studentData = await studentDataCollection.findOne({
-      $or: [
-        { Name: { $regex: new RegExp(`^${escapedUsername}$`, "i") } },
-        { name: { $regex: new RegExp(`^${escapedUsername}$`, "i") } },
-        { 'Student Name': { $regex: new RegExp(`^${escapedUsername}$`, "i") } }
-      ]
-    });
-
-    // If exact match not found, try to find by normalized name
-    if (!studentData) {
-      const allStudents = await studentDataCollection.find({}).toArray();
-      studentData = allStudents.find(student => {
-        const studentName = student.Name || student.name || student['Student Name'] || '';
-        return normalizeName(studentName) === normalizedSearchName;
-      });
-    }
-
-    if (!studentData) {
-      return res.status(404).json({ error: "Student not found with the provided username" });
-    }
-
-    // Return student data (read-only, no modifications)
-    res.json(studentData);
-  } catch (error) {
-    console.error("❌ Error fetching student data by username:", error.message);
-    res.status(500).json({ error: "Server error while fetching student data" });
-  }
+// DEPRECATED: Name-based lookup removed for security. Use /profile instead.
+router.get("/student-data-by-name/:username", authJWT, (req, res) => {
+  console.warn(`⚠️ [DEPRECATED] Name-based lookup attempted for: "${req.params.username}". Use /profile instead.`);
+  return res.status(410).json({ error: "Name-based lookup is disabled. Use /api/students/profile instead." });
 });
 
 // Get student profile by logged-in user email
@@ -100,22 +51,25 @@ router.get("/profile", authJWT, async (req, res) => {
     }
 
     const email = req.user.email.toLowerCase();
-
-    if (!email.endsWith("@rvce.edu.in")) {
-      return res.status(403).json({ error: "Use college email only" });
-    }
+    console.log(`👤 [Profile] Fetching for email: ${email}`);
 
     // Connect to the users_2026 collection
     const db = mongoose.connection.db;
     const usersCollection = db.collection("users_2026");
 
-    const studentData = await usersCollection.findOne({ emailId: email });
+    const studentData = await usersCollection.findOne({ 
+      $or: [
+        { emailId: email },
+        { email: email }
+      ]
+    });
 
     if (!studentData) {
+      console.log(`❓ [Profile] No profile record found in users_2026 for: ${email}`);
       return res.status(404).json({ error: "Profile not found" });
     }
 
-    // Return student data (read-only)
+    console.log(`✅ [Profile] Found Record: ${studentData.Name} -> ${studentData.Company}`);
     res.json(studentData);
   } catch (error) {
     console.error("❌ Error fetching student profile:", error.message);

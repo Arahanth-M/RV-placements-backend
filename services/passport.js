@@ -21,42 +21,51 @@ passport.use(
         const normalizedEmail = primaryEmail.trim().toLowerCase();
         const adminEmail = String(ADMIN_EMAIL || "").trim().toLowerCase();
         
-        if (!normalizedEmail || (!normalizedEmail.endsWith("@rvce.edu.in") && normalizedEmail !== adminEmail)) {
+        // 1. Basic Email Validation
+        if (!normalizedEmail) {
           return done(null, false, { reason: "not_allowed" });
         }
 
+        // 2. Strict Student/Admin Check
         const db = mongoose.connection.db;
         const studentCollection = db.collection("users_2026");
-        const studentRecord = await studentCollection.findOne({ emailId: normalizedEmail });
+        
+        // Find record by emailId (case-insensitive)
+        const studentRecord = await studentCollection.findOne({ 
+          emailId: normalizedEmail 
+        });
         
         if (!studentRecord && normalizedEmail !== adminEmail) {
+          console.warn(`🛑 Login Rejected for email: ${normalizedEmail} (No student record found)`);
           return done(null, false, { reason: "not_found" });
         }
 
+        // 3. Authenticate or Create User
         const existingUser = await User.findOne({ userId: profile.id });
 
         if (existingUser) {
-          // Existing user - no webhook needed
           return done(null, existingUser);
         }
 
-        // New user - create account
+        // New authorized user - create local account
         const user = await new User({
           userId: profile.id,
           username: profile.displayName,
           email: primaryEmail,
-          picture: profile.photos[0].value,
-          fillForm: false, // New users need to fill the placement form
+          picture: profile.photos?.[0]?.value || "",
+          fillForm: false, 
         }).save();
 
-        // Send welcome email webhook only for new users
-        // Fire and forget - don't block login if webhook fails
+        console.log(`👤 New User Created: ${profile.displayName} (${normalizedEmail})`);
+
+        // Send welcome email (non-blocking)
         sendWelcomeEmailWebhook(primaryEmail, profile.displayName).catch((err) => {
-          console.error("Webhook error (non-blocking):", err);
+          console.error("Webhook error:", err);
         });
 
         done(null, user);
       } catch (err) {
+        console.error("Passport strategy error:", err);
         done(err, null);
       }
     }

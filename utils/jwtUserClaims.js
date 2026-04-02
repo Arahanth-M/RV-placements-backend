@@ -14,6 +14,7 @@ export function buildJwtPayloadFromUser(user) {
     points: doc.points ?? 0,
     isPremium: doc.isPremium ?? false,
     membershipType: doc.membershipType,
+    companyId: doc.companyId,
     createdAt: doc.createdAt
       ? new Date(doc.createdAt).toISOString()
       : new Date().toISOString(),
