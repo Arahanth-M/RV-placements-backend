@@ -65,3 +65,13 @@ export async function getSetMembers(key) {
     return [];
   }
 }
+
+export async function deleteKey(key) {
+  try {
+    await redis.del(key);
+    return true;
+  } catch (error) {
+    console.error(`[Redis] del failed for key "${key}":`, error);
+    return false;
+  }
+}

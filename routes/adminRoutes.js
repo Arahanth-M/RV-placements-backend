@@ -5,6 +5,10 @@ import User from "../models/User.js";
 import Submission from "../models/Submission.js";
 import Company from "../models/Company.js";
 import Notification from "../models/Notification.js";
+import {
+  getAdminDashboardStats,
+  invalidateAdminDashboardStatsCache,
+} from "../services/adminDashboardStatsCache.js";
 
 const adminRouter = express.Router();
 
@@ -32,41 +36,81 @@ adminRouter.get("/stats/users", async (req, res) => {
   }
 });
 
-// Get all submissions (with optional status filter)
+const SUBMISSION_CONTENT_PREVIEW_MAX = 520;
+const ADMIN_LIST_DEFAULT_LIMIT = 25;
+const ADMIN_LIST_MAX_LIMIT = 100;
+
+function parseAdminPagination(query) {
+  const page = Math.max(1, parseInt(String(query.page || "1"), 10) || 1);
+  let limit = parseInt(String(query.limit || String(ADMIN_LIST_DEFAULT_LIMIT)), 10);
+  if (!Number.isFinite(limit) || limit < 1) limit = ADMIN_LIST_DEFAULT_LIMIT;
+  limit = Math.min(limit, ADMIN_LIST_MAX_LIMIT);
+  return { page, limit, skip: (page - 1) * limit };
+}
+
+function mapSubmissionListRow(doc) {
+  const o = doc.toObject ? doc.toObject() : { ...doc };
+  const full = typeof o.content === "string" ? o.content : "";
+  const truncated = full.length > SUBMISSION_CONTENT_PREVIEW_MAX;
+  const content = truncated
+    ? `${full.slice(0, SUBMISSION_CONTENT_PREVIEW_MAX)}…`
+    : full;
+  return { ...o, content, contentTruncated: truncated };
+}
+
+// Paginated submissions list (trimmed content for table rows; use GET /submissions/:id for full body)
 adminRouter.get("/submissions", async (req, res) => {
   try {
     const { status } = req.query;
     const query = status ? { status } : {};
-    
-    const submissions = await Submission.find(query)
-      .populate("companyId", "name")
-      .sort({ submittedAt: -1 });
-    
-    res.json(submissions);
+    const { page, limit, skip } = parseAdminPagination(req.query);
+
+    const [total, docs] = await Promise.all([
+      Submission.countDocuments(query),
+      Submission.find(query)
+        .populate("companyId", "name")
+        .select("companyId type submittedBy isAnonymous status submittedAt approvedAt content")
+        .sort({ submittedAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .exec(),
+    ]);
+
+    const items = docs.map(mapSubmissionListRow);
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
+    res.json({
+      items,
+      total,
+      page,
+      limit,
+      totalPages,
+    });
   } catch (error) {
     console.error("❌ Error fetching submissions:", error.message);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-// Get dashboard stats
+// Full submission (e.g. admin modal)
+adminRouter.get("/submissions/:id", async (req, res) => {
+  try {
+    const submission = await Submission.findById(req.params.id).populate("companyId", "name");
+    if (!submission) {
+      return res.status(404).json({ error: "Submission not found" });
+    }
+    res.json(submission);
+  } catch (error) {
+    console.error("❌ Error fetching submission:", error.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Get dashboard stats (Redis-cached when REDIS_URL is set; invalidated on admin mutations)
 adminRouter.get("/stats", async (req, res) => {
   try {
-    const totalUsers = await User.countDocuments();
-    const totalSubmissions = await Submission.countDocuments();
-    const pendingSubmissions = await Submission.countDocuments({ status: "pending" });
-    const approvedSubmissions = await Submission.countDocuments({ status: "approved" });
-    const totalCompanies = await Company.countDocuments({ status: "approved" });
-    const pendingCompanies = await Company.countDocuments({ status: "pending" });
-    
-    res.json({
-      totalUsers,
-      totalSubmissions,
-      pendingSubmissions,
-      approvedSubmissions,
-      totalCompanies,
-      pendingCompanies,
-    });
+    const stats = await getAdminDashboardStats();
+    res.json(stats);
   } catch (error) {
     console.error("❌ Error fetching dashboard stats:", error.message);
     res.status(500).json({ error: "Server error" });
@@ -558,6 +602,8 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
       await contributor.save();
     }
 
+    await invalidateAdminDashboardStatsCache();
+
     res.json({ 
       message: "Submission approved and company updated successfully",
       company: company,
@@ -580,16 +626,43 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
   }
 });
 
-// Get all companies (with optional status filter)
+// Paginated companies list — approved: minimal fields; pending: card fields without heavy blobs (roles, JD, solutions, etc.)
 adminRouter.get("/companies", async (req, res) => {
   try {
     const { status } = req.query;
     const query = status ? { status } : {};
-    
-    const companies = await Company.find(query)
-      .sort({ createdAt: -1 });
-    
-    res.json(companies);
+    const { page, limit, skip } = parseAdminPagination(req.query);
+
+    const approvedSelect =
+      "_id name type status count createdAt updatedAt approvedAt submittedBy";
+    const pendingSelect =
+      "_id name type count status createdAt updatedAt submittedBy interviewExperience interviewQuestions onlineQuestions Must_Do_Topics";
+    const selectFields =
+      status === "approved"
+        ? approvedSelect
+        : status === "pending"
+          ? pendingSelect
+          : "_id name type status count createdAt updatedAt";
+
+    const [total, companies] = await Promise.all([
+      Company.countDocuments(query),
+      Company.find(query)
+        .select(selectFields)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
+    res.json({
+      items: companies,
+      total,
+      page,
+      limit,
+      totalPages,
+    });
   } catch (error) {
     console.error("❌ Error fetching companies:", error.message);
     res.status(500).json({ error: "Server error" });
@@ -609,6 +682,8 @@ adminRouter.post("/companies/:id/approve", async (req, res) => {
     company.approvedAt = new Date();
     // Save will trigger the post-save hook which creates notifications
     await company.save();
+
+    await invalidateAdminDashboardStatsCache();
 
     res.json({ 
       message: "Company approved successfully",
@@ -632,6 +707,8 @@ adminRouter.delete("/companies/:id/reject", async (req, res) => {
 
     await Company.findByIdAndDelete(req.params.id);
 
+    await invalidateAdminDashboardStatsCache();
+
     res.json({ message: "Company rejected and deleted successfully" });
   } catch (error) {
     console.error("❌ Error rejecting company:", error.message);
@@ -653,6 +730,8 @@ adminRouter.delete("/companies/:id/delete", async (req, res) => {
     }
 
     await Company.findByIdAndDelete(req.params.id);
+
+    await invalidateAdminDashboardStatsCache();
 
     res.json({ message: "Approved company deleted successfully" });
   } catch (error) {
@@ -981,6 +1060,8 @@ adminRouter.delete("/submissions/:id/reject", async (req, res) => {
     
     console.log('✅ Submission rejected and deleted:', req.params.id);
     
+    await invalidateAdminDashboardStatsCache();
+
     res.json({ 
       message: "Submission rejected and deleted successfully"
     });
@@ -1011,6 +1092,8 @@ adminRouter.delete("/submissions/:id/delete", async (req, res) => {
     
     console.log('✅ Approved submission deleted:', req.params.id);
     
+    await invalidateAdminDashboardStatsCache();
+
     res.json({ 
       message: "Approved submission deleted successfully"
     });
