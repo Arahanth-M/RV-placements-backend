@@ -1015,14 +1015,15 @@ adminRouter.put("/companies/:id/roles", async (req, res) => {
   }
 });
 
-// Update general company info (eligibility, business model)
+// Update general company info (eligibility, business model, type)
 adminRouter.put("/companies/:id/general", async (req, res) => {
   try {
-    const { eligibility, business_model } = req.body || {};
+    const { eligibility, business_model, type } = req.body || {};
 
     const updateData = {};
     if (eligibility !== undefined) updateData.eligibility = sanitizeText(eligibility);
     if (business_model !== undefined) updateData.business_model = sanitizeText(business_model);
+    if (type !== undefined) updateData.type = sanitizeText(type);
 
     // Use findByIdAndUpdate with $set to bypass unrelated legacy validation
     const company = await Company.findByIdAndUpdate(

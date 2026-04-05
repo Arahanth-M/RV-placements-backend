@@ -42,17 +42,24 @@ export function parseCtcStringToRupees(raw) {
   const numbers = numMatches.map((s) => parseFloat(s.replace(/,/g, ""))).filter((n) => Number.isFinite(n));
   if (numbers.length === 0) return null;
 
-  const avg = numbers.reduce((a, b) => a + b, 0) / numbers.length;
+  const isRange =
+    str.includes("-") ||
+    /\bto\b/.test(str) ||
+    (/\bbetween\b/.test(str) && /\band\b/.test(str));
+
+  const total = isRange
+    ? numbers.reduce((a, b) => a + b, 0) / numbers.length
+    : numbers.reduce((a, b) => a + b, 0);
 
   const hasCrore = /\bcrore\b|\bcr\b/.test(str);
   const hasLakhUnit = /\blakh\b|\blakhs\b|\blpa\b/.test(str);
 
-  if (hasCrore) return avg * 1_00_00_000;
-  if (hasLakhUnit) return avg * RUPEES_PER_LPA;
+  if (hasCrore) return total * 1_00_00_000;
+  if (hasLakhUnit) return total * RUPEES_PER_LPA;
 
-  if (numbers.length === 1 && avg >= 100_000) return avg;
+  if (numbers.length === 1 && total >= 100_000) return total;
 
-  return avg * RUPEES_PER_LPA;
+  return total * RUPEES_PER_LPA;
 }
 
 /**

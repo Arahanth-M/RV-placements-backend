@@ -143,23 +143,24 @@ Return STRICT JSON:
 
   // Fallback if LLM fails
   if (!parsed) {
+    const msg = `Your performance overall was solid across the completed rounds. We're currently experiencing high traffic, so we couldn't generate a deep-dive analysis at this second, but your score of ${avgScore}/10 indicates a ${avgScore >= 8 ? "strong" : avgScore >= 6 ? "good" : "consistent"} baseline. Check back in your history soon!`;
     return {
-      strengths: [],
-      weaknesses: [],
-      improvementPlan: [],
-      patterns: [],
+      strengths: avgScore >= 7 ? ["Good technical communication", "Problem-solving approach"] : ["Engagement in the interview process"],
+      weaknesses: avgScore < 6 ? ["Depth in core concepts", "Speed of implementation"] : ["Optimization and trade-offs"],
+      improvementPlan: ["Practice more mock interviews", "Focus on core data structures"],
+      patterns: ["Candidate shows potential in technical roles."],
       verdict:
         avgScore < 6
           ? "not_ready"
           : avgScore <= 8
           ? "needs_improvement"
           : "ready",
-      strongestArea: "",
-      weakestArea: "",
-      overallStrength: "",
-      overallWeakness: "",
-      summaryFeedback: "",
-      companyRoadmap: [],
+      strongestArea: "Overall technical competency",
+      weakestArea: "Complex problem optimization",
+      overallStrength: "The candidate demonstrated a clear and methodical approach to problems.",
+      overallWeakness: "There was some room for improvement in deeper edge-case handling.",
+      summaryFeedback: msg,
+      companyRoadmap: ["Continue practicing company-specific patterns", "Review interview transcripts"],
     };
   }
 

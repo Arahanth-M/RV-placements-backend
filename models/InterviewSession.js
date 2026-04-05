@@ -3,6 +3,14 @@ import mongoose from "mongoose";
 const ROUND_TYPES = ["DSA", "System Design", "HR"];
 const ROUND_STATE = ["IN_PROGRESS", "COMPLETED"];
 const INTERVIEW_STATE = ["IN_PROGRESS", "COMPLETED"];
+const INTERVIEW_STATES = [
+  "PREVIEW",
+  "IN_PROGRESS",
+  "ROUND_ACTIVE",
+  "EVALUATING",
+  "ROUND_COMPLETE",
+  "INTERVIEW_COMPLETE",
+];
 
 const historyItemSchema = new mongoose.Schema(
   {
@@ -98,6 +106,13 @@ const interviewSessionSchema = new mongoose.Schema(
       enum: ROUND_STATE,
       default: "IN_PROGRESS",
     },
+    state: {
+      type: String,
+      enum: INTERVIEW_STATES,
+      default: "PREVIEW",
+    },
+    // LEGACY FIELDS (status, interviewStatus)
+    // TODO: remove after full migration
     interviewStatus: {
       type: String,
       enum: INTERVIEW_STATE,
@@ -153,6 +168,35 @@ const interviewSessionSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+/**
+ * Canonical state is `state`.
+ * Legacy fields are mirrored for compatibility while callers migrate.
+ */
+interviewSessionSchema.pre("validate", function syncLegacyStates(next) {
+  // If state is present, mirror into legacy fields.
+  if (typeof this.state === "string" && this.state.trim()) {
+    const isCompleted = this.state === "INTERVIEW_COMPLETE";
+    this.interviewStatus = isCompleted ? "COMPLETED" : "IN_PROGRESS";
+    this.status = isCompleted ? "completed" : "in_progress";
+    this.roundStatus = this.state === "ROUND_COMPLETE" ? "COMPLETED" : "IN_PROGRESS";
+    return next();
+  }
+
+  // Fallback inference for older documents that may not have `state`.
+  if (this.status === "completed" || this.interviewStatus === "COMPLETED") {
+    this.state = "INTERVIEW_COMPLETE";
+    return next();
+  }
+
+  if (this.roundStatus === "COMPLETED") {
+    this.state = "ROUND_COMPLETE";
+    return next();
+  }
+
+  this.state = this.currentQuestion ? "ROUND_ACTIVE" : "IN_PROGRESS";
+  return next();
+});
 
 const InterviewSession = mongoose.model("InterviewSession", interviewSessionSchema);
 

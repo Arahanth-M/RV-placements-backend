@@ -3,6 +3,7 @@ import Company from "../models/Company.js";
 import { getCompanyContext } from "./mcp/getCompanyContext.js";
 import { generateQuestion } from "./mcp/generateQuestion.js";
 import { generateRoundFeedback as generateRoundFeedbackMCP } from "./mcp/generateRoundFeedback.js";
+import { INTERVIEW_STATES } from "./interviewStateMachine.js";
 
 const updateOptions = {
   new: true,
@@ -18,7 +19,7 @@ export const createSession = async (userId, companyId) => {
   return InterviewSession.create({
     userId,
     companyId,
-    status: "in_progress",
+    state: INTERVIEW_STATES.PREVIEW,
   });
 };
 
@@ -35,7 +36,7 @@ export const getInProgressSession = async (userId, companyId) => {
   return InterviewSession.findOne({
     userId,
     companyId,
-    status: "in_progress",
+    state: { $ne: INTERVIEW_STATES.INTERVIEW_COMPLETE },
   }).sort({ updatedAt: -1 });
 };
 
@@ -48,7 +49,7 @@ export const getUserSessions = async (userId) => {
 export const discardInProgressSession = async (sessionId) => {
   return InterviewSession.findOneAndDelete({
     _id: sessionId,
-    status: "in_progress",
+    state: { $ne: INTERVIEW_STATES.INTERVIEW_COMPLETE },
   });
 };
 
@@ -109,7 +110,7 @@ export const startRound = async (sessionId) => {
   // 6) Set roundStatus = IN_PROGRESS
   currentRound.status = "IN_PROGRESS";
   session.roundStatus = "IN_PROGRESS";
-  session.interviewStatus = "IN_PROGRESS";
+  session.state = INTERVIEW_STATES.ROUND_ACTIVE;
   session.currentRound = roundNumber;
   session.currentRoundIndex = roundIndex;
   session.currentQuestion = question;

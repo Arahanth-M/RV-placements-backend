@@ -32,11 +32,11 @@ passport.use(
         
         // Find record by emailId (case-insensitive)
         const studentRecord = await studentCollection.findOne({ 
-          emailId: normalizedEmail 
+          emailId: { $regex: new RegExp(`^${normalizedEmail}$`, "i") } 
         });
         
         if (!studentRecord && normalizedEmail !== adminEmail) {
-          console.warn(`🛑 Login Rejected for email: ${normalizedEmail} (No student record found)`);
+          console.warn(`🛑 Login Rejected for email: ${normalizedEmail} (No student record found in users_2026)`);
           return done(null, false, { reason: "not_found" });
         }
 
@@ -44,6 +44,9 @@ passport.use(
         const existingUser = await User.findOne({ userId: profile.id });
 
         if (existingUser) {
+          // Update the email just in case (ensure normalization)
+          existingUser.email = normalizedEmail;
+          await existingUser.save();
           return done(null, existingUser);
         }
 
@@ -51,7 +54,7 @@ passport.use(
         const user = await new User({
           userId: profile.id,
           username: profile.displayName,
-          email: primaryEmail,
+          email: normalizedEmail,
           picture: profile.photos?.[0]?.value || "",
           fillForm: false, 
         }).save();

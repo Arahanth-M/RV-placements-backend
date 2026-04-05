@@ -50,22 +50,35 @@ router.get("/profile", authJWT, async (req, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const email = req.user.email.toLowerCase();
+    const email = (req.user.email || "").trim().toLowerCase();
+    const adminEmail = (process.env.ADMIN_EMAIL || "").trim().toLowerCase();
     console.log(`👤 [Profile] Fetching for email: ${email}`);
 
     // Connect to the users_2026 collection
     const db = mongoose.connection.db;
     const usersCollection = db.collection("users_2026");
 
+    // Escape special regex characters in email
+    const escapedEmail = email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
     const studentData = await usersCollection.findOne({ 
       $or: [
-        { emailId: email },
-        { email: email }
+        { emailId: { $regex: new RegExp(`^${escapedEmail}$`, "i") } },
+        { email: { $regex: new RegExp(`^${escapedEmail}$`, "i") } }
       ]
     });
 
     if (!studentData) {
       console.log(`❓ [Profile] No profile record found in users_2026 for: ${email}`);
+      
+      // If user is admin, provide specialized error
+      if (email === adminEmail) {
+        return res.status(404).json({ 
+          error: "Admin Profile Not Found", 
+          message: "Admins do not have a student profile stored in users_2026." 
+        });
+      }
+
       return res.status(404).json({ error: "Profile not found" });
     }
 

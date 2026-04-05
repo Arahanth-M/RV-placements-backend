@@ -12,8 +12,6 @@ import {
   authLimiter,
   adminLimiter,
   submissionLimiter,
-  aiStartLimiter,
-  aiAnswerLimiter,
 } from "./middleware/rateLimiter.js";
 
 import companyRouter from "./routes/companyRoutes.js";
@@ -100,7 +98,13 @@ app.use(
  * Applied globally to prevent DoS, with route-specific overrides below.
  */
 if (process.env.NODE_ENV !== "test") {
-  app.use(globalLimiter);
+  app.use((req, res, next) => {
+    // Temporarily bypass global throttling for AI interview load testing.
+    if (req.path.startsWith("/api/interview")) {
+      return next();
+    }
+    return globalLimiter(req, res, next);
+  });
 }
 
 app.use(express.json());
@@ -114,8 +118,6 @@ if (process.env.NODE_ENV !== "test") {
   app.use(routes.AUTH, authLimiter);
   app.use(routes.ADMIN, adminLimiter);
   app.use(routes.SUBMISSIONS, submissionLimiter);
-  app.use("/api/interviews/start-interview", aiStartLimiter);
-  app.use("/api/interviews/submit-answer", aiAnswerLimiter);
 }
 
 /**

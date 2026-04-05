@@ -67,6 +67,14 @@ export const callLLM = async (messages, options = {}) => {
     return completion?.choices?.[0]?.message?.content?.trim() || "";
   } catch (error) {
     const message = getErrorMessage(error);
+    const isRateLimit = String(message).toLowerCase().includes("rate limit") || error?.status === 429;
+
+    // Retry once with 8b model if 70b hits rate limit
+    if (isRateLimit && options?.model !== "llama-3.1-8b-instant" && options?.model !== "llama3-8b-8192") {
+      console.warn(`⚠️ [Groq] Rate limit hit on ${options?.model || DEFAULT_ORCHESTRATOR_MODEL}. Falling back to 8b model...`);
+      return callLLM(messages, { ...options, model: "llama-3.1-8b-instant" });
+    }
+
     throw new Error(`Groq LLM request failed: ${message}`);
   }
 };

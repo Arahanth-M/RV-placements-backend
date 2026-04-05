@@ -15,8 +15,15 @@ import { generateInterviewPlan } from "../services/interviewEngine.js";
 import { interviewQueue } from "../services/queues/interviewQueue.js";
 import { EVALUATE_ANSWER } from "../services/queues/jobTypes.js";
 import { tipsByRoundType, defaultTips } from "../utils/interviewTips.js";
+import { INTERVIEW_STATES } from "../services/interviewStateMachine.js";
 
 const router = express.Router();
+
+const toClientStatus = (state) =>
+  state === INTERVIEW_STATES.INTERVIEW_COMPLETE ? "completed" : "in_progress";
+
+const toClientInterviewStatus = (state) =>
+  state === INTERVIEW_STATES.INTERVIEW_COMPLETE ? "COMPLETED" : "IN_PROGRESS";
 
 /** 0-based index into `session.rounds`; `currentRound` (1-based) is the source of truth. */
 function roundIndexFromCurrentRound(session) {
@@ -71,11 +78,11 @@ router.post("/start-interview", async (req, res) => {
     if (isAlreadyInitialized) {
       responsePayload = {
         question: session.currentQuestion,
-        status: session.status || "in_progress",
+        status: toClientStatus(session.state),
         currentRound: session.currentRound || 1,
         currentQuestionIndex: session.currentQuestionIndex ?? 0,
         roundStatus: session.roundStatus || "IN_PROGRESS",
-        interviewStatus: session.interviewStatus || "IN_PROGRESS",
+        interviewStatus: toClientInterviewStatus(session.state),
         rounds: session.rounds || [],
         roundsPlan: session.roundsPlan || [],
         roundsDetails: session.roundsDetails || [],
@@ -94,19 +101,18 @@ router.post("/start-interview", async (req, res) => {
         currentRoundIndex: 0,
         currentQuestionIndex: 0,
         roundStatus: "IN_PROGRESS",
-        interviewStatus: plan.interviewStatus,
-        status: "in_progress",
+        state: INTERVIEW_STATES.IN_PROGRESS,
       });
 
       const roundStart = await startRound(session._id);
       const refreshedSession = await getSession(session._id);
       responsePayload = {
         question: roundStart.question,
-        status: refreshedSession?.status || "in_progress",
+        status: toClientStatus(refreshedSession?.state),
         currentRound: refreshedSession?.currentRound || 1,
         currentQuestionIndex: refreshedSession?.currentQuestionIndex ?? 0,
         roundStatus: refreshedSession?.roundStatus || "IN_PROGRESS",
-        interviewStatus: refreshedSession?.interviewStatus || "IN_PROGRESS",
+        interviewStatus: toClientInterviewStatus(refreshedSession?.state),
         rounds: refreshedSession?.rounds || [],
         roundsPlan: refreshedSession?.roundsPlan || [],
         roundsDetails: refreshedSession?.roundsDetails || [],
@@ -152,11 +158,11 @@ router.get("/resume-interview", async (req, res) => {
       resumable: true,
       sessionId: session._id,
       question: session.currentQuestion || null,
-      status: session.status,
+      status: toClientStatus(session.state),
       currentRound: session.currentRound || null,
       currentQuestionIndex: session.currentQuestionIndex || 0,
       roundStatus: session.roundStatus || "IN_PROGRESS",
-      interviewStatus: session.interviewStatus || "IN_PROGRESS",
+      interviewStatus: toClientInterviewStatus(session.state),
       rounds: session.rounds || [],
       roundsPlan: session.roundsPlan || [],
       roundsDetails: session.roundsDetails || [],
@@ -191,7 +197,7 @@ router.get("/sessions/:userId", async (req, res) => {
         currentRound: session.currentRound || "",
         currentQuestionIndex: session.currentQuestionIndex || 0,
         roundStatus: session.roundStatus || "IN_PROGRESS",
-        interviewStatus: session.interviewStatus || "IN_PROGRESS",
+        interviewStatus: toClientInterviewStatus(session.state),
         rounds: session.rounds || [],
         roundsPlan: session.roundsPlan || [],
         roundsDetails: session.roundsDetails || [],
@@ -199,7 +205,8 @@ router.get("/sessions/:userId", async (req, res) => {
         currentRoundIndex: roundIndexFromCurrentRound(session),
         difficultyLevel: session.difficultyLevel || "",
         currentQuestion: session.currentQuestion || null,
-        status: session.status,
+        status: toClientStatus(session.state),
+        state: session.state || INTERVIEW_STATES.PREVIEW,
         finalReport: session.finalReport || null,
         createdAt: session.createdAt,
         updatedAt: session.updatedAt,
@@ -299,9 +306,9 @@ router.get("/interview-status/:sessionId", async (req, res) => {
     const tips = tipsByRoundType[roundType] || defaultTips;
     const selectedTips = tips.slice(0, 3);
 
-    const sessionInterviewStatus = session.interviewStatus;
+    const sessionInterviewStatus = session.state;
     const roundCompleted =
-      sessionInterviewStatus === "IN_PROGRESS" &&
+      sessionInterviewStatus !== INTERVIEW_STATES.INTERVIEW_COMPLETE &&
       session.roundStatus === "COMPLETED" &&
       !hasActiveQuestion;
     const nextRoundAvailable =
@@ -317,12 +324,15 @@ router.get("/interview-status/:sessionId", async (req, res) => {
           }
         : null;
     const report =
-      session.status === "completed" ? session.finalReport || null : null;
+      session.state === INTERVIEW_STATES.INTERVIEW_COMPLETE
+        ? session.finalReport || null
+        : null;
 
     if (
       !effectiveCurrentQuestion &&
       Number(currentQuestionIndex) > 0 &&
-      session.status === "in_progress"
+      session.state !== INTERVIEW_STATES.INTERVIEW_COMPLETE &&
+      session.roundStatus !== "COMPLETED"
     ) {
       console.warn("[interview-status] anomaly: in_progress, question index > 0, but no effective question", {
         sessionTail: String(sessionId).slice(-8),
@@ -338,21 +348,21 @@ router.get("/interview-status/:sessionId", async (req, res) => {
         currentQuestionIndex,
         effectiveLen: effectiveCurrentQuestion ? effectiveCurrentQuestion.length : 0,
         roundCompleted,
-        status: session.status,
+        status: toClientStatus(session.state),
       });
     }
 
     const isProcessing = await isInterviewAnswerProcessing(sessionId);
 
     return res.json({
-      status: session.status,
+      status: toClientStatus(session.state),
       currentRound: session.currentRound,
       currentQuestion: effectiveCurrentQuestion,
       currentQuestionIndex: session.currentQuestionIndex,
       lastScore: prevQuestion?.score ?? null,
       lastFeedback: prevQuestion?.feedback ?? null,
       roundStatus: currentRoundDoc?.status ?? session.roundStatus ?? null,
-      interviewStatus: session.status,
+      interviewStatus: toClientInterviewStatus(session.state),
       roundType: roundType ?? null,
       isProcessing,
       tips: selectedTips,
@@ -379,7 +389,7 @@ router.post("/move-to-next-round", async (req, res) => {
     if (!session) {
       return res.status(404).json({ error: "Session not found" });
     }
-    if (session.interviewStatus === "COMPLETED") {
+    if (session.state === INTERVIEW_STATES.INTERVIEW_COMPLETE) {
       return res.status(400).json({ error: "Interview already completed" });
     }
 
@@ -406,7 +416,7 @@ router.post("/move-to-next-round", async (req, res) => {
     session.currentRoundIndex = nextRoundIndex;
     session.currentQuestionIndex = 0;
     session.roundStatus = "IN_PROGRESS";
-    session.interviewStatus = "IN_PROGRESS";
+    session.state = INTERVIEW_STATES.IN_PROGRESS;
     session.currentQuestion = null;
     await session.save();
 
@@ -415,7 +425,7 @@ router.post("/move-to-next-round", async (req, res) => {
     return res.json({
       question: roundStart.question,
       status: "in_progress",
-      interviewStatus: session.interviewStatus,
+      interviewStatus: toClientInterviewStatus(session.state),
       roundStatus: session.roundStatus,
       currentRound: session.currentRound,
       currentQuestionIndex: session.currentQuestionIndex,

@@ -17,11 +17,20 @@ import { generateFinalReport } from "../services/interviewEngine.js";
 import { callLLM } from "../services/llmClient.js";
 import { getCompanyContext } from "../services/mcp/getCompanyContext.js";
 import { getEmbedding } from "../utils/embedding.js";
+import { handleEvaluationResult } from "../services/interviewOrchestrator.js";
+import {
+  assertValidTransition,
+  INTERVIEW_STATES,
+} from "../services/interviewStateMachine.js";
 
 await connectDB(config.MONGO_URI);
 await connectRedis().catch(() => {});
 
 const connection = redisUrl ? { url: redisUrl } : {};
+const toClientStatus = (state) =>
+  state === INTERVIEW_STATES.INTERVIEW_COMPLETE ? "completed" : "in_progress";
+const toClientInterviewStatus = (state) =>
+  state === INTERVIEW_STATES.INTERVIEW_COMPLETE ? "COMPLETED" : "IN_PROGRESS";
 
 /** Reserved for tests / future wiring. */
 export const interviewWorkerDeps = {
@@ -48,7 +57,7 @@ async function processEvaluateAnswerJob(sessionId, answer) {
   if (!session) {
     return { httpStatus: 404, body: { error: "Session not found" } };
   }
-  if (session.interviewStatus === "COMPLETED") {
+  if (session.state === INTERVIEW_STATES.INTERVIEW_COMPLETE) {
     return { httpStatus: 400, body: { error: "Interview already completed" } };
   }
   if (!Array.isArray(session.rounds) || session.rounds.length === 0) {
@@ -92,8 +101,8 @@ async function processEvaluateAnswerJob(sessionId, answer) {
         question: session.currentQuestion,
         feedback: existingSlot.feedback || "",
         score: existingSlot.score ?? null,
-        status: session.status || "in_progress",
-        interviewStatus: session.interviewStatus,
+        status: toClientStatus(session.state),
+        interviewStatus: toClientInterviewStatus(session.state),
         roundStatus: session.roundStatus,
         currentRound: session.currentRound,
         currentQuestionIndex: session.currentQuestionIndex,
@@ -153,6 +162,11 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
     llmReasoning = "";
   }
 
+  assertValidTransition(session.state, INTERVIEW_STATES.EVALUATING);
+  session.state = INTERVIEW_STATES.EVALUATING;
+  console.log("State → EVALUATING");
+  await session.save();
+
   // 4) MCP evaluateAnswer
   const questionObj = currentRound.questions[currentQuestionIndex];
   let evaluation;
@@ -173,6 +187,22 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
         "Thanks for the response. I could not evaluate this answer fully right now, so this is a neutral score. Please continue to the next question.",
       verdict: "partial",
     };
+  }
+
+  const evaluationResult = {
+    score: evaluation.score,
+    feedback: evaluation.feedback,
+  };
+  const decision = await handleEvaluationResult(session, evaluationResult);
+  if (!decision || !decision.action) {
+    throw new Error("Invalid orchestrator decision");
+  }
+  console.log("Orchestrator Decision:", decision);
+  if (decision.action === "NEXT_QUESTION") {
+    assertValidTransition(session.state, INTERVIEW_STATES.ROUND_ACTIVE);
+    session.state = INTERVIEW_STATES.ROUND_ACTIVE;
+    await session.save();
+    console.log("State → ROUND_ACTIVE");
   }
 
   // 5) Save answer + score + feedback
@@ -198,13 +228,10 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
   const nextQuestionIndex = currentQuestionIndex + 1;
   session.currentQuestionIndex = nextQuestionIndex;
   session.roundStatus = "IN_PROGRESS";
-  session.interviewStatus = "IN_PROGRESS";
   currentRound.status = "IN_PROGRESS";
 
-  const questionCount = Math.min(5, Math.max(3, Number(currentRound.questionCount) || 3));
-
-  // 7) If more questions remain in the current round -> generate next
-  if (nextQuestionIndex < questionCount) {
+  // 7) Decision branch: keep existing next-question execution logic.
+  if (decision.action === "NEXT_QUESTION") {
     const roundHistory = Array.isArray(currentRound.questions)
       ? currentRound.questions.slice(0, nextQuestionIndex).map((item) => ({
           question: item?.question || "",
@@ -260,7 +287,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
     session.markModified("currentQuestion");
     session.markModified("currentQuestionIndex");
     session.markModified("roundStatus");
-    session.markModified("interviewStatus");
+    session.markModified("state");
     session.markModified("currentRoundIndex");
     await session.save();
 
@@ -269,6 +296,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       currentQuestionIndex: session.currentQuestionIndex,
       nextQuestionLen: String(question || "").length,
     });
+    console.log("Final Session State:", session.state);
 
     return {
       httpStatus: 200,
@@ -276,8 +304,8 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
         question,
         feedback: evaluation.feedback,
         score: evaluation.score,
-        status: "in_progress",
-        interviewStatus: session.interviewStatus,
+        status: toClientStatus(session.state),
+        interviewStatus: toClientInterviewStatus(session.state),
         roundStatus: session.roundStatus,
         currentRound: session.currentRound,
         currentQuestionIndex: session.currentQuestionIndex,
@@ -294,7 +322,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
   session.markModified("currentQuestion");
   session.markModified("currentQuestionIndex");
   session.markModified("roundStatus");
-  session.markModified("interviewStatus");
+  session.markModified("state");
   session.markModified("currentRoundIndex");
   await session.save();
 
@@ -327,22 +355,57 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
     score: roundAverageScore,
   };
 
-  const hasNextRound = refreshedRoundIndex + 1 < refreshedSession.rounds.length;
-  if (!hasNextRound) {
-    refreshedSession.interviewStatus = "COMPLETED";
-    refreshedSession.status = "completed";
-    refreshedSession.finalReport = await generateFinalReport(refreshedSession);
+  if (decision.action === "NEXT_ROUND") {
+    assertValidTransition(refreshedSession.state, INTERVIEW_STATES.ROUND_COMPLETE);
+    refreshedSession.state = INTERVIEW_STATES.ROUND_COMPLETE;
+    await refreshedSession.save();
+    console.log("State → ROUND_COMPLETE");
+
+    // This worker does not initialize the next round question.
+    // If/when a next round has already been initialized on this session, move to ROUND_ACTIVE.
+    if (refreshedSession.currentQuestion) {
+      assertValidTransition(refreshedSession.state, INTERVIEW_STATES.ROUND_ACTIVE);
+      refreshedSession.state = INTERVIEW_STATES.ROUND_ACTIVE;
+      await refreshedSession.save();
+      console.log("State → ROUND_ACTIVE (new round)");
+    }
+  }
+
+  if (decision.action === "INTERVIEW_COMPLETE") {
+    assertValidTransition(refreshedSession.state, INTERVIEW_STATES.ROUND_COMPLETE);
+    refreshedSession.state = INTERVIEW_STATES.ROUND_COMPLETE;
+    await refreshedSession.save();
+    console.log("State → ROUND_COMPLETE");
+
+    assertValidTransition(refreshedSession.state, INTERVIEW_STATES.INTERVIEW_COMPLETE);
+    refreshedSession.state = INTERVIEW_STATES.INTERVIEW_COMPLETE;
+    await refreshedSession.save();
+    console.log("State → INTERVIEW_COMPLETE");
+
+    try {
+      refreshedSession.finalReport = await generateFinalReport(refreshedSession);
+      console.log(`✅ [interviewWorker] Final report generated for session ${sessionId}`);
+    } catch (reportError) {
+      console.error(`❌ [interviewWorker] Final report generation failed for session ${sessionId}:`, reportError?.message || reportError);
+      // Fallback with minimal info so we don't save a completely null report if possible
+      refreshedSession.finalReport = {
+        overallScore: roundAverageScore,
+        summaryFeedback: "Your interview is complete. Feedback is being generated and will be available in your history shortly.",
+        summary: "Interview complete."
+      };
+    }
   }
 
   syncStoredRoundIndexFromCurrentRound(refreshedSession);
   refreshedSession.markModified("rounds");
   refreshedSession.markModified("currentQuestion");
-  refreshedSession.markModified("interviewStatus");
-  refreshedSession.markModified("status");
+  refreshedSession.markModified("state");
   refreshedSession.markModified("finalReport");
   refreshedSession.markModified("currentRoundIndex");
   refreshedSession.markModified("roundStatus");
   await refreshedSession.save();
+  session.state = refreshedSession.state;
+  console.log("Final Session State:", session.state);
 
   return {
     httpStatus: 200,
@@ -350,15 +413,18 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       question: null,
       feedback: evaluation.feedback,
       score: evaluation.score,
-      status: refreshedSession.status || "in_progress",
-      interviewStatus: refreshedSession.interviewStatus,
+      status: toClientStatus(refreshedSession.state),
+      interviewStatus: toClientInterviewStatus(refreshedSession.state),
       roundStatus: refreshedSession.roundStatus,
       currentRound: refreshedSession.currentRound,
       currentQuestionIndex: refreshedSession.currentQuestionIndex,
       roundCompleted: true,
       roundFeedback: refreshedRound.feedback || {},
-      nextRoundAvailable: hasNextRound,
-      report: hasNextRound ? null : refreshedSession.finalReport || null,
+      nextRoundAvailable: decision.action === "NEXT_ROUND",
+      report:
+        decision.action === "INTERVIEW_COMPLETE"
+          ? refreshedSession.finalReport || null
+          : null,
     },
   };
 }
@@ -387,29 +453,43 @@ const processor = async (job) => {
   }
 };
 
-export const interviewWorker = new Worker(INTERVIEW_QUEUE, processor, {
-  connection,
-  concurrency: 5,
-});
+const WORKER_COUNT = 2;
+const WORKER_CONCURRENCY = 10;
 
-interviewWorker.on("completed", (job) => {
-  console.log("[interviewWorker] completed", { id: job.id, name: job.name });
-});
+function attachWorkerListeners(worker, index) {
+  const workerLabel = `interviewWorker#${index + 1}`;
 
-interviewWorker.on("failed", (job, err) => {
-  console.error("[interviewWorker] failed", {
-    id: job?.id,
-    name: job?.name,
-    attemptsMade: job?.attemptsMade,
-    error: err?.message || err,
-    stack: err?.stack,
+  worker.on("completed", (job) => {
+    console.log(`[${workerLabel}] completed`, { id: job.id, name: job.name });
   });
+
+  worker.on("failed", (job, err) => {
+    console.error(`[${workerLabel}] failed`, {
+      id: job?.id,
+      name: job?.name,
+      attemptsMade: job?.attemptsMade,
+      error: err?.message || err,
+      stack: err?.stack,
+    });
+  });
+
+  worker.on("error", (err) => {
+    console.error(`[${workerLabel}] worker error:`, err?.message || err, err?.stack);
+  });
+
+  worker.on("stalled", (jobId) => {
+    console.warn(`[${workerLabel}] stalled job:`, jobId);
+  });
+}
+
+export const interviewWorkers = Array.from({ length: WORKER_COUNT }, (_, index) => {
+  const worker = new Worker(INTERVIEW_QUEUE, processor, {
+    connection,
+    concurrency: WORKER_CONCURRENCY,
+  });
+  attachWorkerListeners(worker, index);
+  return worker;
 });
 
-interviewWorker.on("error", (err) => {
-  console.error("[interviewWorker] worker error:", err?.message || err, err?.stack);
-});
-
-interviewWorker.on("stalled", (jobId) => {
-  console.warn("[interviewWorker] stalled job:", jobId);
-});
+// Backward-compatible export for modules expecting a single worker instance.
+export const interviewWorker = interviewWorkers[0];

@@ -4,10 +4,29 @@ import Company from "../models/Company.js";
 import { getCompanyContext } from "./mcp/getCompanyContext.js";
 import { getNumberOfRounds } from "./mcp/getNumberOfRounds.js";
 import { generateFinalFeedback } from "./mcp/generateFinalFeedback.js";
+import { INTERVIEW_STATES } from "./interviewStateMachine.js";
 
 const toSafeString = (value, fallback = "") => {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 };
+
+function inferRoundAbout(roundType) {
+  if (!roundType) {
+    return "General Technical";
+  }
+
+  const normalized = toSafeString(roundType)
+    .toUpperCase()
+    .replace(/\s+/g, "_");
+
+  const mapping = {
+    DSA: "Data Structures and Algorithms",
+    SYSTEM_DESIGN: "System Design",
+    HR: "Behavioral and HR",
+  };
+
+  return mapping[normalized] || "General Technical";
+}
 
 const normalizeStringArray = (value) => {
   if (!Array.isArray(value)) return [];
@@ -109,8 +128,8 @@ const buildFallbackBlueprint = (companyContext, totalRounds, roundHints = []) =>
       roundNumber: index + 1,
       type: roundType,
       about: sanitizeRoundAbout(
-        seedText || inferRoundAbout(seedText, roundType, index),
-        `${roundType} Round`
+        seedText || inferRoundAbout(roundType),
+        inferRoundAbout(roundType)
       ),
       difficulty: inferDifficulty(seedText),
       questionCount: inferQuestionCount(roundType),
@@ -248,7 +267,7 @@ export const generateInterviewPlan = async (companyData) => {
     roundsDetails,
     totalRounds,
     currentRound: 1,
-    interviewStatus: "IN_PROGRESS",
+    state: INTERVIEW_STATES.IN_PROGRESS,
   };
 };
 

@@ -194,7 +194,7 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
 
     try {
       await redis.set(key, JSON.stringify(company), {
-        EX: 3600,
+        EX: 30,
       });
     } catch {
       // Ignore Redis write failures; response already built from MongoDB
