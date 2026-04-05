@@ -1,5 +1,6 @@
 import express from "express";
 import Company from "../models/Company.js";
+import authJWT from "../middleware/authJWT.js";
 import {
   createSession,
   getSession,
@@ -18,6 +19,10 @@ import { tipsByRoundType, defaultTips } from "../utils/interviewTips.js";
 import { INTERVIEW_STATES } from "../services/interviewStateMachine.js";
 
 const router = express.Router();
+router.use(authJWT);
+
+const getAuthenticatedUserId = (req) => String(req.user?.userId || "").trim();
+const isSessionOwner = (session, userId) => String(session?.userId || "") === userId;
 
 const toClientStatus = (state) =>
   state === INTERVIEW_STATES.INTERVIEW_COMPLETE ? "completed" : "in_progress";
@@ -48,11 +53,16 @@ async function isInterviewAnswerProcessing(sessionId) {
 
 router.post("/start-interview", async (req, res) => {
   try {
-    const { userId, companyId } = req.body;
+    const { companyId } = req.body;
+    const userId = getAuthenticatedUserId(req);
 
-    if (!userId || !companyId) {
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    if (!companyId) {
       return res.status(400).json({
-        error: "userId and companyId are required",
+        error: "companyId is required",
       });
     }
 
@@ -136,11 +146,16 @@ router.post("/start-interview", async (req, res) => {
 
 router.get("/resume-interview", async (req, res) => {
   try {
-    const { userId, companyId } = req.query;
+    const { companyId } = req.query;
+    const userId = getAuthenticatedUserId(req);
 
-    if (!userId || !companyId) {
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    if (!companyId) {
       return res.status(400).json({
-        error: "userId and companyId are required",
+        error: "companyId is required",
       });
     }
 
@@ -179,9 +194,9 @@ router.get("/resume-interview", async (req, res) => {
 
 router.get("/sessions/:userId", async (req, res) => {
   try {
-    const { userId } = req.params;
+    const userId = getAuthenticatedUserId(req);
     if (!userId) {
-      return res.status(400).json({ error: "userId is required" });
+      return res.status(401).json({ error: "Unauthorized" });
     }
 
     const sessions = await getUserSessions(userId);
@@ -220,9 +235,9 @@ router.get("/sessions/:userId", async (req, res) => {
 
 router.get("/analytics/:userId", async (req, res) => {
   try {
-    const { userId } = req.params;
+    const userId = getAuthenticatedUserId(req);
     if (!userId) {
-      return res.status(400).json({ error: "userId is required" });
+      return res.status(401).json({ error: "Unauthorized" });
     }
 
     const data = await buildUserInterviewAnalytics(userId);
@@ -236,11 +251,24 @@ router.get("/analytics/:userId", async (req, res) => {
 router.post("/submit-answer", async (req, res) => {
   try {
     const { sessionId, answer } = req.body;
+    const userId = getAuthenticatedUserId(req);
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
     if (!sessionId || typeof answer !== "string" || !answer.trim()) {
       return res.status(400).json({
         error: "sessionId and answer are required",
       });
+    }
+
+    const session = await getSession(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+    if (!isSessionOwner(session, userId)) {
+      return res.status(403).json({ error: "Forbidden" });
     }
 
     try {
@@ -271,6 +299,10 @@ router.post("/submit-answer", async (req, res) => {
 router.get("/interview-status/:sessionId", async (req, res) => {
   try {
     const { sessionId } = req.params;
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
     if (!sessionId) {
       return res.status(400).json({ error: "sessionId is required" });
     }
@@ -278,6 +310,9 @@ router.get("/interview-status/:sessionId", async (req, res) => {
     const session = await getSessionLean(sessionId);
     if (!session) {
       return res.status(404).json({ error: "Session not found" });
+    }
+    if (!isSessionOwner(session, userId)) {
+      return res.status(403).json({ error: "Forbidden" });
     }
 
     const rounds = Array.isArray(session.rounds) ? session.rounds : [];
@@ -381,6 +416,10 @@ router.get("/interview-status/:sessionId", async (req, res) => {
 router.post("/move-to-next-round", async (req, res) => {
   try {
     const { sessionId } = req.body;
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
     if (!sessionId) {
       return res.status(400).json({ error: "sessionId is required" });
     }
@@ -388,6 +427,9 @@ router.post("/move-to-next-round", async (req, res) => {
     const session = await getSession(sessionId);
     if (!session) {
       return res.status(404).json({ error: "Session not found" });
+    }
+    if (!isSessionOwner(session, userId)) {
+      return res.status(403).json({ error: "Forbidden" });
     }
     if (session.state === INTERVIEW_STATES.INTERVIEW_COMPLETE) {
       return res.status(400).json({ error: "Interview already completed" });
@@ -441,8 +483,20 @@ router.post("/move-to-next-round", async (req, res) => {
 router.delete("/discard/:sessionId", async (req, res) => {
   try {
     const { sessionId } = req.params;
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
     if (!sessionId) {
       return res.status(400).json({ error: "sessionId is required" });
+    }
+
+    const session = await getSession(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+    if (!isSessionOwner(session, userId)) {
+      return res.status(403).json({ error: "Forbidden" });
     }
 
     const deleted = await discardInProgressSession(sessionId);
