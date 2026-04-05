@@ -46,6 +46,56 @@ export const getUserSessions = async (userId) => {
     .sort({ updatedAt: -1 });
 };
 
+/**
+ * Lightweight list payload for interview history screen.
+ * Excludes heavy arrays like rounds/history to keep initial load fast.
+ */
+export const getUserSessionSummaries = async (userId) => {
+  return InterviewSession.find({ userId })
+    .select(
+      "userId companyId role currentRound currentQuestionIndex roundStatus state roundsPlan roundsDetails totalRounds currentRoundIndex difficultyLevel currentQuestion finalReport.overallScore createdAt updatedAt"
+    )
+    .populate("companyId", "name type")
+    .sort({ updatedAt: -1 })
+    .lean();
+};
+
+export const getUserSessionSummariesPaginated = async (userId, page = 1, limit = 10) => {
+  const pageNumber = Math.max(1, Number(page) || 1);
+  const limitNumber = Math.min(50, Math.max(1, Number(limit) || 10));
+  const skip = (pageNumber - 1) * limitNumber;
+
+  const [items, total] = await Promise.all([
+    InterviewSession.find({ userId })
+      .select(
+        "userId companyId role currentRound currentQuestionIndex roundStatus state roundsPlan roundsDetails totalRounds currentRoundIndex difficultyLevel currentQuestion finalReport.overallScore createdAt updatedAt"
+      )
+      .populate("companyId", "name type")
+      .sort({ updatedAt: -1 })
+      .skip(skip)
+      .limit(limitNumber)
+      .lean(),
+    InterviewSession.countDocuments({ userId }),
+  ]);
+
+  return {
+    items,
+    pagination: {
+      page: pageNumber,
+      limit: limitNumber,
+      total,
+      hasMore: skip + items.length < total,
+    },
+  };
+};
+
+/** Full session detail for a single session, restricted to owner. */
+export const getUserSessionDetail = async (userId, sessionId) => {
+  return InterviewSession.findOne({ _id: sessionId, userId })
+    .populate("companyId", "name type")
+    .lean();
+};
+
 export const discardInProgressSession = async (sessionId) => {
   return InterviewSession.findOneAndDelete({
     _id: sessionId,

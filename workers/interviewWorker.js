@@ -22,6 +22,12 @@ import {
   assertValidTransition,
   INTERVIEW_STATES,
 } from "../services/interviewStateMachine.js";
+import {
+  clearInterviewProcessing,
+  invalidateInterviewDetail,
+  invalidateInterviewSummaries,
+  markInterviewProcessing,
+} from "../services/interviewCache.js";
 
 await connectDB(config.MONGO_URI);
 await connectRedis().catch(() => {});
@@ -439,8 +445,22 @@ const processor = async (job) => {
 
   if (job.name === EVALUATE_ANSWER) {
     const { sessionId, answer } = job.data || {};
-    const result = await processEvaluateAnswerJob(sessionId, answer);
-    return result;
+    await markInterviewProcessing(sessionId);
+    try {
+      const result = await processEvaluateAnswerJob(sessionId, answer);
+      return result;
+    } finally {
+      await clearInterviewProcessing(sessionId);
+      await invalidateInterviewDetail(sessionId);
+      try {
+        const latest = await getSession(sessionId);
+        if (latest?.userId) {
+          await invalidateInterviewSummaries(latest.userId);
+        }
+      } catch (err) {
+        console.warn("[interviewWorker] cache invalidation after job failed:", err?.message || err);
+      }
+    }
   }
 
   if (job.name && job.name !== EVALUATE_ANSWER) {

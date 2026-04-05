@@ -6,7 +6,8 @@ import {
   getSession,
   getSessionLean,
   getInProgressSession,
-  getUserSessions,
+  getUserSessionSummariesPaginated,
+  getUserSessionDetail,
   buildUserInterviewAnalytics,
   updateSession,
   discardInProgressSession,
@@ -17,6 +18,17 @@ import { interviewQueue } from "../services/queues/interviewQueue.js";
 import { EVALUATE_ANSWER } from "../services/queues/jobTypes.js";
 import { tipsByRoundType, defaultTips } from "../utils/interviewTips.js";
 import { INTERVIEW_STATES } from "../services/interviewStateMachine.js";
+import {
+  getCachedInterviewSummaries,
+  setCachedInterviewSummaries,
+  invalidateInterviewSummaries,
+  getCachedInterviewDetail,
+  setCachedInterviewDetail,
+  invalidateInterviewDetail,
+  markInterviewProcessing,
+  isInterviewProcessing,
+  clearInterviewProcessing,
+} from "../services/interviewCache.js";
 
 const router = express.Router();
 router.use(authJWT);
@@ -37,18 +49,34 @@ function roundIndexFromCurrentRound(session) {
   return Math.max(0, Math.min(rounds.length - 1, currentRoundNumber - 1));
 }
 
-/** True if a BullMQ evaluate-answer job exists for this session (waiting, active, or delayed). */
-async function isInterviewAnswerProcessing(sessionId) {
-  try {
-    const id = String(sessionId);
-    const jobs = await interviewQueue.getJobs(["waiting", "active", "delayed"], 0, 200);
-    return jobs.some(
-      (job) => job.name === EVALUATE_ANSWER && String(job.data?.sessionId || "") === id
-    );
-  } catch (err) {
-    console.warn("[interview-status] isInterviewAnswerProcessing check failed:", err?.message || err);
-    return false;
-  }
+const clampPage = (value) => Math.max(1, Number(value) || 1);
+const clampLimit = (value) => Math.min(50, Math.max(1, Number(value) || 10));
+const latencyWindows = {
+  sessions: [],
+  sessionDetail: [],
+};
+
+function recordLatencyMetric(metricName, durationMs) {
+  const window = latencyWindows[metricName];
+  if (!window) return;
+  window.push(Number(durationMs) || 0);
+  if (window.length > 200) window.shift();
+  if (window.length % 25 !== 0) return;
+  const sorted = [...window].sort((a, b) => a - b);
+  const index = Math.max(0, Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1));
+  const p95 = sorted[index];
+  console.info(`[interview-metrics] ${metricName}`, {
+    samples: sorted.length,
+    p95Ms: p95,
+    latestMs: Number(durationMs) || 0,
+  });
+}
+
+async function invalidateSessionAndSummaryCaches(userId, sessionId) {
+  await Promise.all([
+    invalidateInterviewDetail(sessionId),
+    invalidateInterviewSummaries(userId),
+  ]);
 }
 
 router.post("/start-interview", async (req, res) => {
@@ -133,6 +161,11 @@ router.post("/start-interview", async (req, res) => {
       };
     }
 
+    await Promise.all([
+      invalidateInterviewSummaries(userId),
+      invalidateInterviewDetail(session._id),
+    ]);
+
     return res.status(createdNewSession ? 201 : 200).json({
       sessionId: session._id,
       ...responsePayload,
@@ -193,27 +226,39 @@ router.get("/resume-interview", async (req, res) => {
 });
 
 router.get("/sessions/:userId", async (req, res) => {
+  const startedAt = Date.now();
   try {
     const userId = getAuthenticatedUserId(req);
     if (!userId) {
       return res.status(401).json({ error: "Unauthorized" });
     }
+    const page = clampPage(req.query.page);
+    const limit = clampLimit(req.query.limit);
+    const cached = await getCachedInterviewSummaries(userId, page, limit);
+    if (cached) {
+      recordLatencyMetric("sessions", Date.now() - startedAt);
+      console.info("[interview-sessions] cache hit", {
+        userId,
+        page,
+        limit,
+        durationMs: Date.now() - startedAt,
+      });
+      return res.json(cached);
+    }
 
-    const sessions = await getUserSessions(userId);
-    return res.json(
-      sessions.map((session) => ({
+    const { items, pagination } = await getUserSessionSummariesPaginated(userId, page, limit);
+    const payload = {
+      items: items.map((session) => ({
         _id: session._id,
         userId: session.userId,
         companyId: session.companyId?._id || session.companyId || null,
         companyName: session.companyId?.name || "Unknown Company",
         companyType: session.companyId?.type || "",
         role: session.role || "",
-        history: session.history || [],
         currentRound: session.currentRound || "",
         currentQuestionIndex: session.currentQuestionIndex || 0,
         roundStatus: session.roundStatus || "IN_PROGRESS",
         interviewStatus: toClientInterviewStatus(session.state),
-        rounds: session.rounds || [],
         roundsPlan: session.roundsPlan || [],
         roundsDetails: session.roundsDetails || [],
         totalRounds: session.totalRounds || 0,
@@ -222,14 +267,96 @@ router.get("/sessions/:userId", async (req, res) => {
         currentQuestion: session.currentQuestion || null,
         status: toClientStatus(session.state),
         state: session.state || INTERVIEW_STATES.PREVIEW,
-        finalReport: session.finalReport || null,
+        finalScore:
+          typeof session?.finalReport?.overallScore === "number"
+            ? session.finalReport.overallScore
+            : null,
         createdAt: session.createdAt,
         updatedAt: session.updatedAt,
-      }))
-    );
+      })),
+      pagination,
+    };
+    await setCachedInterviewSummaries(userId, page, limit, payload);
+    recordLatencyMetric("sessions", Date.now() - startedAt);
+    console.info("[interview-sessions] cache miss", {
+      userId,
+      page,
+      limit,
+      count: payload.items.length,
+      durationMs: Date.now() - startedAt,
+    });
+    return res.json(payload);
   } catch (error) {
     console.error("❌ Error fetching interview sessions:", error.message);
     return res.status(500).json({ error: "Failed to fetch interview history" });
+  }
+});
+
+router.get("/session/:sessionId", async (req, res) => {
+  const startedAt = Date.now();
+  try {
+    const userId = getAuthenticatedUserId(req);
+    const { sessionId } = req.params;
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    if (!sessionId) {
+      return res.status(400).json({ error: "sessionId is required" });
+    }
+
+    const cached = await getCachedInterviewDetail(sessionId);
+    if (cached) {
+      if (!isSessionOwner(cached, userId)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      recordLatencyMetric("sessionDetail", Date.now() - startedAt);
+      console.info("[interview-session-detail] cache hit", {
+        sessionId,
+        durationMs: Date.now() - startedAt,
+      });
+      return res.json(cached);
+    }
+
+    const session = await getUserSessionDetail(userId, sessionId);
+    if (!session) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    const payload = {
+      _id: session._id,
+      userId: session.userId,
+      companyId: session.companyId?._id || session.companyId || null,
+      companyName: session.companyId?.name || "Unknown Company",
+      companyType: session.companyId?.type || "",
+      role: session.role || "",
+      history: session.history || [],
+      currentRound: session.currentRound || "",
+      currentQuestionIndex: session.currentQuestionIndex || 0,
+      roundStatus: session.roundStatus || "IN_PROGRESS",
+      interviewStatus: toClientInterviewStatus(session.state),
+      rounds: session.rounds || [],
+      roundsPlan: session.roundsPlan || [],
+      roundsDetails: session.roundsDetails || [],
+      totalRounds: session.totalRounds || 0,
+      currentRoundIndex: roundIndexFromCurrentRound(session),
+      difficultyLevel: session.difficultyLevel || "",
+      currentQuestion: session.currentQuestion || null,
+      status: toClientStatus(session.state),
+      state: session.state || INTERVIEW_STATES.PREVIEW,
+      finalReport: session.finalReport || null,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+    };
+    await setCachedInterviewDetail(sessionId, payload);
+    recordLatencyMetric("sessionDetail", Date.now() - startedAt);
+    console.info("[interview-session-detail] cache miss", {
+      sessionId,
+      durationMs: Date.now() - startedAt,
+    });
+    return res.json(payload);
+  } catch (error) {
+    console.error("❌ Error fetching interview session detail:", error.message);
+    return res.status(500).json({ error: "Failed to fetch interview detail" });
   }
 });
 
@@ -272,6 +399,8 @@ router.post("/submit-answer", async (req, res) => {
     }
 
     try {
+      await markInterviewProcessing(sessionId);
+      await invalidateSessionAndSummaryCaches(userId, sessionId);
       const job = await interviewQueue.add(EVALUATE_ANSWER, {
         sessionId,
         answer: answer.trim(),
@@ -282,6 +411,7 @@ router.post("/submit-answer", async (req, res) => {
         sessionId,
       });
     } catch (queueError) {
+      await clearInterviewProcessing(sessionId);
       console.warn("[submit-answer] BullMQ enqueue failed:", queueError?.message || queueError);
       return res.status(503).json({ error: "Interview queue unavailable" });
     }
@@ -387,7 +517,9 @@ router.get("/interview-status/:sessionId", async (req, res) => {
       });
     }
 
-    const isProcessing = await isInterviewAnswerProcessing(sessionId);
+    const isProcessing =
+      session.state === INTERVIEW_STATES.EVALUATING ||
+      (await isInterviewProcessing(sessionId));
 
     return res.json({
       status: toClientStatus(session.state),
@@ -461,6 +593,7 @@ router.post("/move-to-next-round", async (req, res) => {
     session.state = INTERVIEW_STATES.IN_PROGRESS;
     session.currentQuestion = null;
     await session.save();
+    await invalidateSessionAndSummaryCaches(userId, sessionId);
 
     const roundStart = await startRound(sessionId);
 
@@ -500,6 +633,10 @@ router.delete("/discard/:sessionId", async (req, res) => {
     }
 
     const deleted = await discardInProgressSession(sessionId);
+    await Promise.all([
+      invalidateSessionAndSummaryCaches(userId, sessionId),
+      clearInterviewProcessing(sessionId),
+    ]);
     if (!deleted) {
       // Idempotent discard: treat "already discarded/not found" as success.
       return res.json({ success: true, message: "No in-progress interview found to discard" });
