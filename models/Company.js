@@ -180,6 +180,7 @@
 // export default Company;
 
 import mongoose from "mongoose";
+import { invalidateCompanyDetailCache } from "../services/companyDetailCache.js";
 // Import models for notification creation (using lazy loading to avoid circular deps)
 let Notification, User;
 
@@ -356,6 +357,77 @@ companySchema.pre("save", function (next) {
   }
   
   next();
+});
+
+/** Payload keys for OA / Interview / Process tabs — invalidate detail cache only when these change */
+const COMPANY_DETAIL_TAB_FIELDS = [
+  "onlineQuestions",
+  "onlineQuestions_solution",
+  "interviewQuestions",
+  "interviewQuestions_solution",
+  "interviewProcess",
+];
+
+function modifiedPathTouchesDetailTabs(path) {
+  if (!path || typeof path !== "string") return false;
+  return COMPANY_DETAIL_TAB_FIELDS.some(
+    (prefix) => path === prefix || path.startsWith(`${prefix}.`)
+  );
+}
+
+function saveDocumentTouchesDetailTabs(doc) {
+  if (!doc || typeof doc.modifiedPaths !== "function") return false;
+  return doc.modifiedPaths().some(modifiedPathTouchesDetailTabs);
+}
+
+function collectUpdateRootKeys(update) {
+  const keys = [];
+  function walk(node) {
+    if (!node || typeof node !== "object") return;
+    for (const [k, v] of Object.entries(node)) {
+      if (k.startsWith("$")) {
+        if (v && typeof v === "object" && !Array.isArray(v)) walk(v);
+      } else {
+        keys.push(k);
+      }
+    }
+  }
+  walk(update);
+  return keys;
+}
+
+function updateObjectTouchesDetailTabs(update) {
+  return collectUpdateRootKeys(update).some(modifiedPathTouchesDetailTabs);
+}
+
+// Invalidate Redis `company:<id>` only when OA / Interview / Process tab data changes (see above)
+companySchema.post("save", async function (doc) {
+  try {
+    if (!saveDocumentTouchesDetailTabs(doc)) return;
+    await invalidateCompanyDetailCache(doc._id);
+  } catch {
+    // Never fail the save if Redis invalidation errors
+  }
+});
+
+companySchema.post(["findOneAndUpdate", "findByIdAndUpdate"], async function (doc) {
+  try {
+    const update = typeof this.getUpdate === "function" ? this.getUpdate() : {};
+    if (!updateObjectTouchesDetailTabs(update)) return;
+    const id = doc?._id ?? this.getFilter?.()?._id;
+    await invalidateCompanyDetailCache(id);
+  } catch {
+    // Never fail the update if Redis invalidation errors
+  }
+});
+
+companySchema.post(["findOneAndDelete", "findByIdAndDelete"], async function (doc) {
+  try {
+    const id = doc?._id ?? this.getFilter?.()?._id;
+    await invalidateCompanyDetailCache(id);
+  } catch {
+    // Never fail the delete if Redis invalidation errors
+  }
 });
 
 // Post-save hook to create notifications when company is approved

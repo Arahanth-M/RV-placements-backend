@@ -15,15 +15,14 @@ import {
 } from "./middleware/rateLimiter.js";
 
 import companyRouter from "./routes/companyRoutes.js";
+import submissionRouter from "./routes/submissionsRoutes.js";
 import experienceRouter from "./routes/experienceRoutes.js";
 import authRouter from "./routes/authRoutes.js";
-import submissionRoutes from "./routes/submissionsRoutes.js";
 import paymentRouter from "./routes/payment.js";
 import leetcodeRouter from "./routes/leetcodeRoutes.js";
 import adminRouter from "./routes/adminRoutes.js";
 import eventRouter from "./routes/eventRoutes.js";
 import yearStatsRouter from "./routes/yearStatsRoutes.js";
-import commentRouter from "./routes/commentRoutes.js";
 import notificationRouter from "./routes/notificationRoutes.js";
 import studentRouter from "./routes/studentRoutes.js";
 import placementRouter from "./routes/placementRoutes.js";
@@ -124,15 +123,14 @@ if (process.env.NODE_ENV !== "test") {
  * 5. Application Routes
  */
 app.use(routes.AUTH, authRouter);
+app.use(routes.SUBMISSIONS, submissionRouter);
 app.use(routes.COMPANIES, companyRouter);
 app.use(routes.EXPERIENCES, experienceRouter);
-app.use(routes.SUBMISSIONS, submissionRoutes);
 app.use(routes.PAYMENT, paymentRouter);
 app.use(routes.LEETCODE, leetcodeRouter);
 app.use(routes.ADMIN, adminRouter);
 app.use(routes.EVENTS, eventRouter);
 app.use(routes.YEAR_STATS, yearStatsRouter);
-app.use(routes.COMMENTS, commentRouter);
 app.use(routes.NOTIFICATIONS, notificationRouter);
 app.use(routes.STUDENTS, studentRouter);
 app.use(routes.PLACEMENT, placementRouter);

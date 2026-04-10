@@ -9,6 +9,7 @@ import Submission from "../models/Submission.js";
 import { getCompanyFocusTags } from "../utils/companyFocusTags.js";
 import { attachPlacementCategoryToCompany } from "../utils/ctcCategory.js";
 import redis from "../utils/redis.js";
+import { companyDetailRedisKey } from "../services/companyDetailCache.js";
 dotenv.config();
 
 const companyRouter = express.Router();
@@ -117,13 +118,15 @@ companyRouter.get("/", async (req, res) => {
 // });
 companyRouter.get("/:id", authJWT, async (req, res) => {
   const id = req.params.id;
-  const key = `company:${id}`;
+  const key = companyDetailRedisKey(id);
   try {
     let cached = null;
-    try {
-      cached = await redis.get(key);
-    } catch {
-      // Redis down or error — continue to MongoDB without logging
+    if (key) {
+      try {
+        cached = await redis.get(key);
+      } catch {
+        // Redis down or error — continue to MongoDB without logging
+      }
     }
     if (cached != null && cached !== "") {
       try {
@@ -192,12 +195,14 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
       videoUrl,
     });
 
-    try {
-      await redis.set(key, JSON.stringify(company), {
-        EX: 30,
-      });
-    } catch {
-      // Ignore Redis write failures; response already built from MongoDB
+    if (key) {
+      try {
+        await redis.set(key, JSON.stringify(company), {
+          EX: 30,
+        });
+      } catch {
+        // Ignore Redis write failures; response already built from MongoDB
+      }
     }
 
     return res.json(company);

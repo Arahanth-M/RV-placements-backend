@@ -2,8 +2,9 @@
  * Claims embedded in the access JWT at login. authJWT verifies the signature only
  * (no DB) and attaches this object to req.user.
  */
-export function buildJwtPayloadFromUser(user) {
+export function buildJwtPayloadFromUser(user, options = {}) {
   const doc = user.toObject ? user.toObject() : user;
+  const isAdminSession = options?.isAdminSession === true;
   return {
     userId: doc.userId,
     email: doc.email,
@@ -15,6 +16,7 @@ export function buildJwtPayloadFromUser(user) {
     isPremium: doc.isPremium ?? false,
     membershipType: doc.membershipType,
     companyId: doc.companyId,
+    isAdminSession,
     createdAt: doc.createdAt
       ? new Date(doc.createdAt).toISOString()
       : new Date().toISOString(),

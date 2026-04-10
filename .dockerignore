@@ -1,5 +1,9 @@
-node_modules
-.git
+node_modules/
+.git/
+.DS_Store
+.vscode/
+.history/
+.cache/
 .env
 .env.*
 !.env.example
@@ -7,7 +11,9 @@ Dockerfile
 .dockerignore
 *.md
 .gitignore
-tests
-coverage
+tests/
+coverage/
 *.log
 npm-debug.log*
+tmp/
+*.tmp

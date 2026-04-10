@@ -74,7 +74,6 @@ export const routes = {
   ADMIN: '/api/admin',
   EVENTS: '/api/events',
   YEAR_STATS: '/api/year-stats',
-  COMMENTS: '/api',
   NOTIFICATIONS: '/api/notifications',
   STUDENTS: '/api/students',
   PLACEMENT: '/api/placement',
@@ -102,12 +101,17 @@ export const messages = {
   },
 };
 
-// Login allowlist (temporary): only this Google account may sign in as student or admin.
-export const ALLOWED_LOGIN_EMAIL =
-  process.env.ALLOWED_LOGIN_EMAIL || "arahanthm.cs22@rvce.edu.in";
+/** Single canonical allowlist / admin identity for dev defaults (override with env). */
+export const DEFAULT_PLATFORM_OWNER_EMAIL = "arahanthm.cs22@rvce.edu.in";
 
-// Admin Configuration (defaults to same as allowlist when unset)
-export const ADMIN_EMAIL = process.env.ADMIN_EMAIL || ALLOWED_LOGIN_EMAIL;
+// Login allowlist: this Google account may sign in (student flow and/or admin flow).
+export const ALLOWED_LOGIN_EMAIL =
+  process.env.ALLOWED_LOGIN_EMAIL || DEFAULT_PLATFORM_OWNER_EMAIL;
+
+// Admin email: must match this address to complete /api/auth/google/admin OAuth (JWT gets isAdminSession).
+// Student OAuth uses /api/auth/google — same email, but isAdminSession is false.
+export const ADMIN_EMAIL =
+  process.env.ADMIN_EMAIL?.trim() || DEFAULT_PLATFORM_OWNER_EMAIL;
 
 // Default values
 export const defaults = {

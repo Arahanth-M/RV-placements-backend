@@ -47,12 +47,12 @@ const redirectToAuthCallback = (req, res, query) => {
 
 const JWT_COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
-const setTokenCookie = (res, user) => {
+const setTokenCookie = (res, user, options = {}) => {
   if (!config.JWT_SECRET) {
     console.warn("JWT_SECRET is not set; skipping token cookie");
     return;
   }
-  const payload = buildJwtPayloadFromUser(user);
+  const payload = buildJwtPayloadFromUser(user, options);
   const token = jwt.sign(payload, config.JWT_SECRET, { expiresIn: "7d" });
   res.cookie("token", token, {
     httpOnly: true,
@@ -152,7 +152,7 @@ router.get(
         }
       }
 
-      setTokenCookie(res, user);
+      setTokenCookie(res, user, { isAdminSession: isAdminLogin });
 
       if (isAdminLogin) {
         return redirectToAuthCallback(req, res, "login=success&admin=true");
@@ -186,7 +186,7 @@ router.get("/current_user", authJWT, async (req, res) => {
 
 router.get("/is_admin", authJWT, (req, res) => {
   try {
-    const isAdmin = req.user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+    const isAdmin = req.user?.isAdminSession === true;
     res.json({ isAdmin });
   } catch (error) {
     console.error("❌ Error checking admin status:", error);

@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 # Multi-stage: build then run (smaller final image, no npm cache)
 # Debian slim (glibc): @xenova/transformers → onnxruntime-node requires glibc;
 # node:*-alpine (musl) fails with "ld-linux-aarch64.so.1: No such file or directory".
@@ -5,7 +6,8 @@
 FROM node:20-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev --no-audit --no-fund
 
 # Stage 2: production runtime
 FROM node:20-slim
