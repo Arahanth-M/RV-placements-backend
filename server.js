@@ -145,7 +145,14 @@ app.use(routes.INTERVIEW, interviewRouter);
  */
 if (process.env.NODE_ENV !== "test") {
   connectDB(config.MONGO_URI).then(async () => {
-    connectRedis().catch(() => {});
+    await connectRedis().catch(() => {});
+    const { startNotificationSseSubscriber } = await import(
+      "./services/realtime/notificationEmitter.js"
+    );
+    await startNotificationSseSubscriber().catch((e) =>
+      console.error("[notifications] SSE subscriber startup:", e?.message || e)
+    );
+
     app.listen(config.PORT, () =>
       console.log(`🚀 Server running on ${config.BACKEND_URL}`)
     );

@@ -1,132 +1,157 @@
 import express from "express";
-import Notification from "../models/Notification.js";
+import mongoose from "mongoose";
+import {
+  createNotification,
+  getUserNotifications,
+  getUnreadCount,
+  markAsSeen,
+  markAllAsSeen,
+  deleteNotification,
+  clearAllNotifications,
+} from "../services/notificationService.js";
 import authJWT from "../middleware/authJWT.js";
+import { subscribe } from "../services/realtime/notificationEmitter.js";
 
 const notificationRouter = express.Router();
 
-// All notification routes require authentication
 notificationRouter.use(authJWT);
 
-// Get all notifications for the current user
-notificationRouter.get("/", async (req, res) => {
-  try {
-    if (!req.user || !req.user.userId) {
-      return res.status(401).json({ error: "User not authenticated" });
-    }
+notificationRouter.get("/stream", (req, res) => {
+  const userId = req.user?._id;
+  if (!userId) return res.sendStatus(401);
 
-    const notifications = await Notification.find({ userId: req.user.userId })
-      .sort({ createdAt: -1 })
-      .limit(50); // Limit to last 50 notifications
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
 
-    res.json(notifications);
-  } catch (error) {
-    console.error("❌ Error fetching notifications:", error);
-    res.status(500).json({ error: "Server error" });
+  if (typeof res.flushHeaders === "function") {
+    res.flushHeaders();
   }
+
+  subscribe(String(userId), res);
 });
 
-// Get unread notification count
+function userIdFromRequest(req, res) {
+  const raw = req.user?._id;
+  if (raw == null || raw === "") {
+    res.status(401).json({ error: "User not authenticated" });
+    return null;
+  }
+  const s = String(raw);
+  try {
+    // eslint-disable-next-line no-new
+    new mongoose.Types.ObjectId(s);
+    return s;
+  } catch {
+    res.status(400).json({ error: "Invalid user id" });
+    return null;
+  }
+}
+
+function notificationIdFromParams(req, res) {
+  const { id } = req.params;
+  if (id == null || id === "") {
+    res.status(400).json({ error: "Invalid notification id" });
+    return null;
+  }
+  try {
+    // eslint-disable-next-line no-new
+    new mongoose.Types.ObjectId(String(id));
+    return String(id);
+  } catch {
+    res.status(400).json({ error: "Invalid notification id" });
+    return null;
+  }
+}
+
 notificationRouter.get("/unread/count", async (req, res) => {
   try {
-    if (!req.user || !req.user.userId) {
-      return res.status(401).json({ error: "User not authenticated" });
-    }
+    const userId = userIdFromRequest(req, res);
+    if (!userId) return;
 
-    const count = await Notification.countDocuments({
-      userId: req.user.userId,
-      isSeen: false,
-    });
-
-    res.json({ count });
+    const count = await getUnreadCount(userId);
+    res.status(200).json({ count });
   } catch (error) {
     console.error("❌ Error fetching unread count:", error);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-// Mark notification as seen
-notificationRouter.put("/:id/seen", async (req, res) => {
+notificationRouter.get("/", async (req, res) => {
   try {
-    if (!req.user || !req.user.userId) {
-      return res.status(401).json({ error: "User not authenticated" });
-    }
+    const userId = userIdFromRequest(req, res);
+    if (!userId) return;
 
-    const notification = await Notification.findOne({
-      _id: req.params.id,
-      userId: req.user.userId,
+    const { notifications, pageInfo } = await getUserNotifications(userId, {
+      cursor: req.query.cursor,
+      limit: req.query.limit,
     });
-
-    if (!notification) {
-      return res.status(404).json({ error: "Notification not found" });
-    }
-
-    notification.isSeen = true;
-    await notification.save();
-
-    res.json({ message: "Notification marked as seen", notification });
+    res.status(200).json({ notifications, pageInfo });
   } catch (error) {
-    console.error("❌ Error marking notification as seen:", error);
+    console.error("❌ Error fetching notifications:", error);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-// Mark all notifications as seen
 notificationRouter.put("/mark-all-seen", async (req, res) => {
   try {
-    if (!req.user || !req.user.userId) {
-      return res.status(401).json({ error: "User not authenticated" });
-    }
+    const userId = userIdFromRequest(req, res);
+    if (!userId) return;
 
-    await Notification.updateMany(
-      { userId: req.user.userId, isSeen: false },
-      { isSeen: true }
-    );
-
-    res.json({ message: "All notifications marked as seen" });
+    const { modifiedCount } = await markAllAsSeen(userId);
+    res.status(200).json({ modifiedCount });
   } catch (error) {
     console.error("❌ Error marking all notifications as seen:", error);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-// Delete a single notification
-notificationRouter.delete("/:id", async (req, res) => {
+notificationRouter.put("/:id/seen", async (req, res) => {
   try {
-    if (!req.user || !req.user.userId) {
-      return res.status(401).json({ error: "User not authenticated" });
-    }
+    const userId = userIdFromRequest(req, res);
+    if (!userId) return;
 
-    const notification = await Notification.findOneAndDelete({
-      _id: req.params.id,
-      userId: req.user.userId,
-    });
+    const notificationId = notificationIdFromParams(req, res);
+    if (!notificationId) return;
 
+    const notification = await markAsSeen(notificationId, userId);
     if (!notification) {
       return res.status(404).json({ error: "Notification not found" });
     }
+    res.status(200).json(notification);
+  } catch (error) {
+    console.error("❌ Error marking notification as seen:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
 
-    res.json({ message: "Notification deleted successfully" });
+notificationRouter.delete("/:id", async (req, res) => {
+  try {
+    const userId = userIdFromRequest(req, res);
+    if (!userId) return;
+
+    const notificationId = notificationIdFromParams(req, res);
+    if (!notificationId) return;
+
+    const deleted = await deleteNotification(notificationId, userId);
+    if (!deleted) {
+      return res.status(404).json({ error: "Notification not found" });
+    }
+    res.status(200).json(deleted);
   } catch (error) {
     console.error("❌ Error deleting notification:", error);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-// Clear all notifications for the current user
 notificationRouter.delete("/", async (req, res) => {
   try {
-    if (!req.user || !req.user.userId) {
-      return res.status(401).json({ error: "User not authenticated" });
-    }
+    const userId = userIdFromRequest(req, res);
+    if (!userId) return;
 
-    const result = await Notification.deleteMany({
-      userId: req.user.userId,
-    });
-
-    res.json({ 
-      message: "All notifications cleared successfully",
-      deletedCount: result.deletedCount 
-    });
+    const { deletedCount } = await clearAllNotifications(userId);
+    res.status(200).json({ deletedCount });
   } catch (error) {
     console.error("❌ Error clearing notifications:", error);
     res.status(500).json({ error: "Server error" });
@@ -134,4 +159,3 @@ notificationRouter.delete("/", async (req, res) => {
 });
 
 export default notificationRouter;
-

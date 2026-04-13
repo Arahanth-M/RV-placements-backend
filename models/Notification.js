@@ -1,45 +1,108 @@
 import mongoose from "mongoose";
 
+/** Status lifecycle for inbox-style notifications */
+const NOTIFICATION_STATUSES = ["unread", "seen", "archived"];
+
+/** Delivery priority (UI ordering / future routing) */
+const NOTIFICATION_PRIORITIES = ["low", "medium", "high"];
+
 const notificationSchema = new mongoose.Schema(
   {
     userId: {
-      type: String,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
       required: true,
-      index: true, // For faster queries
     },
+    /** Logical kind (e.g. new_company); string stays open-ended for new types */
     type: {
       type: String,
       required: true,
-      enum: ["new_company"],
-      default: "new_company",
+      trim: true,
+      maxlength: 128,
     },
     title: {
       type: String,
       required: true,
+      trim: true,
+      maxlength: 500,
     },
-    message: {
+    body: {
       type: String,
       required: true,
+      trim: true,
+      maxlength: 10000,
     },
-    companyId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Company",
+    /** Deep links, entity ids, extra metadata (e.g. { companyId }) */
+    payload: {
+      type: mongoose.Schema.Types.Mixed,
+      default: undefined,
     },
-    isSeen: {
-      type: Boolean,
-      default: false,
+    channel: {
+      type: String,
+      trim: true,
+      default: "in_app",
+      maxlength: 32,
     },
-    createdAt: {
+    priority: {
+      type: String,
+      enum: NOTIFICATION_PRIORITIES,
+      default: "medium",
+    },
+    status: {
+      type: String,
+      enum: NOTIFICATION_STATUSES,
+      default: "unread",
+    },
+    seenAt: {
       type: Date,
-      default: Date.now,
+      default: null,
+    },
+    expiresAt: {
+      type: Date,
+      default: undefined,
+    },
+    /**
+     * Idempotency / dedupe key for an event (e.g. one key per approved company fan-out).
+     * Sparse index: documents may omit until backfilled.
+     */
+    eventId: {
+      type: String,
+      trim: true,
+      maxlength: 256,
     },
   },
   { timestamps: true }
 );
 
-// Index for efficient queries
-notificationSchema.index({ userId: 1, isSeen: 1 });
-notificationSchema.index({ userId: 1, createdAt: -1 });
+notificationSchema.index({ userId: 1, status: 1, createdAt: -1 });
+notificationSchema.index({ userId: 1 });
+notificationSchema.index({ eventId: 1 }, { unique: true, sparse: true });
+notificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
+function attachLegacyApiShape(ret) {
+  if (!ret || typeof ret !== "object") return ret;
+  ret.isSeen = ret.status === "seen";
+  if (ret.body != null) ret.message = ret.body;
+  const cid =
+    ret.payload && typeof ret.payload === "object" && ret.payload !== null
+      ? ret.payload.companyId
+      : undefined;
+  if (cid != null) ret.companyId = cid;
+  return ret;
+}
+
+notificationSchema.set("toJSON", {
+  virtuals: true,
+  transform(_doc, ret) {
+    return attachLegacyApiShape(ret);
+  },
+});
+
+notificationSchema.set("toObject", {
+  virtuals: true,
+  transform(_doc, ret) {
+    return attachLegacyApiShape(ret);
+  },
+});
 
 export default mongoose.model("Notification", notificationSchema);
-

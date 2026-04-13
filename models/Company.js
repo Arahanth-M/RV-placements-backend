@@ -181,8 +181,8 @@
 
 import mongoose from "mongoose";
 import { invalidateCompanyDetailCache } from "../services/companyDetailCache.js";
-// Import models for notification creation (using lazy loading to avoid circular deps)
-let Notification, User;
+import { dispatchEvent } from "../services/events/eventDispatcher.js";
+import { EVENT_TYPES } from "../services/events/eventTypes.js";
 
 const selectedCandidateSchema = new mongoose.Schema(
   {
@@ -333,7 +333,7 @@ const companySchema = new mongoose.Schema(
 );
 
 // -------------------- DYNAMIC CTC HANDLING -------------------- //
-companySchema.pre("save", function (next) {
+companySchema.pre("save", async function () {
   if (this.roles && this.roles.length > 0) {
     this.roles = this.roles.map((role) => {
       // Convert Map to plain object
@@ -345,18 +345,28 @@ companySchema.pre("save", function (next) {
       };
     });
   }
-  
-  // Track if status is being modified to "approved" for notification creation
-  if (this.isModified('status') && this.status === 'approved') {
-    this._statusChangedToApproved = true;
-  } else if (this.isNew && this.status === 'approved') {
-    // For new documents, also track if status is approved
-    this._statusChangedToApproved = true;
+
+  if (!this.isNew && this.isModified("status")) {
+    const prior = await this.constructor
+      .findById(this._id)
+      .select("status")
+      .lean();
+    this._prevCompanyStatusForEvent = prior?.status;
   } else {
-    this._statusChangedToApproved = false;
+    this._prevCompanyStatusForEvent = undefined;
   }
-  
-  next();
+});
+
+companySchema.pre(["findOneAndUpdate", "findByIdAndUpdate"], async function () {
+  try {
+    const oldDoc = await this.model
+      .findOne(this.getFilter())
+      .select("status")
+      .lean();
+    this._companyEventOldStatus = oldDoc?.status;
+  } catch {
+    this._companyEventOldStatus = undefined;
+  }
 });
 
 /** Payload keys for OA / Interview / Process tabs — invalidate detail cache only when these change */
@@ -400,6 +410,17 @@ function updateObjectTouchesDetailTabs(update) {
   return collectUpdateRootKeys(update).some(modifiedPathTouchesDetailTabs);
 }
 
+/** Resolves post-update status when findOneAndUpdate uses `new: false` (doc may still be old). */
+function statusAfterUpdateFromQuery(doc, query) {
+  const fromDoc = doc?.status;
+  const update = typeof query.getUpdate === "function" ? query.getUpdate() : {};
+  if (update && typeof update === "object") {
+    if (typeof update.status === "string") return update.status;
+    if (update.$set && typeof update.$set.status === "string") return update.$set.status;
+  }
+  return fromDoc;
+}
+
 // Invalidate Redis `company:<id>` only when OA / Interview / Process tab data changes (see above)
 companySchema.post("save", async function (doc) {
   try {
@@ -430,62 +451,28 @@ companySchema.post(["findOneAndDelete", "findByIdAndDelete"], async function (do
   }
 });
 
-// Post-save hook to create notifications when company is approved
-companySchema.post("save", async function (doc) {
-  // Only create notifications if status was changed to "approved" (not on every save)
-  if (doc.status === "approved" && doc._statusChangedToApproved) {
-    console.log(`🔔 Post-save hook triggered for company: ${doc.name}, status changed to approved`);
-    
-    try {
-      // Lazy load models to avoid circular dependencies
-      if (!Notification) {
-        Notification = (await import("./Notification.js")).default;
-      }
-      if (!User) {
-        User = (await import("./User.js")).default;
-      }
-      
-      console.log(`🔍 Checking for existing notifications for company: ${doc._id}`);
-      
-      // Check if notifications already exist for this company to avoid duplicates
-      const existingNotification = await Notification.findOne({
-        companyId: doc._id,
-        type: "new_company",
-      });
-      
-      if (existingNotification) {
-        console.log(`⚠️ Notifications already exist for company: ${doc.name}`);
-        return;
-      }
-      
-      console.log(`👥 Fetching all users...`);
-      const allUsers = await User.find({}, "userId");
-      console.log(`📊 Found ${allUsers.length} users`);
-      
-      if (allUsers.length > 0) {
-        const notifications = allUsers.map((user) => ({
-          userId: user.userId,
-          type: "new_company",
-          title: "New Company Added",
-          message: `${doc.name} has been added to the platform. Check it out!`,
-          companyId: doc._id,
-          isSeen: false,
-        }));
-        
-        console.log(`📝 Creating ${notifications.length} notifications...`);
-        await Notification.insertMany(notifications);
-        console.log(`✅ Created ${notifications.length} notifications for new company: ${doc.name}`);
-      } else {
-        console.log(`⚠️ No users found to send notifications to`);
-      }
-    } catch (error) {
-      // Don't fail the save if notification creation fails
-      console.error("❌ Error creating notifications:", error);
-      console.error("❌ Error stack:", error.stack);
-    }
-  } else {
-    console.log(`⏭️ Skipping notification creation - status not changed to approved (status: ${doc.status}, changed: ${doc._statusChangedToApproved})`);
+companySchema.post("save", function (doc) {
+  const oldStatus = doc._prevCompanyStatusForEvent;
+  if (oldStatus === "pending" && doc.status === "approved") {
+    dispatchEvent(EVENT_TYPES.COMPANY_APPROVED, {
+      companyId: doc._id,
+      companyName: doc.name,
+    }).catch(console.error);
   }
+});
+
+companySchema.post(["findOneAndUpdate", "findByIdAndUpdate"], function (doc) {
+  const newStatus = statusAfterUpdateFromQuery(doc, this);
+  const oldStatus = this._companyEventOldStatus;
+  if (oldStatus !== "pending" || newStatus !== "approved") return;
+
+  const companyId = doc?._id ?? this.getFilter?.()?._id;
+  if (!companyId) return;
+
+  dispatchEvent(EVENT_TYPES.COMPANY_APPROVED, {
+    companyId,
+    companyName: doc?.name ?? "",
+  }).catch(console.error);
 });
 
 const Company = mongoose.model("Company", companySchema, "companies1");
