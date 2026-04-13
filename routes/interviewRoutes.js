@@ -1,6 +1,14 @@
 import express from "express";
 import Company from "../models/Company.js";
 import authJWT from "../middleware/authJWT.js";
+import checkBetaAccess from "../middleware/checkBetaAccess.js";
+import authorize from "../middleware/authorize.js";
+import validateRequest from "../middleware/validateRequest.js";
+import {
+  interviewStartSchema,
+  interviewSubmitAnswerSchema,
+  interviewMoveRoundSchema,
+} from "../validations/interview.validation.js";
 import {
   createSession,
   getSession,
@@ -32,6 +40,8 @@ import {
 
 const router = express.Router();
 router.use(authJWT);
+router.use(checkBetaAccess);
+router.use(authorize(["student", "admin"]));
 
 const getAuthenticatedUserId = (req) => String(req.user?.userId || "").trim();
 const isSessionOwner = (session, userId) => String(session?.userId || "") === userId;
@@ -79,7 +89,7 @@ async function invalidateSessionAndSummaryCaches(userId, sessionId) {
   ]);
 }
 
-router.post("/start-interview", async (req, res) => {
+router.post("/start-interview", validateRequest(interviewStartSchema), async (req, res) => {
   try {
     const { companyId } = req.body;
     const userId = getAuthenticatedUserId(req);
@@ -375,7 +385,7 @@ router.get("/analytics/:userId", async (req, res) => {
   }
 });
 
-router.post("/submit-answer", async (req, res) => {
+router.post("/submit-answer", validateRequest(interviewSubmitAnswerSchema), async (req, res) => {
   try {
     const { sessionId, answer } = req.body;
     const userId = getAuthenticatedUserId(req);
@@ -545,7 +555,7 @@ router.get("/interview-status/:sessionId", async (req, res) => {
   }
 });
 
-router.post("/move-to-next-round", async (req, res) => {
+router.post("/move-to-next-round", validateRequest(interviewMoveRoundSchema), async (req, res) => {
   try {
     const { sessionId } = req.body;
     const userId = getAuthenticatedUserId(req);

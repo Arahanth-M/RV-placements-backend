@@ -1,6 +1,8 @@
 import express from "express";
 import requireAdmin from "../middleware/requireAdmin.js";
 import authJWT from "../middleware/authJWT.js";
+import validateRequest from "../middleware/validateRequest.js";
+import { eventCreateSchema, eventUpdateSchema } from "../validations/event.validation.js";
 import Event from "../models/Event.js";
 
 const eventRouter = express.Router();
@@ -43,7 +45,7 @@ eventRouter.use(authJWT);
 eventRouter.use(requireAdmin);
 
 // Create new event (Admin only)
-eventRouter.post("/", async (req, res) => {
+eventRouter.post("/", validateRequest(eventCreateSchema), async (req, res) => {
   try {
     const { title, url, lastDateToRegister } = req.body;
 
@@ -93,7 +95,7 @@ eventRouter.post("/", async (req, res) => {
 });
 
 // Update event (Admin only)
-eventRouter.put("/:id", async (req, res) => {
+eventRouter.put("/:id", validateRequest(eventUpdateSchema), async (req, res) => {
   try {
     const { title, url, lastDateToRegister } = req.body;
 

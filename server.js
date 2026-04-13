@@ -13,6 +13,7 @@ import {
   adminLimiter,
   submissionLimiter,
 } from "./middleware/rateLimiter.js";
+import sanitizeInput from "./middleware/sanitizeInput.js";
 
 import companyRouter from "./routes/companyRoutes.js";
 import submissionRouter from "./routes/submissionsRoutes.js";
@@ -107,6 +108,7 @@ if (process.env.NODE_ENV !== "test") {
 }
 
 app.use(express.json());
+app.use(sanitizeInput);
 app.use(cookieParser());
 app.use(passport.initialize());
 

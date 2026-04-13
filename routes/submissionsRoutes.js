@@ -1,12 +1,22 @@
 import express from "express";
 import Submission from "../models/Submission.js";
 import authJWT from "../middleware/authJWT.js";
+import checkBetaAccess from "../middleware/checkBetaAccess.js";
+import authorize from "../middleware/authorize.js";
+import validateRequest from "../middleware/validateRequest.js";
+import { submissionInputSchema } from "../validations/submission.validation.js";
 import { messages } from "../config/constants.js";
 
 
 const submissionRouter = express.Router();
 
-submissionRouter.post("/", authJWT, async (req, res) => {
+submissionRouter.post(
+  "/",
+  authJWT,
+  checkBetaAccess,
+  authorize(["student", "admin"]),
+  validateRequest(submissionInputSchema),
+  async (req, res) => {
   try {
     const { companyId, type, content, isAnonymous } = req.body;
 

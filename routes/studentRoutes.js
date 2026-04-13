@@ -1,6 +1,8 @@
 import express from "express";
 import mongoose from "mongoose";
 import authJWT from "../middleware/authJWT.js";
+import checkBetaAccess from "../middleware/checkBetaAccess.js";
+import authorize from "../middleware/authorize.js";
 import requireAdmin from "../middleware/requireAdmin.js";
 import {
   getCachedStudentProfile,
@@ -9,6 +11,8 @@ import {
   invalidateStudentProfileCacheByEmails,
 } from "../services/studentProfileCache.js";
 import { ADMIN_EMAIL } from "../config/constants.js";
+import validateRequest from "../middleware/validateRequest.js";
+import { profileCacheInvalidateSchema } from "../validations/student.validation.js";
 
 const router = express.Router();
 
@@ -24,7 +28,12 @@ function normalizeText(raw) {
 }
 
 // Get student data by USN from student-data-2026-cse collection
-router.get("/student-data/:usn", authJWT, async (req, res) => {
+router.get(
+  "/student-data/:usn",
+  authJWT,
+  checkBetaAccess,
+  authorize(["student", "admin"]),
+  async (req, res) => {
   try {
     const { usn } = req.params;
     
@@ -57,13 +66,18 @@ router.get("/student-data/:usn", authJWT, async (req, res) => {
 });
 
 // DEPRECATED: Name-based lookup removed for security. Use /profile instead.
-router.get("/student-data-by-name/:username", authJWT, (req, res) => {
+router.get(
+  "/student-data-by-name/:username",
+  authJWT,
+  checkBetaAccess,
+  authorize(["student", "admin"]),
+  (req, res) => {
   console.warn(`⚠️ [DEPRECATED] Name-based lookup attempted for: "${req.params.username}". Use /profile instead.`);
   return res.status(410).json({ error: "Name-based lookup is disabled. Use /api/students/profile instead." });
 });
 
 // Get student profile by logged-in user email
-router.get("/profile", authJWT, async (req, res) => {
+router.get("/profile", authJWT, authorize(["student", "admin"]), async (req, res) => {
   try {
     if (!req.user || !req.user.email) {
       return res.status(401).json({ error: "Unauthorized" });
@@ -153,7 +167,14 @@ router.get("/profile", authJWT, async (req, res) => {
 });
 
 // Admin utility: invalidate one or more cached student profiles after users_2026 updates.
-router.post("/profile/cache-invalidate", authJWT, requireAdmin, async (req, res) => {
+router.post(
+  "/profile/cache-invalidate",
+  authJWT,
+  checkBetaAccess,
+  authorize(["student", "admin"]),
+  requireAdmin,
+  validateRequest(profileCacheInvalidateSchema),
+  async (req, res) => {
   try {
     const singleEmail = typeof req.body?.email === "string" ? req.body.email : "";
     const emailList = Array.isArray(req.body?.emails) ? req.body.emails : [];
@@ -177,7 +198,12 @@ router.post("/profile/cache-invalidate", authJWT, requireAdmin, async (req, res)
 });
 
 // Self utility: clear current user's cached profile and force fresh DB read next time.
-router.post("/profile/cache-invalidate-self", authJWT, async (req, res) => {
+router.post(
+  "/profile/cache-invalidate-self",
+  authJWT,
+  checkBetaAccess,
+  authorize(["student", "admin"]),
+  async (req, res) => {
   try {
     const email = (req.user?.email || "").trim().toLowerCase();
     if (!email) {

@@ -3,12 +3,18 @@ import Company from "../models/Company.js";
 import Submission from "../models/Submission.js";
 import User from "../models/User.js";
 import authJWT from "../middleware/authJWT.js";
+import validateRequest from "../middleware/validateRequest.js";
+import { placementDataSchema } from "../validations/placement.validation.js";
 import { messages } from "../config/constants.js";
 
 const router = express.Router();
 
 // Submit placement form data as submissions (requires admin approval)
-router.post("/:companyId/placement-data", authJWT, async (req, res) => {
+router.post(
+  "/:companyId/placement-data",
+  authJWT,
+  validateRequest(placementDataSchema),
+  async (req, res) => {
   try {
     const { companyId } = req.params;
     const { onlineQuestions, interviewQuestions, interviewProcess } = req.body;

@@ -4,6 +4,9 @@ import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { s3 } from "../utils/s3.js";
 import authJWT from "../middleware/authJWT.js";
+import validateRequest from "../middleware/validateRequest.js";
+import { companyCreateSchema } from "../validations/company.validation.js";
+import { submissionInputSchema } from "../validations/submission.validation.js";
 import dotenv from "dotenv";
 import Submission from "../models/Submission.js";
 import { getCompanyFocusTags } from "../utils/companyFocusTags.js";
@@ -44,7 +47,7 @@ const getSignedVideoUrl = async (videoKey) => {
   return url;
 };
 
-companyRouter.post("/", authJWT, async (req, res) => {
+companyRouter.post("/", authJWT, validateRequest(companyCreateSchema), async (req, res) => {
   try {
     const newCompany = new Company({  
       ...req.body,
@@ -292,7 +295,7 @@ companyRouter.get("/:id/helpful/status", authJWT, async (req, res) => {
   }
 });
 
-companyRouter.post("/", async (req, res) => {
+companyRouter.post("/", validateRequest(submissionInputSchema), async (req, res) => {
   try {
     const { companyId, type, content } = req.body;
 

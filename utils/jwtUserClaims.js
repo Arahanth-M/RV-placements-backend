@@ -14,9 +14,11 @@ export function buildJwtPayloadFromUser(user, options = {}) {
     fillForm: doc.fillForm ?? false,
     points: doc.points ?? 0,
     isPremium: doc.isPremium ?? false,
+    betaAccess: doc.betaAccess ?? true,
     membershipType: doc.membershipType,
     companyId: doc.companyId,
     isAdminSession,
+    role: isAdminSession ? "admin" : (doc.role || "student"),
     createdAt: doc.createdAt
       ? new Date(doc.createdAt).toISOString()
       : new Date().toISOString(),

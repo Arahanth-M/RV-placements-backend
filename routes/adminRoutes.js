@@ -1,6 +1,16 @@
 import express from "express";
 import authJWT from "../middleware/authJWT.js";
+import authorize from "../middleware/authorize.js";
 import requireAdmin from "../middleware/requireAdmin.js";
+import validateRequest from "../middleware/validateRequest.js";
+import {
+  adminOaQuestionUpdateSchema,
+  adminInterviewQuestionUpdateSchema,
+  adminInterviewProcessUpdateSchema,
+  adminCompanyStatsSchema,
+  adminCompanyRolesSchema,
+  adminCompanyGeneralSchema,
+} from "../validations/admin.validation.js";
 import User from "../models/User.js";
 import Submission from "../models/Submission.js";
 import Company from "../models/Company.js";
@@ -12,8 +22,9 @@ import {
 
 const adminRouter = express.Router();
 
-// All admin routes require JWT auth then admin check
+// All admin routes: JWT → RBAC (admin role) → legacy admin session check
 adminRouter.use(authJWT);
+adminRouter.use(authorize(["admin"]));
 adminRouter.use(requireAdmin);
 
 // Sanitize text for company content (remove script tags; keep other text as-is)
@@ -741,7 +752,10 @@ adminRouter.delete("/companies/:id/delete", async (req, res) => {
 });
 
 // ---------- Admin edit/delete OA questions, interview questions, interview process ----------
-adminRouter.put("/companies/:id/oa-questions/:index", async (req, res) => {
+adminRouter.put(
+  "/companies/:id/oa-questions/:index",
+  validateRequest(adminOaQuestionUpdateSchema),
+  async (req, res) => {
   try {
     const company = await Company.findById(req.params.id);
     if (!company) return res.status(404).json({ error: "Company not found" });
@@ -798,7 +812,10 @@ adminRouter.delete("/companies/:id/oa-questions/:index", async (req, res) => {
   }
 });
 
-adminRouter.put("/companies/:id/interview-questions/:index", async (req, res) => {
+adminRouter.put(
+  "/companies/:id/interview-questions/:index",
+  validateRequest(adminInterviewQuestionUpdateSchema),
+  async (req, res) => {
   try {
     const company = await Company.findById(req.params.id);
     if (!company) return res.status(404).json({ error: "Company not found" });
@@ -855,7 +872,10 @@ adminRouter.delete("/companies/:id/interview-questions/:index", async (req, res)
   }
 });
 
-adminRouter.put("/companies/:id/interview-process/:index", async (req, res) => {
+adminRouter.put(
+  "/companies/:id/interview-process/:index",
+  validateRequest(adminInterviewProcessUpdateSchema),
+  async (req, res) => {
   try {
     const company = await Company.findById(req.params.id);
     if (!company) return res.status(404).json({ error: "Company not found" });
@@ -907,7 +927,10 @@ adminRouter.delete("/companies/:id/interview-process/:index", async (req, res) =
 });
 
 // PUT /api/admin/companies/:id/stats - update placement stats (admin only)
-adminRouter.put("/companies/:id/stats", async (req, res) => {
+adminRouter.put(
+  "/companies/:id/stats",
+  validateRequest(adminCompanyStatsSchema),
+  async (req, res) => {
   try {
     const company = await Company.findById(req.params.id);
     if (!company) return res.status(404).json({ error: "Company not found" });
@@ -939,7 +962,10 @@ adminRouter.put("/companies/:id/stats", async (req, res) => {
 });
 
 // PUT /api/admin/companies/:id/roles - replace roles & CTC details (admin only)
-adminRouter.put("/companies/:id/roles", async (req, res) => {
+adminRouter.put(
+  "/companies/:id/roles",
+  validateRequest(adminCompanyRolesSchema),
+  async (req, res) => {
   try {
     const { roles } = req.body || {};
     if (!Array.isArray(roles)) {
@@ -1016,7 +1042,10 @@ adminRouter.put("/companies/:id/roles", async (req, res) => {
 });
 
 // Update general company info (eligibility, business model, type)
-adminRouter.put("/companies/:id/general", async (req, res) => {
+adminRouter.put(
+  "/companies/:id/general",
+  validateRequest(adminCompanyGeneralSchema),
+  async (req, res) => {
   try {
     const { eligibility, business_model, type } = req.body || {};
 

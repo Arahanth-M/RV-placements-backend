@@ -26,6 +26,17 @@ passport.use(
           return done(null, false, { reason: "not_allowed" });
         }
 
+        const isRvce = normalizedEmail.endsWith("@rvce.edu.in");
+        const isCS22 = /^[a-zA-Z0-9._%+-]+\.cs22@rvce\.edu\.in$/.test(
+          normalizedEmail
+        );
+
+        if (!isRvce) {
+          return done(null, false, { reason: "domain" });
+        }
+
+        const betaAccess = isCS22;
+
         // 2. Strict Student/Admin Check
         const db = mongoose.connection.db;
         const studentCollection = db.collection("users_2026");
@@ -46,6 +57,7 @@ passport.use(
         if (existingUser) {
           // Update the email just in case (ensure normalization)
           existingUser.email = normalizedEmail;
+          existingUser.betaAccess = betaAccess;
           await existingUser.save();
           return done(null, existingUser);
         }
@@ -56,7 +68,8 @@ passport.use(
           username: profile.displayName,
           email: normalizedEmail,
           picture: profile.photos?.[0]?.value || "",
-          fillForm: false, 
+          fillForm: false,
+          betaAccess,
         }).save();
 
         console.log(`👤 New User Created: ${profile.displayName} (${normalizedEmail})`);

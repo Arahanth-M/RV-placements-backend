@@ -28,6 +28,15 @@ const userSchema = new Schema({
     type: Number,
     default: 0
   },
+  role: {
+    type: String,
+    enum: ["student", "admin", "company"],
+    default: "student"
+  },
+  betaAccess: {
+    type: Boolean,
+    default: true
+  },
   createdAt: {
     type: Date,
     default: Date.now
