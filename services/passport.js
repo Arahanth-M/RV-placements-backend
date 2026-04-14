@@ -6,6 +6,17 @@ import User from "../models/User.js";
 import { urls, ADMIN_EMAIL } from "../config/constants.js";
 import { sendWelcomeEmailWebhook } from "./webhookService.js";
 
+/** Google may expose the avatar on photos[], _json.picture, or legacy profile.picture */
+function pictureFromGoogleProfile(profile) {
+  if (!profile) return "";
+  const fromPhotos = profile.photos?.[0]?.value?.trim();
+  if (fromPhotos) return fromPhotos;
+  const fromJson = profile._json?.picture;
+  if (typeof fromJson === "string" && fromJson.trim()) return fromJson.trim();
+  const legacy = typeof profile.picture === "string" ? profile.picture.trim() : "";
+  return legacy || "";
+}
+
 passport.use(
   new GoogleStrategy(
     {
@@ -55,9 +66,13 @@ passport.use(
         const existingUser = await User.findOne({ userId: profile.id });
 
         if (existingUser) {
-          // Update the email just in case (ensure normalization)
           existingUser.email = normalizedEmail;
           existingUser.betaAccess = betaAccess;
+          const pic = pictureFromGoogleProfile(profile);
+          if (pic) existingUser.picture = pic;
+          if (profile.displayName?.trim()) {
+            existingUser.username = profile.displayName.trim();
+          }
           await existingUser.save();
           return done(null, existingUser);
         }
@@ -67,7 +82,7 @@ passport.use(
           userId: profile.id,
           username: profile.displayName,
           email: normalizedEmail,
-          picture: profile.photos?.[0]?.value || "",
+          picture: pictureFromGoogleProfile(profile),
           fillForm: false,
           betaAccess,
         }).save();
