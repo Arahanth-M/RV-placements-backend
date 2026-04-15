@@ -31,8 +31,15 @@ adminRouter.use(requireAdmin);
 function sanitizeText(text) {
   if (text === undefined || text === null) return '';
   let str = String(text);
-  // Strip out any script tags and their contents completely
+  // Strip out dangerous HTML/script tags while preserving code-like angle brackets
+  // such as vector<int> or #include<stdio.h>.
   str = str.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+  str = str.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
+  str = str.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '');
+  str = str.replace(/<\/?\s*(?:script|style|iframe|object|embed|form|svg|link|meta|base|body|html|head|img|video|audio|source|input|button|textarea|select|option|noscript)\b[^>]*>/gi, '');
+  str = str.replace(/\s+on[a-z][\w-]*\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+  str = str.replace(/(?<![/:])\bjavascript\s*:[^\s"'<>]*/gi, '');
+  str = str.replace(/(?<![/:])\bdata\s*:[^\s"'<>]*/gi, '');
   return str.trim();
 }
 
@@ -175,17 +182,6 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
     } catch {
       parsedContent = { question: submission.content, solution: "" };
     }
-
-    // Helper function to sanitize text (remove script tags and dangerous HTML)
-    const sanitizeText = (text) => {
-      if (text === undefined || text === null) return '';
-      let str = String(text);
-      // Remove script tags
-      str = str.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-      // Remove other potentially dangerous HTML tags
-      str = str.replace(/<[^>]+>/g, '');
-      return str.trim();
-    };
 
     // Update company based on submission type
     if (submission.type === "onlineQuestions") {
