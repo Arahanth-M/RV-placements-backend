@@ -26,6 +26,31 @@ const TAG_LIKE_OPEN = /^<\/?\s*[a-zA-Z!?:]/;
 /** Max length of a single removed data: / javascript: segment (avoids pathological strings). */
 const MAX_SCHEME_TAIL = 2_000_000;
 
+/**
+ * Fields that contain code / rich text where `<...>` should be preserved
+ * (e.g. vector<int>, #include<stdio.h>, generics/templates).
+ */
+const RAW_TEXT_FIELDS = new Set([
+  "content",
+  "question",
+  "questions",
+  "solution",
+  "solutions",
+  "answer",
+  "answers",
+  "code",
+  "solution_code",
+  "explanation",
+  "onlineQuestions",
+  "onlineQuestions_solution",
+  "interviewQuestions",
+  "interviewQuestions_solution",
+  "interviewProcess",
+  "prev_coding_ques",
+  "Must_Do_Topics",
+  "internshipExperience",
+]);
+
 function stripDangerousSchemes(str) {
   const jsRe = new RegExp(`(?<![/:])\\bjavascript\\s*:[^\\s"'<>]{0,${MAX_SCHEME_TAIL}}`, "gi");
   const dataRe = new RegExp(`(?<![/:])\\bdata\\s*:[^\\s"'<>]{0,${MAX_SCHEME_TAIL}}`, "gi");
@@ -56,13 +81,19 @@ function sanitizeString(str) {
   return out;
 }
 
-function sanitizeValue(value) {
+function shouldPreserveRawText(path) {
+  if (!Array.isArray(path) || path.length === 0) return false;
+  return path.some((segment) => RAW_TEXT_FIELDS.has(String(segment)));
+}
+
+function sanitizeValue(value, path = []) {
   if (typeof value === "string") {
+    if (shouldPreserveRawText(path)) return value;
     return sanitizeString(value);
   }
   if (Array.isArray(value)) {
     for (let i = 0; i < value.length; i += 1) {
-      value[i] = sanitizeValue(value[i]);
+      value[i] = sanitizeValue(value[i], [...path, i]);
     }
     return value;
   }
@@ -77,7 +108,7 @@ function sanitizeValue(value) {
     return value;
   }
   for (const key of Object.keys(value)) {
-    value[key] = sanitizeValue(value[key]);
+    value[key] = sanitizeValue(value[key], [...path, key]);
   }
   return value;
 }
