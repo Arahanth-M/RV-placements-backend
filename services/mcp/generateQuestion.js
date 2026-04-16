@@ -44,11 +44,73 @@ const buildSeenQuestionsKey = (userId) => {
   return `user:${normalizedUserId}:seen_questions`;
 };
 
-const normalizeExpectedPointsStrings = (value) => {
+const normalizeRubricImportance = (value) => {
+  const safe = toSafeString(value, "mustHave");
+  return ["mustHave", "goodToHave", "redFlag"].includes(safe)
+    ? safe
+    : "mustHave";
+};
+
+const normalizeRubricCategory = (value, fallback = "coverage") => {
+  return toSafeString(value, fallback) || fallback;
+};
+
+const normalizeExpectedAnswerMode = (value, fallback = "conceptual") => {
+  const safe = toSafeString(value, fallback);
+  return ["code", "design", "story", "conceptual"].includes(safe)
+    ? safe
+    : fallback;
+};
+
+const inferAnswerModeFromRoundType = (roundType) => {
+  const safeRoundType = toSafeString(roundType, "general").toLowerCase();
+  if (safeRoundType.includes("system")) return "design";
+  if (safeRoundType.includes("hr") || safeRoundType.includes("behavior")) return "story";
+  if (safeRoundType.includes("dsa") || safeRoundType.includes("coding")) return "code";
+  return "conceptual";
+};
+
+export const normalizeExpectedPoint = (point, defaults = {}) => {
+  const baseAnswerMode = normalizeExpectedAnswerMode(
+    defaults.expectedAnswerMode,
+    inferAnswerModeFromRoundType(defaults.roundType)
+  );
+
+  if (typeof point === "string") {
+    const text = toSafeString(point);
+    if (!text) return null;
+    return {
+      text,
+      category: normalizeRubricCategory(defaults.category, "coverage"),
+      importance: normalizeRubricImportance(defaults.importance),
+      expectedAnswerMode: baseAnswerMode,
+      embedding: [],
+    };
+  }
+
+  if (!point || typeof point !== "object" || Array.isArray(point)) return null;
+  const text = toSafeString(point.text || point.point || point.content);
+  if (!text) return null;
+
+  return {
+    text,
+    category: normalizeRubricCategory(point.category, defaults.category || "coverage"),
+    importance: normalizeRubricImportance(point.importance || defaults.importance),
+    expectedAnswerMode: normalizeExpectedAnswerMode(
+      point.expectedAnswerMode,
+      baseAnswerMode
+    ),
+    embedding: Array.isArray(point.embedding)
+      ? point.embedding
+          .map((value) => Number(value))
+          .filter((value) => Number.isFinite(value))
+      : [],
+  };
+};
+
+export const normalizeExpectedPoints = (value, defaults = {}) => {
   if (!Array.isArray(value)) return [];
-  return value
-    .map((p) => toSafeString(typeof p === "string" ? p : p?.text))
-    .filter(Boolean);
+  return value.map((point) => normalizeExpectedPoint(point, defaults)).filter(Boolean);
 };
 
 const normalizePoolItem = (item) => {
@@ -57,12 +119,19 @@ const normalizePoolItem = (item) => {
     if (!question) return null;
     return {
       question,
-      expectedPoints: normalizeExpectedPointsStrings(item.expectedPoints),
+      expectedAnswerMode: normalizeExpectedAnswerMode(
+        item.expectedAnswerMode,
+        inferAnswerModeFromRoundType(item.roundType)
+      ),
+      expectedPoints: normalizeExpectedPoints(item.expectedPoints, {
+        roundType: item.roundType,
+        expectedAnswerMode: item.expectedAnswerMode,
+      }),
     };
   }
   const question = toSafeString(item);
   if (!question) return null;
-  return { question, expectedPoints: [] };
+  return { question, expectedAnswerMode: "conceptual", expectedPoints: [] };
 };
 
 const normalizeQuestionPool = (value) => {
@@ -148,14 +217,31 @@ Rules:
 8) Respect target difficulty and follow-up mode.
 9) Avoid repeating the same question or asking something unrelated.
 10) Return exactly ${requestedCount} questions.
-11) For each question, include 3–5 concise expectedPoints: key ideas or rubric bullets a strong answer should cover (not the answer itself).
+11) For each question, include 4-6 rubric points a strong answer should cover.
+12) Each rubric point must include:
+   - text
+   - category
+   - importance ("mustHave" | "goodToHave" | "redFlag")
+13) Set expectedAnswerMode to one of: "code", "design", "story", "conceptual".
+14) Use category values that help grading, such as:
+   - coding: "algorithmChoice", "edgeCases", "complexityAwareness", "implementationQuality"
+   - system design: "architectureCoverage", "tradeoffs", "scalability", "failureHandling"
+   - behavioral: "situationClarity", "actionOwnership", "resultSpecificity", "reflection"
+   - general: "coverage", "reasoning", "communication"
 
 Return JSON:
 {
   "questions": [
     {
       "question": "...",
-      "expectedPoints": ["point1", "point2", "point3"]
+      "expectedAnswerMode": "code",
+      "expectedPoints": [
+        {
+          "text": "Mentions time complexity trade-off",
+          "category": "complexityAwareness",
+          "importance": "mustHave"
+        }
+      ]
     }
   ]
 }`,
@@ -167,6 +253,93 @@ const getRandomItem = (array) => {
   if (!Array.isArray(array) || array.length === 0) return null;
   const randomIndex = Math.floor(Math.random() * array.length);
   return array[randomIndex] ?? null;
+};
+
+const buildFallbackRubric = ({ roundType, roundAbout }) => {
+  const safeRoundType = toSafeString(roundType, "technical").toLowerCase();
+  const safeTopic = toSafeString(roundAbout, "this topic");
+
+  if (safeRoundType.includes("hr") || safeRoundType.includes("behavior")) {
+    return normalizeExpectedPoints(
+      [
+        {
+          text: `Clearly frame the situation around ${safeTopic}`,
+          category: "situationClarity",
+          importance: "mustHave",
+        },
+        {
+          text: "Explain the specific actions you personally took",
+          category: "actionOwnership",
+          importance: "mustHave",
+        },
+        {
+          text: "End with a concrete result or measurable outcome",
+          category: "resultSpecificity",
+          importance: "mustHave",
+        },
+        {
+          text: "Reflect on what you learned or would improve",
+          category: "reflection",
+          importance: "goodToHave",
+        },
+      ],
+      { roundType, expectedAnswerMode: "story" }
+    );
+  }
+
+  if (safeRoundType.includes("system")) {
+    return normalizeExpectedPoints(
+      [
+        {
+          text: `Define the main components needed for the ${safeTopic} design`,
+          category: "architectureCoverage",
+          importance: "mustHave",
+        },
+        {
+          text: "Discuss scaling or performance bottlenecks",
+          category: "scalability",
+          importance: "mustHave",
+        },
+        {
+          text: "Mention trade-offs in storage, consistency, or complexity",
+          category: "tradeoffs",
+          importance: "mustHave",
+        },
+        {
+          text: "Address failure handling or reliability concerns",
+          category: "failureHandling",
+          importance: "goodToHave",
+        },
+      ],
+      { roundType, expectedAnswerMode: "design" }
+    );
+  }
+
+  return normalizeExpectedPoints(
+    [
+      {
+        text: `Choose a sound approach for solving the ${safeTopic} problem`,
+        category: "algorithmChoice",
+        importance: "mustHave",
+      },
+      {
+        text: "Cover edge cases or tricky inputs",
+        category: "edgeCases",
+        importance: "mustHave",
+      },
+      {
+        text: "Mention time or space complexity",
+        category: "complexityAwareness",
+        importance: "goodToHave",
+      },
+      {
+        text: "Provide an implementation or clear executable logic",
+        category: "implementationQuality",
+        importance: "mustHave",
+      },
+    ],
+    { roundType, expectedAnswerMode: "code" }
+  );
 };
 
 const buildBasicFallbackQuestion = ({ roundType, roundAbout, difficulty }) => {
@@ -183,14 +356,36 @@ const buildBasicFallbackQuestion = ({ roundType, roundAbout, difficulty }) => {
     question = `Can you walk me through your approach to solving a ${level} ${safeTopic} problem, including edge cases?`;
   }
 
-  return { question, expectedPoints: [] };
+  return {
+    question,
+    expectedAnswerMode: inferAnswerModeFromRoundType(roundType),
+    expectedPoints: buildFallbackRubric({ roundType, roundAbout }),
+  };
 };
 
-const getAdaptiveFollowUp = ({ hasPreviousAnswer, previousScore, difficulty }) => {
+const getAdaptiveFollowUp = ({
+  hasPreviousAnswer,
+  previousScore,
+  previousEvaluation,
+  difficulty,
+}) => {
   const baseDifficulty = normalizeDifficulty(difficulty);
   const score = Number(previousScore);
+  const priorConfidence = Number(previousEvaluation?.confidence);
+  const recentScores = Array.isArray(previousEvaluation?.recentScores)
+    ? previousEvaluation.recentScores
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value))
+    : [];
+  const smoothedScore = recentScores.length
+    ? recentScores.reduce((sum, value) => sum + value, 0) / recentScores.length
+    : score;
+  const criticalMisses = Array.isArray(previousEvaluation?.criticalMisses)
+    ? previousEvaluation.criticalMisses.filter(Boolean)
+    : [];
+  const lowConfidence = Number.isFinite(priorConfidence) && priorConfidence < 0.55;
 
-  if (!hasPreviousAnswer || !Number.isFinite(score)) {
+  if (!hasPreviousAnswer || !Number.isFinite(smoothedScore)) {
     return {
       targetDifficulty: baseDifficulty,
       followUpMode: "opening",
@@ -198,7 +393,25 @@ const getAdaptiveFollowUp = ({ hasPreviousAnswer, previousScore, difficulty }) =
     };
   }
 
-  if (score >= 8) {
+  if (criticalMisses.length >= 2) {
+    return {
+      targetDifficulty: baseDifficulty === "hard" ? "medium" : "easy",
+      followUpMode: "repair",
+      interviewerIntent:
+        "Candidate missed important rubric points. Ask a targeted follow-up that repairs conceptual gaps before moving ahead.",
+    };
+  }
+
+  if (lowConfidence) {
+    return {
+      targetDifficulty: baseDifficulty,
+      followUpMode: "steady",
+      interviewerIntent:
+        "Confidence in the previous score is limited. Ask a nearby follow-up at similar difficulty to confirm the candidate's level.",
+    };
+  }
+
+  if (smoothedScore >= 8) {
     return {
       targetDifficulty: baseDifficulty === "easy" ? "medium" : "hard",
       followUpMode: "challenge",
@@ -207,7 +420,7 @@ const getAdaptiveFollowUp = ({ hasPreviousAnswer, previousScore, difficulty }) =
     };
   }
 
-  if (score <= 4) {
+  if (smoothedScore <= 4.5) {
     return {
       targetDifficulty: baseDifficulty === "hard" ? "medium" : "easy",
       followUpMode: "clarify",
@@ -227,7 +440,7 @@ const getAdaptiveFollowUp = ({ hasPreviousAnswer, previousScore, difficulty }) =
 /**
  * MCP tool: generateQuestion
  * Generates one interview question (and expectedPoints rubric) for the given round context.
- * @returns {{ question: string, expectedPoints: string[] }}
+ * @returns {{ question: string, expectedPoints: object[], expectedAnswerMode: string }}
  */
 export const generateQuestion = async ({
   userId,
@@ -239,6 +452,7 @@ export const generateQuestion = async ({
   previousAnswer,
   previousFeedback,
   previousScore,
+  previousEvaluation = null,
   roundHistory = [],
 }) => {
   try {
@@ -246,6 +460,7 @@ export const generateQuestion = async ({
     const adaptiveFollowUp = getAdaptiveFollowUp({
       hasPreviousAnswer,
       previousScore,
+      previousEvaluation,
       difficulty,
     });
 
@@ -327,7 +542,6 @@ export const generateQuestion = async ({
         await setJSON(cacheKey, mergedPool, QUESTION_POOL_TTL_SECONDS);
         return mergedPool;
       } catch (error) {
-        // If LLM fails, keep existing pool (if any) and let caller use static fallback.
         console.warn("[generateQuestion] LLM question generation failed:", error?.message || error);
         return normalizeQuestionPool(currentPool);
       }
@@ -365,9 +579,14 @@ export const generateQuestion = async ({
       picked && picked.question
         ? {
             question: picked.question,
-            expectedPoints: Array.isArray(picked.expectedPoints)
-              ? picked.expectedPoints
-              : [],
+            expectedAnswerMode: normalizeExpectedAnswerMode(
+              picked.expectedAnswerMode,
+              inferAnswerModeFromRoundType(roundType)
+            ),
+            expectedPoints: normalizeExpectedPoints(picked.expectedPoints, {
+              roundType,
+              expectedAnswerMode: picked.expectedAnswerMode,
+            }),
           }
         : buildBasicFallbackQuestion({
             roundType,
@@ -382,12 +601,20 @@ export const generateQuestion = async ({
 
     return {
       question: selectedQuestion.question,
-      expectedPoints: Array.isArray(selectedQuestion.expectedPoints)
-        ? selectedQuestion.expectedPoints
-        : [],
+      expectedAnswerMode: normalizeExpectedAnswerMode(
+        selectedQuestion.expectedAnswerMode,
+        inferAnswerModeFromRoundType(roundType)
+      ),
+      expectedPoints: normalizeExpectedPoints(selectedQuestion.expectedPoints, {
+        roundType,
+        expectedAnswerMode: selectedQuestion.expectedAnswerMode,
+      }),
     };
   } catch (error) {
-    console.warn("[generateQuestion] Unexpected failure, returning basic fallback question:", error?.message || error);
+    console.warn(
+      "[generateQuestion] Unexpected failure, returning basic fallback question:",
+      error?.message || error
+    );
     return buildBasicFallbackQuestion({
       roundType,
       roundAbout,

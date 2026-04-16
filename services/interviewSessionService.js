@@ -1,7 +1,7 @@
 import InterviewSession from "../models/InterviewSession.js";
 import Company from "../models/Company.js";
 import { getCompanyContext } from "./mcp/getCompanyContext.js";
-import { generateQuestion } from "./mcp/generateQuestion.js";
+import { generateQuestion, normalizeExpectedPoints } from "./mcp/generateQuestion.js";
 import { generateRoundFeedback as generateRoundFeedbackMCP } from "./mcp/generateRoundFeedback.js";
 import { INTERVIEW_STATES } from "./interviewStateMachine.js";
 
@@ -10,10 +10,8 @@ const updateOptions = {
   runValidators: true,
 };
 
-const expectedPointsFromStrings = (points) =>
-  (Array.isArray(points) ? points : [])
-    .filter((text) => typeof text === "string" && text.trim())
-    .map((text) => ({ text: text.trim(), embedding: [] }));
+const expectedPointsFromStrings = (points, defaults = {}) =>
+  normalizeExpectedPoints(points, defaults);
 
 export const createSession = async (userId, companyId) => {
   return InterviewSession.create({
@@ -41,7 +39,10 @@ export const getInProgressSession = async (userId, companyId) => {
 };
 
 export const getUserSessions = async (userId) => {
-  return InterviewSession.find({ userId })
+  return InterviewSession.find({
+    userId,
+    state: INTERVIEW_STATES.INTERVIEW_COMPLETE,
+  })
     .populate("companyId", "name type")
     .sort({ updatedAt: -1 });
 };
@@ -51,7 +52,10 @@ export const getUserSessions = async (userId) => {
  * Excludes heavy arrays like rounds/history to keep initial load fast.
  */
 export const getUserSessionSummaries = async (userId) => {
-  return InterviewSession.find({ userId })
+  return InterviewSession.find({
+    userId,
+    state: INTERVIEW_STATES.INTERVIEW_COMPLETE,
+  })
     .select(
       "userId companyId role currentRound currentQuestionIndex roundStatus state roundsPlan roundsDetails totalRounds currentRoundIndex difficultyLevel currentQuestion finalReport.overallScore createdAt updatedAt"
     )
@@ -64,9 +68,13 @@ export const getUserSessionSummariesPaginated = async (userId, page = 1, limit =
   const pageNumber = Math.max(1, Number(page) || 1);
   const limitNumber = Math.min(50, Math.max(1, Number(limit) || 10));
   const skip = (pageNumber - 1) * limitNumber;
+  const completedFilter = {
+    userId,
+    state: INTERVIEW_STATES.INTERVIEW_COMPLETE,
+  };
 
   const [items, total] = await Promise.all([
-    InterviewSession.find({ userId })
+    InterviewSession.find(completedFilter)
       .select(
         "userId companyId role currentRound currentQuestionIndex roundStatus state roundsPlan roundsDetails totalRounds currentRoundIndex difficultyLevel currentQuestion finalReport.overallScore createdAt updatedAt"
       )
@@ -75,7 +83,7 @@ export const getUserSessionSummariesPaginated = async (userId, page = 1, limit =
       .skip(skip)
       .limit(limitNumber)
       .lean(),
-    InterviewSession.countDocuments({ userId }),
+    InterviewSession.countDocuments(completedFilter),
   ]);
 
   return {
@@ -130,7 +138,7 @@ export const startRound = async (sessionId) => {
     )
     .lean();
   const companyContext = await getCompanyContext(companyData || {});
-  const { question, expectedPoints } = await generateQuestion({
+  const { question, expectedPoints, expectedAnswerMode } = await generateQuestion({
     userId: String(session.userId || ""),
     companyContext,
     roundType: currentRound.type,
@@ -150,7 +158,11 @@ export const startRound = async (sessionId) => {
       answer: "",
       score: null,
       feedback: "",
-      expectedPoints: expectedPointsFromStrings(expectedPoints),
+      evaluationTrace: null,
+      expectedPoints: expectedPointsFromStrings(expectedPoints, {
+        roundType: currentRound.type,
+        expectedAnswerMode,
+      }),
     },
   ];
 

@@ -27,7 +27,44 @@ const historyItemSchema = new mongoose.Schema(
 const expectedPointSchema = new mongoose.Schema(
   {
     text: { type: String, trim: true },
+    category: { type: String, trim: true, default: "coverage" },
+    importance: {
+      type: String,
+      enum: ["mustHave", "goodToHave", "redFlag"],
+      default: "mustHave",
+    },
+    expectedAnswerMode: {
+      type: String,
+      enum: ["code", "design", "story", "conceptual"],
+      default: "conceptual",
+    },
     embedding: { type: [Number] },
+  },
+  { _id: false }
+);
+
+const evaluationTraceSchema = new mongoose.Schema(
+  {
+    scoringVersion: { type: String, trim: true },
+    questionType: { type: String, trim: true },
+    expectedAnswerMode: { type: String, trim: true },
+    verdict: {
+      type: String,
+      enum: ["correct", "partial", "incorrect"],
+    },
+    confidence: { type: Number },
+    relevance: { type: Number },
+    coverage: { type: Number },
+    correctness: { type: Number },
+    communication: { type: Number },
+    matchedRubricPoints: { type: [String], default: [] },
+    missingRubricPoints: { type: [String], default: [] },
+    criticalMisses: { type: [String], default: [] },
+    subscores: {
+      type: Map,
+      of: Number,
+      default: {},
+    },
   },
   { _id: false }
 );
@@ -38,6 +75,10 @@ const roundQuestionSchema = new mongoose.Schema(
     answer: { type: String, trim: true },
     score: { type: Number },
     feedback: { type: String, trim: true },
+    evaluationTrace: {
+      type: evaluationTraceSchema,
+      default: null,
+    },
     expectedPoints: {
       type: [expectedPointSchema],
       default: [],

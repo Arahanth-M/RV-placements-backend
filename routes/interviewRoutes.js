@@ -24,7 +24,7 @@ import {
 import { generateInterviewPlan } from "../services/interviewEngine.js";
 import { interviewQueue } from "../services/queues/interviewQueue.js";
 import { EVALUATE_ANSWER } from "../services/queues/jobTypes.js";
-import { tipsByRoundType, defaultTips } from "../utils/interviewTips.js";
+import { buildInterviewTips } from "../utils/interviewTips.js";
 import { INTERVIEW_STATES } from "../services/interviewStateMachine.js";
 import {
   getCachedInterviewSummaries,
@@ -51,6 +51,12 @@ const toClientStatus = (state) =>
 
 const toClientInterviewStatus = (state) =>
   state === INTERVIEW_STATES.INTERVIEW_COMPLETE ? "COMPLETED" : "IN_PROGRESS";
+
+const toRelevanceLabel = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  return numeric >= 0.62 ? "relevant" : "irrelevant";
+};
 
 /** 0-based index into `session.rounds`; `currentRound` (1-based) is the source of truth. */
 function roundIndexFromCurrentRound(session) {
@@ -478,8 +484,14 @@ router.get("/interview-status/:sessionId", async (req, res) => {
     const hasActiveQuestion = Boolean(effectiveCurrentQuestion);
 
     const roundType = session.rounds[currentRoundIndex]?.type;
-    const tips = tipsByRoundType[roundType] || defaultTips;
-    const selectedTips = tips.slice(0, 3);
+    const selectedTips = buildInterviewTips({
+      roundType,
+      difficulty: currentRoundDoc?.difficulty || session.difficultyLevel,
+      currentQuestion: effectiveCurrentQuestion || prevQuestion?.question || "",
+      companyName: session.companyId?.name || "",
+      currentQuestionIndex,
+      desiredCount: 8,
+    });
 
     const sessionInterviewStatus = session.state;
     const roundCompleted =
@@ -538,6 +550,8 @@ router.get("/interview-status/:sessionId", async (req, res) => {
       currentQuestionIndex: session.currentQuestionIndex,
       lastScore: prevQuestion?.score ?? null,
       lastFeedback: prevQuestion?.feedback ?? null,
+      lastCorrectness: prevQuestion?.evaluationTrace?.verdict ?? null,
+      lastRelevance: toRelevanceLabel(prevQuestion?.evaluationTrace?.relevance),
       roundStatus: currentRoundDoc?.status ?? session.roundStatus ?? null,
       interviewStatus: toClientInterviewStatus(session.state),
       roundType: roundType ?? null,

@@ -3,76 +3,86 @@ import User from "../models/User.js";
 import Submission from "../models/Submission.js";
 import authJWT from "../middleware/authJWT.js";
 import { redisUrl } from "../src/utils/redisClient.js";
-import { getJSON, setJSON } from "../src/utils/redisHelpers.js";
+import { deleteKey, getJSON, setJSON } from "../src/utils/redisHelpers.js";
 
 const leaderboardRouter = express.Router();
 const LEADERBOARD_CACHE_KEY = "rv:leaderboard:top_contributors";
 const LEADERBOARD_TTL_SECONDS = 3 * 60 * 60; // 3 hours
-const WEEKLY_TOP_CACHE_KEY_PREFIX = "rv:leaderboard:weekly_top";
+const PREVIOUS_DAY_TOP_CACHE_KEY_PREFIX = "rv:leaderboard:previous_day_top";
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
-function getCurrentWeekRangeUTC() {
+function formatIstDateKey(date) {
+  const shifted = new Date(date.getTime() + IST_OFFSET_MS);
+  const year = shifted.getUTCFullYear();
+  const month = String(shifted.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(shifted.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getPreviousDayRangeIST() {
   const now = new Date();
-  const day = now.getUTCDay(); // 0=Sun ... 6=Sat
-  const diffToMonday = (day + 6) % 7; // Mon -> 0, Sun -> 6
+  const shiftedNow = new Date(now.getTime() + IST_OFFSET_MS);
+  const currentDayStartMs =
+    Date.UTC(
+      shiftedNow.getUTCFullYear(),
+      shiftedNow.getUTCMonth(),
+      shiftedNow.getUTCDate(),
+      0,
+      0,
+      0,
+      0
+    ) - IST_OFFSET_MS;
+  const nextDayStartMs = currentDayStartMs + 24 * 60 * 60 * 1000;
+  const previousDayStartMs = currentDayStartMs - 24 * 60 * 60 * 1000;
 
-  const weekStart = new Date(Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate() - diffToMonday,
-    0,
-    0,
-    0,
-    0
-  ));
-  const nextWeekStart = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000);
-  return { weekStart, nextWeekStart };
+  return {
+    now,
+    previousDayStart: new Date(previousDayStartMs),
+    currentDayStart: new Date(currentDayStartMs),
+    nextDayStart: new Date(nextDayStartMs),
+    previousDayKey: formatIstDateKey(new Date(previousDayStartMs)),
+  };
 }
 
-function buildWeeklyTopCacheKey(weekStart) {
-  return `${WEEKLY_TOP_CACHE_KEY_PREFIX}:${weekStart.toISOString().slice(0, 10)}`;
+export async function invalidateLeaderboardCache() {
+  if (!redisUrl) return;
+  await deleteKey(LEADERBOARD_CACHE_KEY);
 }
 
-// GET /api/leaderboard/weekly-top - current week's highest contributor
-leaderboardRouter.get("/weekly-top", authJWT, async (req, res) => {
+// GET /api/leaderboard/previous-day-top - previous IST day's top approved contributor
+leaderboardRouter.get("/previous-day-top", authJWT, async (req, res) => {
   try {
-    const { weekStart, nextWeekStart } = getCurrentWeekRangeUTC();
-    const cacheKey = buildWeeklyTopCacheKey(weekStart);
+    const {
+      now,
+      previousDayStart,
+      currentDayStart,
+      nextDayStart,
+      previousDayKey,
+    } = getPreviousDayRangeIST();
+    const cacheKey = `${PREVIOUS_DAY_TOP_CACHE_KEY_PREFIX}:${previousDayKey}`;
 
     if (redisUrl) {
-      const cachedWeeklyTop = await getJSON(cacheKey);
-      if (cachedWeeklyTop) {
-        return res.json(cachedWeeklyTop);
+      const cachedPreviousDayTop = await getJSON(cacheKey);
+      if (cachedPreviousDayTop) {
+        return res.json(cachedPreviousDayTop);
       }
     }
 
     const [top] = await Submission.aggregate([
       {
         $match: {
-          submittedAt: { $gte: weekStart, $lt: nextWeekStart },
+          status: "approved",
+          approvedAt: { $gte: previousDayStart, $lt: currentDayStart },
         },
       },
       {
         $group: {
           _id: "$submittedBy.email",
-          totalSubmissions: { $sum: 1 },
-          questionsAdded: {
-            $sum: {
-              $cond: [{ $eq: ["$type", "internshipExperience"] }, 0, 1],
-            },
-          },
-          experiencesAdded: {
-            $sum: {
-              $cond: [{ $eq: ["$type", "internshipExperience"] }, 1, 0],
-            },
-          },
-          weeklyPoints: {
-            $sum: {
-              $cond: [{ $eq: ["$type", "internshipExperience"] }, 10, 5],
-            },
-          },
+          approvedSubmissionCount: { $sum: 1 },
+          submittedByName: { $first: "$submittedBy.name" },
         },
       },
-      { $sort: { weeklyPoints: -1, totalSubmissions: -1, _id: 1 } },
+      { $sort: { approvedSubmissionCount: -1, _id: 1 } },
       { $limit: 1 },
     ]);
 
@@ -83,22 +93,33 @@ leaderboardRouter.get("/weekly-top", authJWT, async (req, res) => {
         .lean();
 
       payload = {
-        weekStart: weekStart.toISOString(),
-        weekEndExclusive: nextWeekStart.toISOString(),
+        day: previousDayKey,
+        windowStart: previousDayStart.toISOString(),
+        windowEndExclusive: currentDayStart.toISOString(),
+        refreshAt: nextDayStart.toISOString(),
         userId: user?.userId || null,
-        username: user?.username || top._id || "Anonymous",
+        username: user?.username || top.submittedByName || top._id || "Anonymous",
         picture: user?.picture || null,
         email: top._id,
-        weeklyPoints: top.weeklyPoints ?? 0,
-        questionsAdded: top.questionsAdded ?? 0,
-        experiencesAdded: top.experiencesAdded ?? 0,
-        totalSubmissions: top.totalSubmissions ?? 0,
+        approvedSubmissionCount: top.approvedSubmissionCount ?? 0,
+      };
+    } else {
+      payload = {
+        day: previousDayKey,
+        windowStart: previousDayStart.toISOString(),
+        windowEndExclusive: currentDayStart.toISOString(),
+        refreshAt: nextDayStart.toISOString(),
+        userId: null,
+        username: null,
+        picture: null,
+        email: null,
+        approvedSubmissionCount: 0,
       };
     }
 
     const ttlSeconds = Math.max(
       60,
-      Math.floor((nextWeekStart.getTime() - Date.now()) / 1000)
+      Math.floor((nextDayStart.getTime() - now.getTime()) / 1000)
     );
     if (redisUrl) {
       await setJSON(cacheKey, payload, ttlSeconds);
@@ -106,7 +127,7 @@ leaderboardRouter.get("/weekly-top", authJWT, async (req, res) => {
 
     return res.json(payload);
   } catch (error) {
-    console.error("❌ Error fetching weekly top contributor:", error.message);
+    console.error("❌ Error fetching previous day top contributor:", error.message);
     return res.status(500).json({ error: "Server error" });
   }
 });

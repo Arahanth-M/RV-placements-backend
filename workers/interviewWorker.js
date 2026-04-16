@@ -192,6 +192,21 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       feedback:
         "Thanks for the response. I could not evaluate this answer fully right now, so this is a neutral score. Please continue to the next question.",
       verdict: "partial",
+      evaluationTrace: {
+        scoringVersion: "fallback",
+        questionType: "general",
+        expectedAnswerMode: "conceptual",
+        verdict: "partial",
+        confidence: 0.3,
+        relevance: 0.5,
+        coverage: 0.5,
+        correctness: 0.5,
+        communication: 0.5,
+        matchedRubricPoints: [],
+        missingRubricPoints: [],
+        criticalMisses: [],
+        subscores: {},
+      },
     };
   }
 
@@ -221,6 +236,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       answer: "",
       score: null,
       feedback: "",
+      evaluationTrace: null,
       expectedPoints: Array.isArray(currentQuestionEntry?.expectedPoints)
         ? currentQuestionEntry.expectedPoints
         : [],
@@ -229,6 +245,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
   currentRound.questions[currentQuestionIndex].answer = trimmedAnswer;
   currentRound.questions[currentQuestionIndex].score = evaluation.score;
   currentRound.questions[currentQuestionIndex].feedback = evaluation.feedback;
+  currentRound.questions[currentQuestionIndex].evaluationTrace = evaluation.evaluationTrace || null;
 
   // 6) Increment currentQuestionIndex
   const nextQuestionIndex = currentQuestionIndex + 1;
@@ -247,7 +264,13 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
         }))
       : [];
 
-    let { question, expectedPoints } = await generateQuestion({
+    const recentScores = (Array.isArray(currentRound.questions) ? currentRound.questions : [])
+      .slice(0, nextQuestionIndex)
+      .map((item) => Number(item?.score))
+      .filter((value) => Number.isFinite(value))
+      .slice(-2);
+
+    let { question, expectedPoints, expectedAnswerMode } = await generateQuestion({
       userId: String(session.userId || ""),
       companyContext,
       roundType: currentRound.type,
@@ -257,17 +280,26 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       previousAnswer: trimmedAnswer,
       previousFeedback: evaluation.feedback,
       previousScore: evaluation.score,
+      previousEvaluation: {
+        confidence: evaluation?.evaluationTrace?.confidence,
+        criticalMisses: evaluation?.evaluationTrace?.criticalMisses || [],
+        recentScores,
+      },
       roundHistory,
     });
     if (!question || !String(question).trim()) {
       question = `Let's go deeper — how would you refine or extend your approach for this ${currentRound.type || "technical"} question?`;
       expectedPoints = [];
+      expectedAnswerMode = "conceptual";
     }
 
     const nextExpectedPointsStored = (Array.isArray(expectedPoints) ? expectedPoints : []).map(
       (p) => ({
-        text: p,
-        embedding: [],
+        text: p?.text || "",
+        category: p?.category || "coverage",
+        importance: p?.importance || "mustHave",
+        expectedAnswerMode: p?.expectedAnswerMode || expectedAnswerMode || "conceptual",
+        embedding: Array.isArray(p?.embedding) ? p.embedding : [],
       })
     );
 
@@ -277,6 +309,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
         answer: "",
         score: null,
         feedback: "",
+        evaluationTrace: null,
         expectedPoints: nextExpectedPointsStored,
       };
     } else {
@@ -284,6 +317,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       currentRound.questions[nextQuestionIndex].answer = "";
       currentRound.questions[nextQuestionIndex].score = null;
       currentRound.questions[nextQuestionIndex].feedback = "";
+      currentRound.questions[nextQuestionIndex].evaluationTrace = null;
       currentRound.questions[nextQuestionIndex].expectedPoints = nextExpectedPointsStored;
     }
 

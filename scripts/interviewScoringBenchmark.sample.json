@@ -1,0 +1,74 @@
+[
+  {
+    "id": "coding-strong",
+    "question": "How would you solve a sorted array lookup problem and discuss complexity?",
+    "answer": "I would use binary search because the array is sorted. I would handle empty arrays and off-by-one cases, and the time complexity is O(log n) with O(1) extra space.",
+    "expectedAnswerMode": "code",
+    "expectedPoints": [
+      {
+        "text": "Choose a sound approach",
+        "category": "algorithmChoice",
+        "importance": "mustHave"
+      },
+      {
+        "text": "Cover edge cases or tricky inputs",
+        "category": "edgeCases",
+        "importance": "mustHave"
+      },
+      {
+        "text": "Mention time or space complexity",
+        "category": "complexityAwareness",
+        "importance": "goodToHave"
+      }
+    ],
+    "targetScore": 8
+  },
+  {
+    "id": "system-design-mid",
+    "question": "How would you design a notification service for a large app?",
+    "answer": "I would have an API, a queue, and workers. We can scale workers horizontally and cache user preferences. I would also think about retries for failed sends.",
+    "expectedAnswerMode": "design",
+    "expectedPoints": [
+      {
+        "text": "Define the main components needed for the design",
+        "category": "architectureCoverage",
+        "importance": "mustHave"
+      },
+      {
+        "text": "Discuss scaling or performance bottlenecks",
+        "category": "scalability",
+        "importance": "mustHave"
+      },
+      {
+        "text": "Address failure handling or reliability concerns",
+        "category": "failureHandling",
+        "importance": "goodToHave"
+      }
+    ],
+    "targetScore": 7
+  },
+  {
+    "id": "behavioral-weak",
+    "question": "Tell me about a time you handled conflict in a team.",
+    "answer": "There was some conflict in my team and I helped resolve it.",
+    "expectedAnswerMode": "story",
+    "expectedPoints": [
+      {
+        "text": "Clearly frame the situation",
+        "category": "situationClarity",
+        "importance": "mustHave"
+      },
+      {
+        "text": "Explain the specific actions you personally took",
+        "category": "actionOwnership",
+        "importance": "mustHave"
+      },
+      {
+        "text": "End with a concrete result or measurable outcome",
+        "category": "resultSpecificity",
+        "importance": "mustHave"
+      }
+    ],
+    "targetScore": 3
+  }
+]

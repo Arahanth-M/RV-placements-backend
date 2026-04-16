@@ -19,6 +19,7 @@ import {
   getAdminDashboardStats,
   invalidateAdminDashboardStatsCache,
 } from "../services/adminDashboardStatsCache.js";
+import { invalidateLeaderboardCache } from "./leaderboardRoutes.js";
 
 const adminRouter = express.Router();
 
@@ -607,6 +608,11 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
     if (contributor) {
       contributor.points = (contributor.points || 0) + pointsToAdd;
       await contributor.save();
+      try {
+        await invalidateLeaderboardCache();
+      } catch (cacheErr) {
+        console.warn("⚠️ Failed to invalidate leaderboard cache after approval:", cacheErr?.message || cacheErr);
+      }
     }
 
     await invalidateAdminDashboardStatsCache();
@@ -685,16 +691,29 @@ adminRouter.post("/companies/:id/approve", async (req, res) => {
       return res.status(404).json({ error: "Company not found" });
     }
 
+    if (company.status === "approved") {
+      return res.json({
+        message: "Company already approved",
+        company,
+        alreadyApproved: true,
+      });
+    }
+
     company.status = "approved";
     company.approvedAt = new Date();
     // Save will trigger the post-save hook which creates notifications
     await company.save();
 
-    await invalidateAdminDashboardStatsCache();
+    try {
+      await invalidateAdminDashboardStatsCache();
+    } catch (cacheErr) {
+      console.warn("⚠️ Failed to invalidate admin dashboard cache after company approval:", cacheErr?.message || cacheErr);
+    }
 
     res.json({ 
       message: "Company approved successfully",
-      company: company
+      company: company,
+      alreadyApproved: false,
     });
   } catch (error) {
     console.error("❌ Error approving company:", error.message);
