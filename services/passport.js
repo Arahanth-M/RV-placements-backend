@@ -31,43 +31,34 @@ passport.use(
         const primaryEmail = profile?.emails?.[0]?.value || "";
         const normalizedEmail = primaryEmail.trim().toLowerCase();
         const adminEmail = String(ADMIN_EMAIL || "").trim().toLowerCase();
-        
+
         // 1. Basic Email Validation
         if (!normalizedEmail) {
           return done(null, false, { reason: "not_allowed" });
         }
 
         const isRvce = normalizedEmail.endsWith("@rvce.edu.in");
-        const isCS22 = /^[a-zA-Z0-9._%+-]+\.cs22@rvce\.edu\.in$/.test(
-          normalizedEmail
-        );
 
         if (!isRvce) {
           return done(null, false, { reason: "domain" });
         }
 
-        const betaAccess = isCS22;
-
         // 2. Strict Student/Admin Check
         const db = mongoose.connection.db;
-        const studentCollection = db.collection("users_2026");
-        
-        // Find record by emailId (case-insensitive)
-        const studentRecord = await studentCollection.findOne({ 
-          emailId: { $regex: new RegExp(`^${normalizedEmail}$`, "i") } 
+        const studentCollection = db.collection("betaTestUsers2026");
+
+        // Find record by Email (case-insensitive)
+        const studentRecord = await studentCollection.findOne({
+          Email: { $regex: new RegExp(`^${normalizedEmail}$`, "i") }
         });
-        
-        if (!studentRecord && normalizedEmail !== adminEmail) {
-          console.warn(`🛑 Login Rejected for email: ${normalizedEmail} (No student record found in users_2026)`);
-          return done(null, false, { reason: "not_found" });
-        }
+        const isBetaListed = Boolean(studentRecord);
 
         // 3. Authenticate or Create User
         const existingUser = await User.findOne({ userId: profile.id });
 
         if (existingUser) {
           existingUser.email = normalizedEmail;
-          existingUser.betaAccess = betaAccess;
+          existingUser.isBetaListed = isBetaListed;
           const pic = pictureFromGoogleProfile(profile);
           if (pic) existingUser.picture = pic;
           if (profile.displayName?.trim()) {
@@ -84,7 +75,7 @@ passport.use(
           email: normalizedEmail,
           picture: pictureFromGoogleProfile(profile),
           fillForm: false,
-          betaAccess,
+          isBetaListed,
         }).save();
 
         console.log(`👤 New User Created: ${profile.displayName} (${normalizedEmail})`);

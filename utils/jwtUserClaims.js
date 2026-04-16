@@ -14,7 +14,7 @@ export function buildJwtPayloadFromUser(user, options = {}) {
     fillForm: doc.fillForm ?? false,
     points: doc.points ?? 0,
     isPremium: doc.isPremium ?? false,
-    betaAccess: doc.betaAccess ?? true,
+    isBetaListed: doc.isBetaListed === true,
     membershipType: doc.membershipType,
     companyId: doc.companyId,
     isAdminSession,

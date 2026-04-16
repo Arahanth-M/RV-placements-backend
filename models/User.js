@@ -33,9 +33,9 @@ const userSchema = new Schema({
     enum: ["student", "admin", "company"],
     default: "student"
   },
-  betaAccess: {
+  isBetaListed: {
     type: Boolean,
-    default: true
+    default: false
   },
   createdAt: {
     type: Date,

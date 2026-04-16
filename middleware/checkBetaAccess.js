@@ -5,10 +5,14 @@ export default function checkBetaAccess(req, res, next) {
     return res.status(401).json({ error: messages.ERROR.NOT_AUTHENTICATED });
   }
 
-  if (req.user.betaAccess === false) {
+  if (req.user.isAdminSession === true) {
+    return next();
+  }
+
+  if (req.user.isBetaListed !== true) {
     return res.status(403).json({
       success: false,
-      message: "Beta access only",
+      message: "Access restricted to beta users",
     });
   }
 

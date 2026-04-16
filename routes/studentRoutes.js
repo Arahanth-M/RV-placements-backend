@@ -15,6 +15,8 @@ import validateRequest from "../middleware/validateRequest.js";
 import { profileCacheInvalidateSchema } from "../validations/student.validation.js";
 
 const router = express.Router();
+const STUDENT_COLLECTION = "betaTestUsers2026";
+const COMPANY_FIELDS = ["company1", "company2", "company3", "company4", "company5"];
 
 function normalizeCompanyId(raw) {
   if (raw == null || raw === "") return null;
@@ -27,7 +29,25 @@ function normalizeText(raw) {
   return String(raw).trim();
 }
 
-// Get student data by USN from student-data-2026-cse collection
+function buildPlacementCompanies(studentRecord) {
+  const companyNameSet = new Map();
+
+  for (const fieldName of COMPANY_FIELDS) {
+    const companyName = normalizeText(studentRecord?.[fieldName]);
+    if (!companyName) continue;
+
+    const key = companyName.toLowerCase();
+    if (!companyNameSet.has(key)) {
+      companyNameSet.set(key, companyName);
+    }
+  }
+
+  return Array.from(companyNameSet.values()).map((companyName) => ({
+    companyName,
+  }));
+}
+
+// Get student data by USN from betaTestUsers2026 collection
 router.get(
   "/student-data/:usn",
   authJWT,
@@ -41,9 +61,9 @@ router.get(
       return res.status(400).json({ error: "USN is required" });
     }
 
-    // Connect to the student data collection (users_2026)
+    // Connect to the beta tester student data collection
     const db = mongoose.connection.db;
-    const studentDataCollection = db.collection("users_2026");
+    const studentDataCollection = db.collection(STUDENT_COLLECTION);
     
     // Escape special regex characters in USN
     const escapedUSN = usn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -77,7 +97,7 @@ router.get(
 });
 
 // Get student profile by logged-in user email
-router.get("/profile", authJWT, authorize(["student", "admin"]), async (req, res) => {
+router.get("/profile", authJWT, checkBetaAccess, authorize(["student", "admin"]), async (req, res) => {
   try {
     if (!req.user || !req.user.email) {
       return res.status(401).json({ error: "Unauthorized" });
@@ -94,68 +114,40 @@ router.get("/profile", authJWT, authorize(["student", "admin"]), async (req, res
     }
     console.log(`🧊 [Profile] Cache miss for ${email}`);
 
-    // Connect to the users_2026 collection
+    // Connect to the beta tester student data collection
     const db = mongoose.connection.db;
-    const usersCollection = db.collection("users_2026");
+    const usersCollection = db.collection(STUDENT_COLLECTION);
 
     // Escape special regex characters in email
     const escapedEmail = email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-    const studentRows = await usersCollection.find({
-      $or: [
-        { emailId: { $regex: new RegExp(`^${escapedEmail}$`, "i") } },
-        { email: { $regex: new RegExp(`^${escapedEmail}$`, "i") } }
-      ]
-    }).toArray();
+    const studentRecord = await usersCollection.findOne({
+      Email: { $regex: new RegExp(`^${escapedEmail}$`, "i") },
+    });
 
-    if (!studentRows || studentRows.length === 0) {
-      console.log(`❓ [Profile] No profile record found in users_2026 for: ${email}`);
-      
+    if (!studentRecord) {
+      console.log(`❓ [Profile] No profile record found in ${STUDENT_COLLECTION} for: ${email}`);
+
       // If user is admin, provide specialized error
       if (email === adminEmail) {
-        return res.status(404).json({ 
-          error: "Admin Profile Not Found", 
-          message: "Admins do not have a student profile stored in users_2026." 
+        return res.status(404).json({
+          error: "Admin Profile Not Found",
+          message: `Admins do not have a student profile stored in ${STUDENT_COLLECTION}.`
         });
       }
 
       return res.status(404).json({ error: "Profile not found" });
     }
 
-    // Base response keeps backward compatibility with existing fields.
-    const primaryRow = studentRows[0];
-
-    // Dedupe company names from the Company field across all rows.
-    // Includes all associated companies irrespective of offer status/value.
-    const companyNameSet = new Map();
-    for (const row of studentRows) {
-      const companyName = normalizeText(row?.Company || row?.company);
-      if (!companyName) continue;
-
-      const key = companyName.toLowerCase();
-      if (!companyNameSet.has(key)) {
-        companyNameSet.set(key, companyName);
-      }
-    }
-
-    const placementCompanies = Array.from(companyNameSet.values()).map((companyName) => ({
-      companyName,
-    }));
-
-    // Preserve original shape while upgrading for multi-row students.
+    const placementCompanies = buildPlacementCompanies(studentRecord);
     const responsePayload = {
-      ...primaryRow,
+      ...studentRecord,
       placementCompanies,
-      companyId: normalizeCompanyId(primaryRow?.companyId) || null,
-      Company:
-        placementCompanies[0]?.companyName ||
-        primaryRow?.Company ||
-        primaryRow?.company ||
-        "",
+      companyId: normalizeCompanyId(studentRecord?.companyId) || null,
     };
 
     console.log(
-      `✅ [Profile] Found ${studentRows.length} row(s), ${placementCompanies.length} associated compan${placementCompanies.length === 1 ? "y" : "ies"} for ${email}`
+      `✅ [Profile] Found 1 record, ${placementCompanies.length} associated compan${placementCompanies.length === 1 ? "y" : "ies"} for ${email}`
     );
 
     await setCachedStudentProfile(email, responsePayload);
@@ -166,7 +158,7 @@ router.get("/profile", authJWT, authorize(["student", "admin"]), async (req, res
   }
 });
 
-// Admin utility: invalidate one or more cached student profiles after users_2026 updates.
+// Admin utility: invalidate one or more cached student profiles after betaTestUsers2026 updates.
 router.post(
   "/profile/cache-invalidate",
   authJWT,
