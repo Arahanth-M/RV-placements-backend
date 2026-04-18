@@ -40,6 +40,11 @@ export const config = {
   // OAuth
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
   GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
+
+  // External form redirect
+  PLACEMENT_FORM_URL:
+    process.env.PLACEMENT_FORM_URL ||
+    "https://docs.google.com/forms/d/e/1FAIpQLScRXllJ4WmuiIPicffKS4y3amX-6gjOMu31yGMu4XZeKaMukg/viewform?usp=dialog",
   
   // JWT (set JWT_SECRET in env; used when signing tokens)
   JWT_SECRET: process.env.JWT_SECRET,

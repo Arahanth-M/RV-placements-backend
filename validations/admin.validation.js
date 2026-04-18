@@ -27,6 +27,10 @@ export const adminCompanyStatsSchema = Joi.object({
   totalGotIn: nonNegIntField.optional(),
 }).unknown(true);
 
+export const adminCompanyTotalGotInAdjustmentSchema = Joi.object({
+  delta: Joi.number().integer().valid(-1, 1).required(),
+}).unknown(true);
+
 export const adminCompanyRolesSchema = Joi.object({
   roles: Joi.array().items(Joi.object().unknown(true)).required(),
 }).unknown(true);
@@ -42,6 +46,7 @@ export default {
   adminInterviewQuestionUpdateSchema,
   adminInterviewProcessUpdateSchema,
   adminCompanyStatsSchema,
+  adminCompanyTotalGotInAdjustmentSchema,
   adminCompanyRolesSchema,
   adminCompanyGeneralSchema,
 };

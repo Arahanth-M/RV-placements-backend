@@ -8,6 +8,7 @@ import {
   adminInterviewQuestionUpdateSchema,
   adminInterviewProcessUpdateSchema,
   adminCompanyStatsSchema,
+  adminCompanyTotalGotInAdjustmentSchema,
   adminCompanyRolesSchema,
   adminCompanyGeneralSchema,
 } from "../validations/admin.validation.js";
@@ -19,6 +20,7 @@ import {
   getAdminDashboardStats,
   invalidateAdminDashboardStatsCache,
 } from "../services/adminDashboardStatsCache.js";
+import { invalidateCompanyDetailCache } from "../services/companyDetailCache.js";
 import { invalidateLeaderboardCache } from "./leaderboardRoutes.js";
 
 const adminRouter = express.Router();
@@ -975,6 +977,55 @@ adminRouter.put(
     res.status(500).json({ error: "Server error" });
   }
 });
+
+adminRouter.patch(
+  "/companies/:id/total-got-in",
+  validateRequest(adminCompanyTotalGotInAdjustmentSchema),
+  async (req, res) => {
+    try {
+      const delta = Number(req.body?.delta);
+      const company = await Company.findOneAndUpdate(
+        { _id: req.params.id },
+        [
+          {
+            $set: {
+              totalGotIn: {
+                $max: [
+                  0,
+                  {
+                    $add: [
+                      { $ifNull: ["$totalGotIn", 0] },
+                      delta,
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        ],
+        { new: true }
+      ).select("_id totalGotIn");
+
+      if (!company) {
+        return res.status(404).json({ error: "Company not found" });
+      }
+
+      await invalidateCompanyDetailCache(company._id);
+
+      return res.json({
+        message: "Got in count updated",
+        companyId: company._id,
+        totalGotIn: company.totalGotIn ?? 0,
+      });
+    } catch (error) {
+      console.error("❌ Error adjusting totalGotIn:", error.message);
+      if (error.name === "CastError") {
+        return res.status(404).json({ error: "Company not found" });
+      }
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
 
 // PUT /api/admin/companies/:id/roles - replace roles & CTC details (admin only)
 adminRouter.put(

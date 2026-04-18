@@ -5,9 +5,37 @@ import User from "../models/User.js";
 import authJWT from "../middleware/authJWT.js";
 import validateRequest from "../middleware/validateRequest.js";
 import { placementDataSchema } from "../validations/placement.validation.js";
-import { messages } from "../config/constants.js";
+import { config, messages } from "../config/constants.js";
 
 const router = express.Router();
+
+function getSafePlacementFormUrl() {
+  const rawUrl = config.PLACEMENT_FORM_URL;
+
+  try {
+    const parsedUrl = new URL(rawUrl);
+    const isGoogleFormsHost = parsedUrl.hostname === "docs.google.com";
+    const isAllowedPath = parsedUrl.pathname.startsWith("/forms/d/e/");
+
+    if (isGoogleFormsHost && isAllowedPath) {
+      return parsedUrl.toString();
+    }
+  } catch (error) {
+    console.error("Invalid placement form URL:", error.message);
+  }
+
+  return null;
+}
+
+router.get("/form", (req, res) => {
+  const safeFormUrl = getSafePlacementFormUrl();
+
+  if (!safeFormUrl) {
+    return res.status(500).json({ error: "Placement form is unavailable" });
+  }
+
+  return res.redirect(302, safeFormUrl);
+});
 
 // Submit placement form data as submissions (requires admin approval)
 router.post(
