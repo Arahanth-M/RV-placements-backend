@@ -325,6 +325,7 @@ const companySchema = new mongoose.Schema(
       enum: ["Computer Science and Engineering", "Electronics and Communication", "Mechanical Engineering"],
       default: undefined
     },
+    views: { type: Number, default: 0, min: 0 },
     totalStudentsApplied: { type: Number, default: 0, min: 0 },
     totalClearedOA: { type: Number, default: 0, min: 0 },
     totalGotIn: { type: Number, default: 0, min: 0 },

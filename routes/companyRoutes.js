@@ -13,6 +13,7 @@ import { getCompanyFocusTags } from "../utils/companyFocusTags.js";
 import { attachPlacementCategoryToCompany } from "../utils/ctcCategory.js";
 import redis from "../utils/redis.js";
 import { companyDetailRedisKey } from "../services/companyDetailCache.js";
+import User from "../models/User.js";
 dotenv.config();
 
 const companyRouter = express.Router();
@@ -123,6 +124,12 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
   const id = req.params.id;
   const key = companyDetailRedisKey(id);
   try {
+    const touchUserActivity = () =>
+      User.updateOne(
+        { _id: req.user?._id },
+        { $set: { lastActiveAt: new Date() } }
+      ).catch(() => {});
+
     let cached = null;
     if (key) {
       try {
@@ -134,6 +141,13 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
     if (cached != null && cached !== "") {
       try {
         const parsed = JSON.parse(cached);
+        await Promise.all([
+          Company.updateOne(
+            { _id: id, status: "approved" },
+            { $inc: { views: 1 } }
+          ).catch(() => {}),
+          touchUserActivity(),
+        ]);
         console.log("HIT — company found in Redis and served from cache:", id);
         return res.json(attachPlacementCategoryToCompany(parsed));
       } catch {
@@ -143,10 +157,17 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
 
     console.log("MISS — company not in Redis; fetched from MongoDB:", id);
 
-    const companyDoc = await Company.findOne({
-      _id: id,
-      status: "approved", 
-    });
+    const [companyDoc] = await Promise.all([
+      Company.findOneAndUpdate(
+        {
+          _id: id,
+          status: "approved",
+        },
+        { $inc: { views: 1 } },
+        { new: true }
+      ),
+      touchUserActivity(),
+    ]);
 
     if (!companyDoc) {
       return res.status(404).json({ error: "Company not found" });

@@ -16,7 +16,20 @@ import { profileCacheInvalidateSchema } from "../validations/student.validation.
 
 const router = express.Router();
 const STUDENT_COLLECTION = "betaTestUsers2026";
-const COMPANY_FIELDS = ["company1", "company2", "company3", "company4", "company5"];
+const COMPANY_FIELDS = [
+  "Summer internship Company name",
+  "FTE Company name",
+  "Only internship Company name",
+  "FTE and internship Company name",
+  "6 months Internship Company name",
+  "company1",
+  "company2",
+  "company3",
+  "company4",
+  "company5",
+  "Company",
+  "company",
+];
 
 function normalizeCompanyId(raw) {
   if (raw == null || raw === "") return null;
@@ -29,11 +42,14 @@ function normalizeText(raw) {
   return String(raw).trim();
 }
 
-function buildPlacementCompanies(studentRecord) {
+function extractPlacementCompanyNames(studentRecord) {
+  const record = studentRecord && typeof studentRecord === "object" ? studentRecord : {};
   const companyNameSet = new Map();
+  const dynamicCompanyFields = Object.keys(record).filter((key) => /company name/i.test(key));
+  const candidateFields = [...new Set([...COMPANY_FIELDS, ...dynamicCompanyFields])];
 
-  for (const fieldName of COMPANY_FIELDS) {
-    const companyName = normalizeText(studentRecord?.[fieldName]);
+  for (const fieldName of candidateFields) {
+    const companyName = normalizeText(record?.[fieldName]);
     if (!companyName) continue;
 
     const key = companyName.toLowerCase();
@@ -42,7 +58,11 @@ function buildPlacementCompanies(studentRecord) {
     }
   }
 
-  return Array.from(companyNameSet.values()).map((companyName) => ({
+  return Array.from(companyNameSet.values());
+}
+
+function buildPlacementCompanies(studentRecord) {
+  return extractPlacementCompanyNames(studentRecord).map((companyName) => ({
     companyName,
   }));
 }
@@ -139,10 +159,22 @@ router.get("/profile", authJWT, checkBetaAccess, authorize(["student", "admin"])
       return res.status(404).json({ error: "Profile not found" });
     }
 
-    const placementCompanies = buildPlacementCompanies(studentRecord);
+    const placementCompanyNames = extractPlacementCompanyNames(studentRecord);
+    const placementCompanies = placementCompanyNames.map((companyName) => ({
+      companyName,
+    }));
+    const primaryCompanyName =
+      normalizeText(studentRecord?.Company) ||
+      normalizeText(studentRecord?.company) ||
+      placementCompanyNames[0] ||
+      null;
     const responsePayload = {
       ...studentRecord,
+      ...(primaryCompanyName && !normalizeText(studentRecord?.Company)
+        ? { Company: primaryCompanyName }
+        : {}),
       placementCompanies,
+      primaryCompanyName,
       companyId: normalizeCompanyId(studentRecord?.companyId) || null,
     };
 

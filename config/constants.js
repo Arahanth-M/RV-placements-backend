@@ -72,6 +72,7 @@ export const urls = {
 export const routes = {
   AUTH: '/api/auth',
   COMPANIES: '/api/companies',
+  MISSING_COMPANIES: '/api/missing-companies',
   SUBMISSIONS: '/api/submissions',
   EXPERIENCES: '/api/experiences',
   PAYMENT: '/api/payment',

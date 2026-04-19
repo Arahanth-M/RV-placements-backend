@@ -16,6 +16,7 @@ import {
 import sanitizeInput from "./middleware/sanitizeInput.js";
 
 import companyRouter from "./routes/companyRoutes.js";
+import missingCompanyRouter from "./routes/missingCompanyRoutes.js";
 import submissionRouter from "./routes/submissionsRoutes.js";
 import experienceRouter from "./routes/experienceRoutes.js";
 import authRouter from "./routes/authRoutes.js";
@@ -127,6 +128,7 @@ if (process.env.NODE_ENV !== "test") {
 app.use(routes.AUTH, authRouter);
 app.use(routes.SUBMISSIONS, submissionRouter);
 app.use(routes.COMPANIES, companyRouter);
+app.use(routes.MISSING_COMPANIES, missingCompanyRouter);
 app.use(routes.EXPERIENCES, experienceRouter);
 app.use(routes.PAYMENT, paymentRouter);
 app.use(routes.LEETCODE, leetcodeRouter);

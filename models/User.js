@@ -37,10 +37,20 @@ const userSchema = new Schema({
     type: Boolean,
     default: false
   },
+  hasSubmittedMissingCompanyRequest: {
+    type: Boolean,
+    default: false
+  },
+  lastActiveAt: {
+    type: Date,
+  },
   createdAt: {
     type: Date,
     default: Date.now
   }
 });
+
+userSchema.index({ createdAt: 1 });
+userSchema.index({ lastActiveAt: 1 });
 
 export default mongoose.model("User", userSchema);

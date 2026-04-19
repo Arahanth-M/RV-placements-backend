@@ -41,6 +41,10 @@ export const adminCompanyGeneralSchema = Joi.object({
   type: Joi.string().max(200).allow("").optional(),
 }).unknown(true);
 
+export const adminMissingCompanyStatusSchema = Joi.object({
+  status: Joi.string().valid("PENDING", "ADDED", "REJECTED").required(),
+}).unknown(true);
+
 export default {
   adminOaQuestionUpdateSchema,
   adminInterviewQuestionUpdateSchema,
@@ -49,4 +53,5 @@ export default {
   adminCompanyTotalGotInAdjustmentSchema,
   adminCompanyRolesSchema,
   adminCompanyGeneralSchema,
+  adminMissingCompanyStatusSchema,
 };

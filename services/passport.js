@@ -59,6 +59,7 @@ passport.use(
         if (existingUser) {
           existingUser.email = normalizedEmail;
           existingUser.isBetaListed = isBetaListed;
+          existingUser.lastActiveAt = new Date();
           const pic = pictureFromGoogleProfile(profile);
           if (pic) existingUser.picture = pic;
           if (profile.displayName?.trim()) {
@@ -76,6 +77,7 @@ passport.use(
           picture: pictureFromGoogleProfile(profile),
           fillForm: false,
           isBetaListed,
+          lastActiveAt: new Date(),
         }).save();
 
         console.log(`👤 New User Created: ${profile.displayName} (${normalizedEmail})`);

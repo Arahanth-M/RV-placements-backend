@@ -11,15 +11,15 @@ import {
   adminCompanyTotalGotInAdjustmentSchema,
   adminCompanyRolesSchema,
   adminCompanyGeneralSchema,
+  adminMissingCompanyStatusSchema,
 } from "../validations/admin.validation.js";
 import User from "../models/User.js";
 import Submission from "../models/Submission.js";
 import Company from "../models/Company.js";
+import MissingCompany from "../models/MissingCompany.js";
 import Notification from "../models/Notification.js";
-import {
-  getAdminDashboardStats,
-  invalidateAdminDashboardStatsCache,
-} from "../services/adminDashboardStatsCache.js";
+import { getAdminStats } from "../controllers/adminStatsController.js";
+import { invalidateAdminDashboardStatsCache } from "../services/adminDashboardStatsCache.js";
 import { invalidateCompanyDetailCache } from "../services/companyDetailCache.js";
 import { invalidateLeaderboardCache } from "./leaderboardRoutes.js";
 
@@ -128,13 +128,66 @@ adminRouter.get("/submissions/:id", async (req, res) => {
 });
 
 // Get dashboard stats (Redis-cached when REDIS_URL is set; invalidated on admin mutations)
-adminRouter.get("/stats", async (req, res) => {
+adminRouter.get("/stats", getAdminStats);
+
+adminRouter.get("/missing-companies", async (req, res) => {
   try {
-    const stats = await getAdminDashboardStats();
-    res.json(stats);
+    const missingCompanies = await MissingCompany.find({})
+      .populate("requestedBy", "_id username email")
+      .sort({ requestCount: -1, createdAt: -1 })
+      .lean();
+
+    res.json({ items: missingCompanies });
   } catch (error) {
-    console.error("❌ Error fetching dashboard stats:", error.message);
+    console.error("❌ Error fetching missing companies:", error.message);
     res.status(500).json({ error: "Server error" });
+  }
+});
+
+adminRouter.patch(
+  "/missing-companies/:id/status",
+  validateRequest(adminMissingCompanyStatusSchema),
+  async (req, res) => {
+    try {
+      const missingCompany = await MissingCompany.findByIdAndUpdate(
+        req.params.id,
+        { $set: { status: req.body.status } },
+        { new: true, runValidators: true }
+      );
+
+      if (!missingCompany) {
+        return res.status(404).json({ error: "Missing company request not found" });
+      }
+
+      return res.json({
+        message: "Missing company status updated successfully",
+        missingCompany,
+      });
+    } catch (error) {
+      console.error("❌ Error updating missing company status:", error.message);
+      if (error.name === "CastError") {
+        return res.status(404).json({ error: "Missing company request not found" });
+      }
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
+adminRouter.delete("/missing-companies/:id", async (req, res) => {
+  try {
+    const missingCompany = await MissingCompany.findByIdAndDelete(req.params.id);
+
+    if (!missingCompany) {
+      return res.status(404).json({ error: "Missing company request not found" });
+    }
+
+    return res.json({ message: "Missing company request deleted successfully" });
+  } catch (error) {
+    console.error("❌ Error deleting missing company request:", error.message);
+    if (error.name === "CastError") {
+      return res.status(404).json({ error: "Missing company request not found" });
+    }
+    return res.status(500).json({ error: "Server error" });
   }
 });
 

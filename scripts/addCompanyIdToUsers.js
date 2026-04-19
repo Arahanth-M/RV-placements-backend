@@ -9,8 +9,39 @@ const __dirname = path.dirname(__filename);
 // Load environment variables from the parent directory (backend root)
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
+const COMPANY_FIELDS = [
+  "Summer internship Company name",
+  "FTE Company name",
+  "Only internship Company name",
+  "FTE and internship Company name",
+  "6 months Internship Company name",
+  "Company",
+  "company",
+  "company1",
+  "company2",
+  "company3",
+  "company4",
+  "company5",
+];
+
 function escapeRegex(string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& means the whole matched string
+}
+
+function getStudentCompanyName(user) {
+  if (!user || typeof user !== "object") return "";
+
+  const dynamicCompanyFields = Object.keys(user).filter((key) => /company name/i.test(key));
+  const candidateFields = [...new Set([...COMPANY_FIELDS, ...dynamicCompanyFields])];
+
+  for (const fieldName of candidateFields) {
+    const raw = user[fieldName];
+    if (typeof raw === "string" && raw.trim()) {
+      return raw.trim();
+    }
+  }
+
+  return "";
 }
 
 async function migrate() {
@@ -38,13 +69,7 @@ async function migrate() {
     let unmatchedCount = 0;
 
     for (const user of users) {
-      if (!user.Company) {
-        // Safe skip
-        unmatchedCount++;
-        continue;
-      }
-
-      const companyStr = user.Company.toString().trim();
+      const companyStr = getStudentCompanyName(user);
       if (!companyStr) {
         unmatchedCount++;
         continue;

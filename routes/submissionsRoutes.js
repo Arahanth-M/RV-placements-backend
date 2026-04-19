@@ -1,5 +1,6 @@
 import express from "express";
 import Submission from "../models/Submission.js";
+import User from "../models/User.js";
 import authJWT from "../middleware/authJWT.js";
 import checkBetaAccess from "../middleware/checkBetaAccess.js";
 import authorize from "../middleware/authorize.js";
@@ -34,7 +35,13 @@ submissionRouter.post(
         email: req.user.email,
       }
     });
-    await newSubmission.save();
+    await Promise.all([
+      newSubmission.save(),
+      User.updateOne(
+        { _id: req.user._id },
+        { $set: { lastActiveAt: new Date() } }
+      ),
+    ]);
 
     res.status(201).json({ message: messages.SUCCESS.SUBMISSION_RECEIVED });
   } catch (error) {

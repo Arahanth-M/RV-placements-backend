@@ -9,6 +9,20 @@ const STUDENTS_COLLECTION = process.env.STUDENTS_COLLECTION || "users_2026";
 const COMPANIES_COLLECTION = process.env.COMPANIES_COLLECTION || "companies1";
 const BULK_BATCH_SIZE = Number(process.env.BULK_BATCH_SIZE || 500);
 const DRY_RUN = process.env.DRY_RUN === "1";
+const COMPANY_FIELDS = [
+  "Summer internship Company name",
+  "FTE Company name",
+  "Only internship Company name",
+  "FTE and internship Company name",
+  "6 months Internship Company name",
+  "Company",
+  "company",
+  "company1",
+  "company2",
+  "company3",
+  "company4",
+  "company5",
+];
 
 function normalizeCompanyName(value) {
   if (!value || typeof value !== "string") return "";
@@ -26,8 +40,19 @@ function getStudentDisplayName(student) {
 }
 
 function getStudentCompanyName(student) {
-  const raw = student.Company ?? student.company ?? "";
-  return typeof raw === "string" ? raw : "";
+  if (!student || typeof student !== "object") return "";
+
+  const dynamicCompanyFields = Object.keys(student).filter((key) => /company name/i.test(key));
+  const candidateFields = [...new Set([...COMPANY_FIELDS, ...dynamicCompanyFields])];
+
+  for (const fieldName of candidateFields) {
+    const raw = student[fieldName];
+    if (typeof raw === "string" && raw.trim()) {
+      return raw.trim();
+    }
+  }
+
+  return "";
 }
 
 async function backfillStudentCompanyIds() {
@@ -80,8 +105,18 @@ async function backfillStudentCompanyIds() {
       {
         projection: {
           _id: 1,
+          "Summer internship Company name": 1,
+          "FTE Company name": 1,
+          "Only internship Company name": 1,
+          "FTE and internship Company name": 1,
+          "6 months Internship Company name": 1,
           Company: 1,
           company: 1,
+          company1: 1,
+          company2: 1,
+          company3: 1,
+          company4: 1,
+          company5: 1,
           companyId: 1,
           name: 1,
           fullName: 1,
