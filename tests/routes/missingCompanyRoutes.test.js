@@ -55,6 +55,35 @@ describe("Missing Company Routes", () => {
       expect(saved.categories).toContain("FTE");
     });
 
+    it('accepts the renamed "Name of Company" student field', async () => {
+      const user = await User.create({
+        userId: "beta-user-name-of-company",
+        username: "beta_user_name_of_company",
+        email: "beta-name-of-company@example.com",
+        isBetaListed: true,
+      });
+
+      await mongoose.connection.db.collection(STUDENT_COLLECTION).insertOne({
+        Email: "beta-name-of-company@example.com",
+        "Name of Company": "Zepto",
+      });
+
+      const response = await request(app)
+        .post("/api/missing-companies")
+        .set("Cookie", authCookieForUser(user))
+        .send({
+          companyName: "Zepto",
+          category: "Internship",
+        })
+        .expect(200);
+
+      expect(response.body.missingCompany).toMatchObject({
+        name: "Zepto",
+        normalizedName: "zepto",
+        status: "PENDING",
+      });
+    });
+
     it("blocks non-beta users at the backend level", async () => {
       const user = await User.create({
         userId: "non-beta-user-1",

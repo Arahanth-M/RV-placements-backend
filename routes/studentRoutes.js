@@ -22,6 +22,8 @@ const COMPANY_FIELDS = [
   "Only internship Company name",
   "FTE and internship Company name",
   "6 months Internship Company name",
+  "Company name",
+  "Name of Company",
   "company1",
   "company2",
   "company3",
@@ -30,6 +32,10 @@ const COMPANY_FIELDS = [
   "Company",
   "company",
 ];
+
+function isPlacementCompanyField(fieldName) {
+  return /company name|name of company/i.test(fieldName);
+}
 
 function normalizeCompanyId(raw) {
   if (raw == null || raw === "") return null;
@@ -45,7 +51,7 @@ function normalizeText(raw) {
 function extractPlacementCompanyNames(studentRecord) {
   const record = studentRecord && typeof studentRecord === "object" ? studentRecord : {};
   const companyNameSet = new Map();
-  const dynamicCompanyFields = Object.keys(record).filter((key) => /company name/i.test(key));
+  const dynamicCompanyFields = Object.keys(record).filter((key) => isPlacementCompanyField(key));
   const candidateFields = [...new Set([...COMPANY_FIELDS, ...dynamicCompanyFields])];
 
   for (const fieldName of candidateFields) {

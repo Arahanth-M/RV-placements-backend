@@ -70,7 +70,7 @@ companyRouter.get("/", async (req, res) => {
     // Fetch approved companies with card fields + text fields used only for focus tags (not sent to client)
     const companies = await Company.find(
       { status: "approved" },
-      "name type eligibility roles count business_model date_of_visit messageDate messagedate message_date logo domain helpfulCount cluster onlineQuestions interviewQuestions interviewProcess Must_Do_Topics totalStudentsApplied totalClearedOA totalGotIn"
+      "name type offCampus eligibility roles count business_model date_of_visit messageDate messagedate message_date logo domain helpfulCount cluster onlineQuestions interviewQuestions interviewProcess Must_Do_Topics totalStudentsApplied totalClearedOA totalGotIn"
     ).lean();
 
     const list = companies.map((c) => {

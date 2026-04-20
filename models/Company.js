@@ -237,6 +237,7 @@ const companySchema = new mongoose.Schema(
     },
     business_model: { type: String, trim: true },
     eligibility: { type: String, trim: true },
+    offCampus: { type: Boolean, default: false },
     roles: [roleSchema],
     jobDescription: [
       {

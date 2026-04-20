@@ -39,6 +39,7 @@ export const adminCompanyGeneralSchema = Joi.object({
   eligibility: Joi.string().max(8000).allow("").optional(),
   business_model: Joi.string().max(500).allow("").optional(),
   type: Joi.string().max(200).allow("").optional(),
+  offCampus: Joi.boolean().optional(),
 }).unknown(true);
 
 export const adminMissingCompanyStatusSchema = Joi.object({

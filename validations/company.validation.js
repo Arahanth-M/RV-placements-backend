@@ -36,6 +36,7 @@ const submittedBySchema = Joi.object({
 const optionalCompanyBody = {
   business_model: t(500).allow(""),
   eligibility: t(4000).allow(""),
+  offCampus: Joi.boolean(),
   roles: Joi.array().items(roleItemSchema).max(80),
   jobDescription: Joi.array().items(jobDescriptionItemSchema).max(30),
   onlineQuestions: Joi.array().items(t(5000)).max(120),

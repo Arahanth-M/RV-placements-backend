@@ -15,6 +15,8 @@ const COMPANY_FIELDS = [
   "Only internship Company name",
   "FTE and internship Company name",
   "6 months Internship Company name",
+  "Company name",
+  "Name of Company",
   "Company",
   "company",
   "company1",
@@ -24,6 +26,10 @@ const COMPANY_FIELDS = [
   "company5",
 ];
 
+function isPlacementCompanyField(fieldName) {
+  return /company name|name of company/i.test(fieldName);
+}
+
 function escapeRegex(string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& means the whole matched string
 }
@@ -31,7 +37,7 @@ function escapeRegex(string) {
 function getStudentCompanyName(user) {
   if (!user || typeof user !== "object") return "";
 
-  const dynamicCompanyFields = Object.keys(user).filter((key) => /company name/i.test(key));
+  const dynamicCompanyFields = Object.keys(user).filter((key) => isPlacementCompanyField(key));
   const candidateFields = [...new Set([...COMPANY_FIELDS, ...dynamicCompanyFields])];
 
   for (const fieldName of candidateFields) {

@@ -702,9 +702,9 @@ adminRouter.get("/companies", async (req, res) => {
     const { page, limit, skip } = parseAdminPagination(req.query);
 
     const approvedSelect =
-      "_id name type status count createdAt updatedAt approvedAt submittedBy";
+      "_id name type offCampus status count createdAt updatedAt approvedAt submittedBy";
     const pendingSelect =
-      "_id name type count status createdAt updatedAt submittedBy interviewExperience interviewQuestions onlineQuestions Must_Do_Topics";
+      "_id name type offCampus count status createdAt updatedAt submittedBy interviewExperience interviewQuestions onlineQuestions Must_Do_Topics";
     const selectFields =
       status === "approved"
         ? approvedSelect
@@ -1160,18 +1160,19 @@ adminRouter.put(
   }
 });
 
-// Update general company info (eligibility, business model, type)
+// Update general company info (eligibility, business model, type, offCampus)
 adminRouter.put(
   "/companies/:id/general",
   validateRequest(adminCompanyGeneralSchema),
   async (req, res) => {
   try {
-    const { eligibility, business_model, type } = req.body || {};
+    const { eligibility, business_model, type, offCampus } = req.body || {};
 
     const updateData = {};
     if (eligibility !== undefined) updateData.eligibility = sanitizeText(eligibility);
     if (business_model !== undefined) updateData.business_model = sanitizeText(business_model);
     if (type !== undefined) updateData.type = sanitizeText(type);
+    if (offCampus !== undefined) updateData.offCampus = Boolean(offCampus);
 
     // Use findByIdAndUpdate with $set to bypass unrelated legacy validation
     const company = await Company.findByIdAndUpdate(
