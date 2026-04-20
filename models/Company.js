@@ -310,6 +310,7 @@ const companySchema = new mongoose.Schema(
       },
     ],
     date_of_visit: { type: String, trim: true },
+    approvedAt: { type: Date },
     status: { type: String, enum: ["pending", "approved", "rejected"], default: "pending" },
     submittedBy: {
       name: { type: String, trim: true },

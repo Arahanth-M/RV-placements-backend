@@ -740,13 +740,14 @@ adminRouter.get("/companies", async (req, res) => {
 // Approve a company
 adminRouter.post("/companies/:id/approve", async (req, res) => {
   try {
-    const company = await Company.findById(req.params.id);
-    
-    if (!company) {
+    const existingCompany = await Company.findById(req.params.id).select("_id status");
+
+    if (!existingCompany) {
       return res.status(404).json({ error: "Company not found" });
     }
 
-    if (company.status === "approved") {
+    if (existingCompany.status === "approved") {
+      const company = await Company.findById(req.params.id);
       return res.json({
         message: "Company already approved",
         company,
@@ -754,10 +755,24 @@ adminRouter.post("/companies/:id/approve", async (req, res) => {
       });
     }
 
-    company.status = "approved";
-    company.approvedAt = new Date();
-    // Save will trigger the post-save hook which creates notifications
-    await company.save();
+    // Use a direct update so old invalid fields in legacy documents do not block approval.
+    const company = await Company.findByIdAndUpdate(
+      req.params.id,
+      {
+        $set: {
+          status: "approved",
+          approvedAt: new Date(),
+        },
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    if (!company) {
+      return res.status(404).json({ error: "Company not found" });
+    }
 
     try {
       await invalidateAdminDashboardStatsCache();
