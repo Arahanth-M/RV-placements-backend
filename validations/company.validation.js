@@ -53,7 +53,6 @@ const optionalCompanyBody = {
   date_of_visit: t(120),
   status: Joi.string().valid("pending", "approved", "rejected"),
   submittedBy: submittedBySchema,
-  videoKey: t(512),
   logo: t(2048),
   domain: t(255),
   cluster: Joi.string().valid(

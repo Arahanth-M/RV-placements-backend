@@ -1,8 +1,5 @@
 import express from "express";
 import Company from "../models/Company.js";
-import { GetObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { s3 } from "../utils/s3.js";
 import authJWT from "../middleware/authJWT.js";
 import validateRequest from "../middleware/validateRequest.js";
 import { companyCreateSchema } from "../validations/company.validation.js";
@@ -17,36 +14,6 @@ import User from "../models/User.js";
 dotenv.config();
 
 const companyRouter = express.Router();
-const VIDEO_URL_TTL_MS = 9 * 60 * 1000;
-const videoUrlCache = new Map();
-
-const getSignedVideoUrl = async (videoKey) => {
-  if (!videoKey) return null;
-
-  const now = Date.now();
-  const cached = videoUrlCache.get(videoKey);
-  if (cached && cached.expiresAt > now) {
-    return cached.url;
-  }
-
-  const command = new GetObjectCommand({
-    Bucket: process.env.BUCKET_NAME,
-    Key: videoKey,
-  });
-  const url = await getSignedUrl(s3, command, { expiresIn: 600 });
-  videoUrlCache.set(videoKey, { url, expiresAt: now + VIDEO_URL_TTL_MS });
-
-  // Opportunistic cleanup to avoid unbounded growth.
-  if (videoUrlCache.size > 500) {
-    for (const [key, value] of videoUrlCache.entries()) {
-      if (value.expiresAt <= now) {
-        videoUrlCache.delete(key);
-      }
-    }
-  }
-
-  return url;
-};
 
 companyRouter.post("/", authJWT, validateRequest(companyCreateSchema), async (req, res) => {
   try {
@@ -86,40 +53,6 @@ companyRouter.get("/", async (req, res) => {
   }
 });
 
-// companyRouter.get("/:id", authJWT, async (req, res) => {
-//   try {
-//     const company = await Company.findOne({
-//       _id: req.params.id,
-//       status: "approved", 
-//     });
-
-//     if (!company) {
-//       return res.status(404).json({ error: "Company not found" });
-//     }
-
-//     let videoUrl = null;
-
-//     if (company.videoKey) {
-//       try {
-//         const command = new GetObjectCommand({
-//           Bucket: process.env.BUCKET_NAME,
-//           Key: company.videoKey,
-//         });
-//         videoUrl = await getSignedUrl(s3, command, { expiresIn: 600 });
-//       } catch (s3Err) {
-//         console.error("❌ S3 Signed URL Error:", s3Err.message);
-//       }
-//     }
-
-//     res.json({
-//       ...company.toObject(),
-//       videoUrl,
-//     });
-//   } catch (err) {
-//     console.error("❌ Company Fetch Error:", err.message);
-//     res.status(500).json({ error: "Internal Server Error" });
-//   }
-// });
 companyRouter.get("/:id", authJWT, async (req, res) => {
   const id = req.params.id;
   const key = companyDetailRedisKey(id);
@@ -173,15 +106,6 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
       return res.status(404).json({ error: "Company not found" });
     }
 
-    let videoUrl = null;
-    if (companyDoc.videoKey) {
-      try {
-        videoUrl = await getSignedVideoUrl(companyDoc.videoKey);
-      } catch {
-        // Signed URL optional; continue without videoUrl
-      }
-    }
-
     // Convert Map -> Object for each role
     const companyObj = companyDoc.toObject();
     companyObj.roles = (companyObj.roles || []).map(role => ({
@@ -214,10 +138,7 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
     delete companyObj.onlineQuestion_solution;
     delete companyObj.onlineQuestion_solutions;
 
-    const company = attachPlacementCategoryToCompany({
-      ...companyObj,
-      videoUrl,
-    });
+    const company = attachPlacementCategoryToCompany(companyObj);
 
     if (key) {
       try {

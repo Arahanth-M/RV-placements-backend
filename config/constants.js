@@ -51,13 +51,6 @@ export const config = {
 
   // CORS
   CORS_ORIGINS: parseCorsOrigins(process.env.CORS_ORIGINS),
-  
-  // AWS (if needed)
-  AWS_REGION: process.env.AWS_REGION || 'us-east-1',
-  AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID,
-  AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
-  BUCKET_NAME: process.env.BUCKET_NAME,
-  
 };
 
 // Derived URLs

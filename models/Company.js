@@ -146,7 +146,6 @@
 //       name: { type: String, trim: true },
 //       email: { type: String, trim: true },
 //     },
-//     videoKey: { type: String, trim: true },
 //   },
 //   { timestamps: true }
 // );
@@ -316,7 +315,6 @@ const companySchema = new mongoose.Schema(
       name: { type: String, trim: true },
       email: { type: String, trim: true },
     },
-    videoKey: { type: String, trim: true },
     logo: { type: String, trim: true },
     domain: { type: String, trim: true }, // e.g. "google.com" for logo.dev
     helpfulCount: { type: Number, default: 0, min: 0 },
