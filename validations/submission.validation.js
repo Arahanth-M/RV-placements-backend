@@ -12,7 +12,7 @@ export const submissionInputSchema = Joi.object({
   companyId: requiredPresent.required(),
   type: Joi.string().trim().min(1).max(80).required(),
   // No trim: parity with prior `if (!content)` (whitespace-only still accepted)
-  content: Joi.string().min(1).max(50000).required(),
+  content: Joi.string().min(1).max(70000).required(),
   isAnonymous: Joi.alternatives()
     .try(Joi.boolean(), Joi.string().valid("true", "false"))
     .optional(),
