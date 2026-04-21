@@ -739,39 +739,62 @@ adminRouter.get("/companies", async (req, res) => {
 
 // Approve a company
 adminRouter.post("/companies/:id/approve", async (req, res) => {
-  try {
-    const existingCompany = await Company.findById(req.params.id).select("_id status");
+  /** Avoid 500 when res.json stringifies Mongoose docs (BigInt in Mixed, circular refs, etc.). */
+  function companyToJsonSafePlainObject(doc) {
+    const plain =
+      doc && typeof doc.toObject === "function"
+        ? doc.toObject({ flattenMaps: true })
+        : doc;
+    const bigintReplacer = (_k, v) => (typeof v === "bigint" ? v.toString() : v);
+    try {
+      return JSON.parse(JSON.stringify(plain, bigintReplacer));
+    } catch (serializeErr) {
+      console.error(
+        "❌ approve company: response serialization failed:",
+        serializeErr?.message || serializeErr
+      );
+      const minimal = {
+        _id: plain?._id,
+        name: plain?.name,
+        status: plain?.status,
+        approvedAt: plain?.approvedAt,
+      };
+      return JSON.parse(JSON.stringify(minimal, bigintReplacer));
+    }
+  }
 
-    if (!existingCompany) {
+  try {
+    const company = await Company.findById(req.params.id);
+
+    if (!company) {
       return res.status(404).json({ error: "Company not found" });
     }
 
-    if (existingCompany.status === "approved") {
-      const company = await Company.findById(req.params.id);
+    if (company.status === "approved") {
       return res.json({
         message: "Company already approved",
-        company,
+        company: companyToJsonSafePlainObject(company),
         alreadyApproved: true,
       });
     }
 
-    // Use a direct update so old invalid fields in legacy documents do not block approval.
-    const company = await Company.findByIdAndUpdate(
-      req.params.id,
-      {
-        $set: {
-          status: "approved",
-          approvedAt: new Date(),
-        },
-      },
-      {
-        new: true,
-        runValidators: true,
-      }
-    );
+    company.status = "approved";
+    company.approvedAt = new Date();
 
-    if (!company) {
-      return res.status(404).json({ error: "Company not found" });
+    // `save()` runs pre-save hooks (e.g. role CTC normalization) so the full company document
+    // is written consistently — `findByIdAndUpdate` skips those hooks.
+    try {
+      await company.save({ validateBeforeSave: true });
+    } catch (saveErr) {
+      if (saveErr?.name === "ValidationError") {
+        console.warn(
+          "⚠️ Company approval: validation failed on save; persisting without validators (legacy document):",
+          saveErr.message
+        );
+        await company.save({ validateBeforeSave: false });
+      } else {
+        throw saveErr;
+      }
     }
 
     try {
@@ -780,14 +803,15 @@ adminRouter.post("/companies/:id/approve", async (req, res) => {
       console.warn("⚠️ Failed to invalidate admin dashboard cache after company approval:", cacheErr?.message || cacheErr);
     }
 
-    res.json({ 
+    res.json({
       message: "Company approved successfully",
-      company: company,
+      company: companyToJsonSafePlainObject(company),
       alreadyApproved: false,
     });
   } catch (error) {
-    console.error("❌ Error approving company:", error.message);
-    console.error("❌ Error stack:", error.stack);
+    console.error("❌ Error approving company:", error?.message || error);
+    console.error("❌ Error name:", error?.name);
+    console.error("❌ Error stack:", error?.stack);
     res.status(500).json({ error: "Server error" });
   }
 });

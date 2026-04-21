@@ -338,10 +338,17 @@ companySchema.pre("save", async function () {
   if (this.roles && this.roles.length > 0) {
     this.roles = this.roles.map((role) => {
       // Convert Map to plain object
-      const ctcObj = role.ctc instanceof Map ? Object.fromEntries(role.ctc) : role.ctc || {};
+      const ctcObj =
+        role?.ctc instanceof Map ? Object.fromEntries(role.ctc) : role?.ctc || {};
+      const rolePlain =
+        role != null && typeof role.toObject === "function"
+          ? role.toObject()
+          : role && typeof role === "object"
+            ? { ...role }
+            : {};
 
       return {
-        ...role.toObject(),
+        ...rolePlain,
         ctc: { ...ctcObj }, // preserve all original keys (strings preserved as-is)
       };
     });
