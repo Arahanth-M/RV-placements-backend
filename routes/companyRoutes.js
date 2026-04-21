@@ -13,6 +13,9 @@ import { companyDetailRedisKey } from "../services/companyDetailCache.js";
 import User from "../models/User.js";
 dotenv.config();
 
+/** Redis TTL for GET /api/companies/:id payload cache */
+const COMPANY_DETAIL_REDIS_TTL_SECONDS = 3 * 60 * 60;
+
 const companyRouter = express.Router();
 
 companyRouter.post("/", authJWT, validateRequest(companyCreateSchema), async (req, res) => {
@@ -143,7 +146,7 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
     if (key) {
       try {
         await redis.set(key, JSON.stringify(company), {
-          EX: 30,
+          EX: COMPANY_DETAIL_REDIS_TTL_SECONDS,
         });
       } catch {
         // Ignore Redis write failures; response already built from MongoDB

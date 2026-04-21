@@ -370,13 +370,14 @@ companySchema.pre(["findOneAndUpdate", "findByIdAndUpdate"], async function () {
   }
 });
 
-/** Payload keys for OA / Interview / Process tabs — invalidate detail cache only when these change */
+/** Payload keys for OA / Interview / Process / Must Do tabs — invalidate detail cache only when these change */
 const COMPANY_DETAIL_TAB_FIELDS = [
   "onlineQuestions",
   "onlineQuestions_solution",
   "interviewQuestions",
   "interviewQuestions_solution",
   "interviewProcess",
+  "Must_Do_Topics",
 ];
 
 function modifiedPathTouchesDetailTabs(path) {
@@ -422,10 +423,20 @@ function statusAfterUpdateFromQuery(doc, query) {
   return fromDoc;
 }
 
+// After save(), modifiedPaths() is empty — read intent in pre("save") and act in post("save").
+companySchema.pre("save", function () {
+  if (!this.$locals) this.$locals = {};
+  this.$locals._invalidateCompanyDetailCacheAfterSave = saveDocumentTouchesDetailTabs(this);
+});
+
 // Invalidate Redis `company:<id>` only when OA / Interview / Process tab data changes (see above)
 companySchema.post("save", async function (doc) {
   try {
-    if (!saveDocumentTouchesDetailTabs(doc)) return;
+    const fromPreSave = doc.$locals?._invalidateCompanyDetailCacheAfterSave === true;
+    if (doc.$locals && Object.prototype.hasOwnProperty.call(doc.$locals, "_invalidateCompanyDetailCacheAfterSave")) {
+      delete doc.$locals._invalidateCompanyDetailCacheAfterSave;
+    }
+    if (!fromPreSave) return;
     await invalidateCompanyDetailCache(doc._id);
   } catch {
     // Never fail the save if Redis invalidation errors
