@@ -359,9 +359,12 @@ companySchema.pre("save", async function () {
       .findById(this._id)
       .select("status")
       .lean();
-    this._prevCompanyStatusForEvent = prior?.status;
-  } else {
-    this._prevCompanyStatusForEvent = undefined;
+    if (!this.$locals) this.$locals = {};
+    // Used in post("save") to fire COMPANY_APPROVED only on a real status change (avoids
+    // mistaking "status not in this save" for "was implicit pending" when oldStatus is undefined).
+    this.$locals._companyStatusTransition = { from: prior?.status };
+  } else if (this.$locals) {
+    this.$locals._companyStatusTransition = null;
   }
 });
 
@@ -471,19 +474,25 @@ companySchema.post(["findOneAndDelete", "findByIdAndDelete"], async function (do
 });
 
 companySchema.post("save", function (doc) {
-  const oldStatus = doc._prevCompanyStatusForEvent;
-  if (oldStatus === "pending" && doc.status === "approved") {
-    dispatchEvent(EVENT_TYPES.COMPANY_APPROVED, {
-      companyId: doc._id,
-      companyName: doc.name,
-    }).catch(console.error);
-  }
+  const t = doc.$locals?._companyStatusTransition;
+  if (!t || doc.status !== "approved") return;
+  const from = t.from;
+  const wasPendingish =
+    from === "pending" || from == null || from === "";
+  if (!wasPendingish) return;
+  // dispatchEvent() does not return a promise; errors are handled inside the dispatcher.
+  dispatchEvent(EVENT_TYPES.COMPANY_APPROVED, {
+    companyId: doc._id,
+    companyName: doc.name,
+  });
 });
 
 companySchema.post(["findOneAndUpdate", "findByIdAndUpdate"], function (doc) {
   const newStatus = statusAfterUpdateFromQuery(doc, this);
   const oldStatus = this._companyEventOldStatus;
-  if (oldStatus !== "pending" || newStatus !== "approved") return;
+  const wasPendingish =
+    oldStatus === "pending" || oldStatus == null || oldStatus === "";
+  if (!wasPendingish || newStatus !== "approved") return;
 
   const companyId = doc?._id ?? this.getFilter?.()?._id;
   if (!companyId) return;
@@ -491,7 +500,7 @@ companySchema.post(["findOneAndUpdate", "findByIdAndUpdate"], function (doc) {
   dispatchEvent(EVENT_TYPES.COMPANY_APPROVED, {
     companyId,
     companyName: doc?.name ?? "",
-  }).catch(console.error);
+  });
 });
 
 const Company = mongoose.model("Company", companySchema, "companies1");

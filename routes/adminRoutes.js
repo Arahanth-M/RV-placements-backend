@@ -741,10 +741,15 @@ adminRouter.get("/companies", async (req, res) => {
 adminRouter.post("/companies/:id/approve", async (req, res) => {
   /** Avoid 500 when res.json stringifies Mongoose docs (BigInt in Mixed, circular refs, etc.). */
   function companyToJsonSafePlainObject(doc) {
-    const plain =
-      doc && typeof doc.toObject === "function"
-        ? doc.toObject({ flattenMaps: true })
-        : doc;
+    let plain = doc;
+    try {
+      if (doc && typeof doc.toObject === "function") {
+        plain = doc.toObject({ flattenMaps: true });
+      }
+    } catch (e) {
+      console.error("❌ approve company: toObject failed:", e?.message || e);
+      plain = { _id: doc?._id, name: doc?.name, status: doc?.status, approvedAt: doc?.approvedAt };
+    }
     const bigintReplacer = (_k, v) => (typeof v === "bigint" ? v.toString() : v);
     try {
       return JSON.parse(JSON.stringify(plain, bigintReplacer));

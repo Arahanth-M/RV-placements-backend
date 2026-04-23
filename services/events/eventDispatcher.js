@@ -25,11 +25,15 @@ async function processBatch(batch, companyId, companyName) {
 
 async function handleCompanyApproved(payload) {
   const { companyId, companyName } = payload || {};
-  if (!companyId || !companyName) return;
+  if (!companyId) return;
+  const name =
+    (companyName && String(companyName).trim()) || "A company on the platform";
 
+  // Fan-out to active students. DB field is `isBetaListed` (see User model, jwtUserClaims, checkBetaAccess).
+  // `betaAccess` is not stored on User but may exist in legacy documents — include both.
   const cursor = User.find({
     role: "student",
-    betaAccess: true,
+    $or: [{ isBetaListed: true }, { betaAccess: true }],
   })
     .select("_id")
     .lean()
@@ -43,7 +47,7 @@ async function handleCompanyApproved(payload) {
       batch.push(user);
 
       if (batch.length === BATCH_SIZE) {
-        createdCount += await processBatch(batch, companyId, companyName);
+        createdCount += await processBatch(batch, companyId, name);
         batch.length = 0;
 
         await new Promise((r) => setTimeout(r, 50));
@@ -51,7 +55,7 @@ async function handleCompanyApproved(payload) {
     }
 
     if (batch.length > 0) {
-      createdCount += await processBatch(batch, companyId, companyName);
+      createdCount += await processBatch(batch, companyId, name);
     }
   } finally {
     if (typeof cursor.close === "function") {
