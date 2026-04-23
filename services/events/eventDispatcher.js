@@ -13,7 +13,7 @@ async function processBatch(batch, companyId, companyName) {
         userId: user._id,
         type: EVENT_TYPES.COMPANY_APPROVED,
         title: `${companyName} approved`,
-        body: "New company on the platform — tap to view the profile.",
+        body: "New company on the platform.",
         payload: { companyId, companyName },
         eventId,
       });
