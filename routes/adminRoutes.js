@@ -27,6 +27,7 @@ import {
   ensureAdminVisitForYear,
   getCompanyMergedForAdminById,
   listAdminPaginatedCompaniesFromSplit,
+  normalizeCompanyDetailYear,
   persistMergedCompany,
   updateCompanyStatic,
   updateCompanyVisit,
@@ -39,6 +40,11 @@ const adminRouter = express.Router();
 adminRouter.use(authJWT);
 adminRouter.use(authorize(["admin"]));
 adminRouter.use(requireAdmin);
+
+/** Placement year for admin visit reads/writes (`?year=2026|2027`, default 2026). */
+function adminVisitYearFromQuery(req) {
+  return normalizeCompanyDetailYear(req.query?.year);
+}
 
 function projectAdminCompanyListRow(merged, status) {
   if (status === "approved") {
@@ -279,8 +285,12 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
       return res.status(404).json({ error: "Submission not found" });
     }
 
-    await ensureAdminVisitForYear(submission.companyId);
-    const loadedForSub = await getCompanyMergedForAdminById(String(submission.companyId));
+    const placementYear = normalizeCompanyDetailYear(submission.placementYear);
+    await ensureAdminVisitForYear(submission.companyId, placementYear);
+    const loadedForSub = await getCompanyMergedForAdminById(
+      String(submission.companyId),
+      placementYear
+    );
     if (!loadedForSub?.staticRow || !loadedForSub.merged) {
       return res.status(404).json({ error: "Company not found" });
     }
@@ -657,7 +667,7 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
           }
         });
       }
-      await persistMergedCompany(String(submission.companyId), merged);
+      await persistMergedCompany(String(submission.companyId), merged, placementYear);
       console.log("✅ Company updated successfully:", submission.companyId);
     } catch (saveError) {
       console.error("❌ Error persisting company:", saveError);
@@ -711,7 +721,10 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
 
     await invalidateAdminDashboardStatsCache();
 
-    const reloadedSub = await getCompanyMergedForAdminById(String(submission.companyId));
+    const reloadedSub = await getCompanyMergedForAdminById(
+      String(submission.companyId),
+      placementYear
+    );
     const companyOut = reloadedSub?.merged
       ? companyToJsonSafePlainObject(reloadedSub.merged)
       : null;
@@ -770,7 +783,8 @@ adminRouter.get("/companies", async (req, res) => {
 // Approve a company
 adminRouter.post("/companies/:id/approve", async (req, res) => {
   try {
-    const loaded = await getCompanyMergedForAdminById(req.params.id);
+    const y = adminVisitYearFromQuery(req);
+    const loaded = await getCompanyMergedForAdminById(req.params.id, y);
     if (!loaded || !loaded.staticRow) {
       return res.status(404).json({ error: "Company not found" });
     }
@@ -783,10 +797,14 @@ adminRouter.post("/companies/:id/approve", async (req, res) => {
     }
 
     const approvedAt = new Date();
-    await updateCompanyVisit(req.params.id, {
-      status: "approved",
-      approvedAt,
-    });
+    await updateCompanyVisit(
+      req.params.id,
+      {
+        status: "approved",
+        approvedAt,
+      },
+      y
+    );
 
     try {
       await invalidateAdminDashboardStatsCache();
@@ -794,7 +812,7 @@ adminRouter.post("/companies/:id/approve", async (req, res) => {
       console.warn("⚠️ Failed to invalidate admin dashboard cache after company approval:", cacheErr?.message || cacheErr);
     }
 
-    const out = (await getCompanyMergedForAdminById(req.params.id))?.merged ?? null;
+    const out = (await getCompanyMergedForAdminById(req.params.id, y))?.merged ?? null;
     res.json({
       message: "Company approved successfully",
       company: out ? companyToJsonSafePlainObject(out) : null,
@@ -855,7 +873,8 @@ adminRouter.put(
   validateRequest(adminOaQuestionUpdateSchema),
   async (req, res) => {
   try {
-    const loaded = await getCompanyMergedForAdminById(req.params.id);
+    const y = adminVisitYearFromQuery(req);
+    const loaded = await getCompanyMergedForAdminById(req.params.id, y);
     if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
     const merged = { ...loaded.merged };
     const index = parseInt(req.params.index, 10);
@@ -875,9 +894,9 @@ adminRouter.put(
     if (solution !== undefined && solution !== null) {
       merged.onlineQuestions_solution[index] = sanitizeText(solution);
     }
-    await ensureAdminVisitForYear(req.params.id);
-    await persistMergedCompany(req.params.id, merged);
-    const out = (await getCompanyMergedForAdminById(req.params.id))?.merged;
+    await ensureAdminVisitForYear(req.params.id, y);
+    await persistMergedCompany(req.params.id, merged, y);
+    const out = (await getCompanyMergedForAdminById(req.params.id, y))?.merged;
     res.json({ message: "OA question updated", company: out });
   } catch (error) {
     console.error("❌ Error updating OA question:", error.message);
@@ -890,7 +909,8 @@ adminRouter.put(
 
 adminRouter.delete("/companies/:id/oa-questions/:index", async (req, res) => {
   try {
-    const loaded = await getCompanyMergedForAdminById(req.params.id);
+    const y = adminVisitYearFromQuery(req);
+    const loaded = await getCompanyMergedForAdminById(req.params.id, y);
     if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
     const merged = JSON.parse(JSON.stringify(loaded.merged));
     const index = parseInt(req.params.index, 10);
@@ -903,9 +923,9 @@ adminRouter.delete("/companies/:id/oa-questions/:index", async (req, res) => {
       merged.onlineQuestions_solution = [...merged.onlineQuestions_solution];
       merged.onlineQuestions_solution.splice(index, 1);
     }
-    await ensureAdminVisitForYear(req.params.id);
-    await persistMergedCompany(req.params.id, merged);
-    const out = (await getCompanyMergedForAdminById(req.params.id))?.merged;
+    await ensureAdminVisitForYear(req.params.id, y);
+    await persistMergedCompany(req.params.id, merged, y);
+    const out = (await getCompanyMergedForAdminById(req.params.id, y))?.merged;
     res.json({ message: "OA question deleted", company: out });
   } catch (error) {
     console.error("❌ Error deleting OA question:", error.message);
@@ -918,7 +938,8 @@ adminRouter.put(
   validateRequest(adminInterviewQuestionUpdateSchema),
   async (req, res) => {
   try {
-    const loaded = await getCompanyMergedForAdminById(req.params.id);
+    const y = adminVisitYearFromQuery(req);
+    const loaded = await getCompanyMergedForAdminById(req.params.id, y);
     if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
     const merged = JSON.parse(JSON.stringify(loaded.merged));
     const index = parseInt(req.params.index, 10);
@@ -938,9 +959,9 @@ adminRouter.put(
     if (solution !== undefined && solution !== null) {
       merged.interviewQuestions_solution[index] = sanitizeText(solution);
     }
-    await ensureAdminVisitForYear(req.params.id);
-    await persistMergedCompany(req.params.id, merged);
-    const out = (await getCompanyMergedForAdminById(req.params.id))?.merged;
+    await ensureAdminVisitForYear(req.params.id, y);
+    await persistMergedCompany(req.params.id, merged, y);
+    const out = (await getCompanyMergedForAdminById(req.params.id, y))?.merged;
     res.json({ message: "Interview question updated", company: out });
   } catch (error) {
     console.error("❌ Error updating interview question:", error.message);
@@ -953,7 +974,8 @@ adminRouter.put(
 
 adminRouter.delete("/companies/:id/interview-questions/:index", async (req, res) => {
   try {
-    const loaded = await getCompanyMergedForAdminById(req.params.id);
+    const y = adminVisitYearFromQuery(req);
+    const loaded = await getCompanyMergedForAdminById(req.params.id, y);
     if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
     const merged = JSON.parse(JSON.stringify(loaded.merged));
     const index = parseInt(req.params.index, 10);
@@ -966,9 +988,9 @@ adminRouter.delete("/companies/:id/interview-questions/:index", async (req, res)
       merged.interviewQuestions_solution = [...merged.interviewQuestions_solution];
       merged.interviewQuestions_solution.splice(index, 1);
     }
-    await ensureAdminVisitForYear(req.params.id);
-    await persistMergedCompany(req.params.id, merged);
-    const out = (await getCompanyMergedForAdminById(req.params.id))?.merged;
+    await ensureAdminVisitForYear(req.params.id, y);
+    await persistMergedCompany(req.params.id, merged, y);
+    const out = (await getCompanyMergedForAdminById(req.params.id, y))?.merged;
     res.json({ message: "Interview question deleted", company: out });
   } catch (error) {
     console.error("❌ Error deleting interview question:", error.message);
@@ -981,7 +1003,8 @@ adminRouter.put(
   validateRequest(adminInterviewProcessUpdateSchema),
   async (req, res) => {
   try {
-    const loaded = await getCompanyMergedForAdminById(req.params.id);
+    const y = adminVisitYearFromQuery(req);
+    const loaded = await getCompanyMergedForAdminById(req.params.id, y);
     if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
     const merged = JSON.parse(JSON.stringify(loaded.merged));
     const index = parseInt(req.params.index, 10);
@@ -1002,9 +1025,9 @@ adminRouter.put(
     }
     merged.interviewProcess = [...arr];
     merged.interviewProcess[index] = newEntry;
-    await ensureAdminVisitForYear(req.params.id);
-    await persistMergedCompany(req.params.id, merged);
-    const out = (await getCompanyMergedForAdminById(req.params.id))?.merged;
+    await ensureAdminVisitForYear(req.params.id, y);
+    await persistMergedCompany(req.params.id, merged, y);
+    const out = (await getCompanyMergedForAdminById(req.params.id, y))?.merged;
     res.json({ message: "Interview process updated", company: out });
   } catch (error) {
     console.error("❌ Error updating interview process:", error.message);
@@ -1017,7 +1040,8 @@ adminRouter.put(
 
 adminRouter.delete("/companies/:id/interview-process/:index", async (req, res) => {
   try {
-    const loaded = await getCompanyMergedForAdminById(req.params.id);
+    const y = adminVisitYearFromQuery(req);
+    const loaded = await getCompanyMergedForAdminById(req.params.id, y);
     if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
     const merged = JSON.parse(JSON.stringify(loaded.merged));
     const index = parseInt(req.params.index, 10);
@@ -1026,9 +1050,9 @@ adminRouter.delete("/companies/:id/interview-process/:index", async (req, res) =
       return res.status(404).json({ error: "Entry not found" });
     merged.interviewProcess = [...merged.interviewProcess];
     merged.interviewProcess.splice(index, 1);
-    await ensureAdminVisitForYear(req.params.id);
-    await persistMergedCompany(req.params.id, merged);
-    const out = (await getCompanyMergedForAdminById(req.params.id))?.merged;
+    await ensureAdminVisitForYear(req.params.id, y);
+    await persistMergedCompany(req.params.id, merged, y);
+    const out = (await getCompanyMergedForAdminById(req.params.id, y))?.merged;
     res.json({ message: "Interview process entry deleted", company: out });
   } catch (error) {
     console.error("❌ Error deleting interview process:", error.message);
@@ -1042,6 +1066,7 @@ adminRouter.put(
   validateRequest(adminCompanyStatsSchema),
   async (req, res) => {
   try {
+    const y = adminVisitYearFromQuery(req);
     const staticRow = await CompanyStatic.findById(req.params.id).lean();
     if (!staticRow) return res.status(404).json({ error: "Company not found" });
     const { totalStudentsApplied, totalClearedOA, totalGotIn } = req.body || {};
@@ -1061,9 +1086,9 @@ adminRouter.put(
       if (isNaN(n) || n < 0) return res.status(400).json({ error: "totalGotIn must be a non-negative number" });
       payload.totalGotIn = n;
     }
-    await ensureAdminVisitForYear(req.params.id);
-    await updateCompanyVisit(req.params.id, payload);
-    const out = (await getCompanyMergedForAdminById(req.params.id))?.merged;
+    await ensureAdminVisitForYear(req.params.id, y);
+    await updateCompanyVisit(req.params.id, payload, y);
+    const out = (await getCompanyMergedForAdminById(req.params.id, y))?.merged;
     res.json({ message: "Stats updated", company: out });
   } catch (error) {
     console.error("❌ Error updating company stats:", error.message);
@@ -1076,9 +1101,10 @@ adminRouter.patch(
   validateRequest(adminCompanyTotalGotInAdjustmentSchema),
   async (req, res) => {
     try {
+      const y = adminVisitYearFromQuery(req);
       const delta = Number(req.body?.delta);
-      await ensureAdminVisitForYear(req.params.id);
-      const gotInDoc = await adjustVisitTotalGotIn(req.params.id, delta);
+      await ensureAdminVisitForYear(req.params.id, y);
+      const gotInDoc = await adjustVisitTotalGotIn(req.params.id, delta, y);
       if (!gotInDoc) {
         return res.status(404).json({ error: "Company not found" });
       }
@@ -1104,6 +1130,7 @@ adminRouter.put(
   validateRequest(adminCompanyRolesSchema),
   async (req, res) => {
   try {
+    const y = adminVisitYearFromQuery(req);
     const { roles } = req.body || {};
     if (!Array.isArray(roles)) {
       return res.status(400).json({ error: "roles must be an array" });
@@ -1156,9 +1183,9 @@ adminRouter.put(
     if (!staticRow) {
       return res.status(404).json({ error: "Company not found" });
     }
-    await ensureAdminVisitForYear(req.params.id);
-    await updateCompanyVisit(req.params.id, { roles: normalizedRoles });
-    const loaded = await getCompanyMergedForAdminById(req.params.id);
+    await ensureAdminVisitForYear(req.params.id, y);
+    await updateCompanyVisit(req.params.id, { roles: normalizedRoles }, y);
+    const loaded = await getCompanyMergedForAdminById(req.params.id, y);
     const rolesAfterUpdate = loaded?.merged?.roles || [];
     const rolesResponse = (rolesAfterUpdate || []).map((role) => ({
       ...role,
@@ -1181,6 +1208,7 @@ adminRouter.put(
   validateRequest(adminCompanyGeneralSchema),
   async (req, res) => {
   try {
+    const y = adminVisitYearFromQuery(req);
     const { eligibility, business_model, type, offCampus } = req.body || {};
 
     const updateData = {};
@@ -1193,9 +1221,9 @@ adminRouter.put(
     if (!staticRow) {
       return res.status(404).json({ error: "Company not found" });
     }
-    await ensureAdminVisitForYear(req.params.id);
-    await persistMergedCompany(req.params.id, updateData);
-    const out = (await getCompanyMergedForAdminById(req.params.id))?.merged;
+    await ensureAdminVisitForYear(req.params.id, y);
+    await persistMergedCompany(req.params.id, updateData, y);
+    const out = (await getCompanyMergedForAdminById(req.params.id, y))?.merged;
 
     res.json({ message: "Company general info updated successfully", company: out });
   } catch (error) {

@@ -7,6 +7,7 @@ import authorize from "../middleware/authorize.js";
 import validateRequest from "../middleware/validateRequest.js";
 import { submissionInputSchema } from "../validations/submission.validation.js";
 import { messages } from "../config/constants.js";
+import { normalizeCompanyDetailYear } from "../services/companyService.js";
 
 
 const submissionRouter = express.Router();
@@ -19,16 +20,19 @@ submissionRouter.post(
   validateRequest(submissionInputSchema),
   async (req, res) => {
   try {
-    const { companyId, type, content, isAnonymous } = req.body;
+    const { companyId, type, content, isAnonymous, placementYear: rawPlacementYear } = req.body;
 
     if (!companyId || !type || !content) {
       return res.status(400).json({ error: messages.ERROR.MISSING_FIELDS });
     }
 
+    const placementYear = normalizeCompanyDetailYear(rawPlacementYear);
+
     const newSubmission = new Submission({
       companyId,
       type,
       content,
+      placementYear,
       isAnonymous: isAnonymous === true || isAnonymous === 'true',
       submittedBy: {
         name: req.user.username, 

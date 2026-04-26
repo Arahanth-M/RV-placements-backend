@@ -78,6 +78,7 @@ export const routes = {
   PLACEMENT: '/api/placement',
   LEADERBOARD: '/api/leaderboard',
   INTERVIEW: '/api/interview',
+  RESUME: '/api/resume',
 };
 
 // Messages
@@ -111,6 +112,15 @@ export const ALLOWED_LOGIN_EMAIL =
 // Student OAuth uses /api/auth/google — same email, but isAdminSession is false.
 export const ADMIN_EMAIL =
   process.env.ADMIN_EMAIL?.trim() || DEFAULT_PLATFORM_OWNER_EMAIL;
+
+// Collection used to determine whether a student is in the active beta cohort.
+export const BETA_ACCESS_COLLECTION =
+  process.env.BETA_ACCESS_COLLECTION?.trim() || "users27_monday";
+
+// Student placement profile (USN/email lookup, popup companies, /api/students/profile).
+// Roster export name (case resolved at runtime when possible).
+export const STUDENT_PROFILE_COLLECTION =
+  process.env.STUDENT_PROFILE_COLLECTION?.trim() || "users27_monday";
 
 // Default values
 export const defaults = {

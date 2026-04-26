@@ -64,6 +64,18 @@ export const submissionLimiter = rateLimit({
 });
 
 /**
+ * Resume Rate Limiter: protects autosave/export endpoints from abuse.
+ */
+export const resumeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: "Too many resume requests, please try again later",
+  handler: rateLimitExceededHandler,
+});
+
+/**
  * AI Interview Start Limiter: Very strict limit on starting new AI interview sessions.
  */
 export const aiStartLimiter = rateLimit({

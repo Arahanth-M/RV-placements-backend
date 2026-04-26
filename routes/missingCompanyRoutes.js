@@ -5,12 +5,12 @@ import authJWT from "../middleware/authJWT.js";
 import checkBetaAccess from "../middleware/checkBetaAccess.js";
 import MissingCompany from "../models/MissingCompany.js";
 import User from "../models/User.js";
-import { config } from "../config/constants.js";
+import { config, STUDENT_PROFILE_COLLECTION } from "../config/constants.js";
 import { buildJwtPayloadFromUser } from "../utils/jwtUserClaims.js";
 
 const router = express.Router();
 
-const STUDENT_COLLECTION = "betaTestUsers2026";
+const STUDENT_COLLECTION = STUDENT_PROFILE_COLLECTION;
 const COMPANY_FIELDS = [
   "Summer internship Company name",
   "FTE Company name",
@@ -18,6 +18,7 @@ const COMPANY_FIELDS = [
   "FTE and internship Company name",
   "6 months Internship Company name",
   "Company name",
+  "Company_Name",
   "Name of Company",
   "company1",
   "company2",
@@ -29,7 +30,11 @@ const COMPANY_FIELDS = [
 ];
 
 function isPlacementCompanyField(fieldName) {
-  return /company name|name of company/i.test(fieldName);
+  const k = String(fieldName || "");
+  return (
+    /company\s*name|name\s*of\s*company/i.test(k) ||
+    /company[_\s]+name/i.test(k)
+  );
 }
 
 function normalizeText(raw) {
@@ -137,7 +142,7 @@ router.post("/", authJWT, checkBetaAccess, async (req, res) => {
 
     const escapedEmail = escapeRegex(String(dbUser.email).trim().toLowerCase());
     const studentRecord = await usersCollection.findOne({
-      Email: { $regex: new RegExp(`^${escapedEmail}$`, "i") },
+      Email: { $regex: new RegExp(`^\\s*${escapedEmail}\\s*$`, "i") },
     });
 
     const placementCompanies = extractPlacementCompanyNames(studentRecord);

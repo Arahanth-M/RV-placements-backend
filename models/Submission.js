@@ -35,6 +35,12 @@ const submissionSchema = new mongoose.Schema({
   approvedAt: {
     type: Date,
   },
+  /** Placement cycle for visit-backed types (OA, interview, etc.); defaults to 2026 in approval logic when unset. */
+  placementYear: {
+    type: Number,
+    min: 2026,
+    max: 2027,
+  },
 });
 
 const Submission = mongoose.model("Submission", submissionSchema);

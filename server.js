@@ -12,6 +12,7 @@ import {
   authLimiter,
   adminLimiter,
   submissionLimiter,
+  resumeLimiter,
 } from "./middleware/rateLimiter.js";
 import sanitizeInput from "./middleware/sanitizeInput.js";
 
@@ -30,6 +31,7 @@ import studentRouter from "./routes/studentRoutes.js";
 import placementRouter from "./routes/placementRoutes.js";
 import leaderboardRouter from "./routes/leaderboardRoutes.js";
 import interviewRouter from "./routes/interviewRoutes.js";
+import resumeRouter from "./routes/resumeRoutes.js";
 
 import "./services/passport.js";
 
@@ -120,6 +122,7 @@ if (process.env.NODE_ENV !== "test") {
   app.use(routes.AUTH, authLimiter);
   app.use(routes.ADMIN, adminLimiter);
   app.use(routes.SUBMISSIONS, submissionLimiter);
+  app.use(routes.RESUME, resumeLimiter);
 }
 
 /**
@@ -140,6 +143,7 @@ app.use(routes.STUDENTS, studentRouter);
 app.use(routes.PLACEMENT, placementRouter);
 app.use(routes.LEADERBOARD, leaderboardRouter);
 app.use(routes.INTERVIEW, interviewRouter);
+app.use(routes.RESUME, resumeRouter);
 
 /**
  * 6. Server Initialization

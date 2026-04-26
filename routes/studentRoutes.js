@@ -10,12 +10,12 @@ import {
   invalidateStudentProfileCacheByEmail,
   invalidateStudentProfileCacheByEmails,
 } from "../services/studentProfileCache.js";
-import { ADMIN_EMAIL } from "../config/constants.js";
+import { ADMIN_EMAIL, STUDENT_PROFILE_COLLECTION } from "../config/constants.js";
 import validateRequest from "../middleware/validateRequest.js";
 import { profileCacheInvalidateSchema } from "../validations/student.validation.js";
 
 const router = express.Router();
-const STUDENT_COLLECTION = "betaTestUsers2026";
+const STUDENT_COLLECTION = STUDENT_PROFILE_COLLECTION;
 const COMPANY_FIELDS = [
   "Summer internship Company name",
   "FTE Company name",
@@ -23,6 +23,7 @@ const COMPANY_FIELDS = [
   "FTE and internship Company name",
   "6 months Internship Company name",
   "Company name",
+  "Company_Name",
   "Name of Company",
   "company1",
   "company2",
@@ -34,7 +35,11 @@ const COMPANY_FIELDS = [
 ];
 
 function isPlacementCompanyField(fieldName) {
-  return /company name|name of company/i.test(fieldName);
+  const k = String(fieldName || "");
+  return (
+    /company\s*name|name\s*of\s*company/i.test(k) ||
+    /company[_\s]+name/i.test(k)
+  );
 }
 
 function normalizeCompanyId(raw) {
@@ -73,7 +78,7 @@ function buildPlacementCompanies(studentRecord) {
   }));
 }
 
-// Get student data by USN from betaTestUsers2026 collection
+// Get student data by USN from STUDENT_PROFILE_COLLECTION
 router.get(
   "/student-data/:usn",
   authJWT,
@@ -87,7 +92,6 @@ router.get(
       return res.status(400).json({ error: "USN is required" });
     }
 
-    // Connect to the beta tester student data collection
     const db = mongoose.connection.db;
     const studentDataCollection = db.collection(STUDENT_COLLECTION);
     
@@ -140,15 +144,11 @@ router.get("/profile", authJWT, checkBetaAccess, authorize(["student", "admin"])
     }
     console.log(`🧊 [Profile] Cache miss for ${email}`);
 
-    // Connect to the beta tester student data collection
     const db = mongoose.connection.db;
     const usersCollection = db.collection(STUDENT_COLLECTION);
-
-    // Escape special regex characters in email
     const escapedEmail = email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
     const studentRecord = await usersCollection.findOne({
-      Email: { $regex: new RegExp(`^${escapedEmail}$`, "i") },
+      Email: { $regex: new RegExp(`^\\s*${escapedEmail}\\s*$`, "i") },
     });
 
     if (!studentRecord) {
@@ -172,11 +172,15 @@ router.get("/profile", authJWT, checkBetaAccess, authorize(["student", "admin"])
     const primaryCompanyName =
       normalizeText(studentRecord?.Company) ||
       normalizeText(studentRecord?.company) ||
+      normalizeText(studentRecord?.Company_Name) ||
       placementCompanyNames[0] ||
       null;
+    const hasLegacyCompanyField =
+      Boolean(normalizeText(studentRecord?.Company)) ||
+      Boolean(normalizeText(studentRecord?.company));
     const responsePayload = {
       ...studentRecord,
-      ...(primaryCompanyName && !normalizeText(studentRecord?.Company)
+      ...(primaryCompanyName && !hasLegacyCompanyField
         ? { Company: primaryCompanyName }
         : {}),
       placementCompanies,
@@ -196,7 +200,7 @@ router.get("/profile", authJWT, checkBetaAccess, authorize(["student", "admin"])
   }
 });
 
-// Admin utility: invalidate one or more cached student profiles after betaTestUsers2026 updates.
+// Admin utility: invalidate one or more cached student profiles after roster updates.
 router.post(
   "/profile/cache-invalidate",
   authJWT,

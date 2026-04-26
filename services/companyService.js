@@ -15,6 +15,22 @@ import { invalidateCompanyDetailCache } from "./companyDetailCache.js";
 
 export const COMPANY_VISIT_YEAR = 2026;
 
+/** Placement years exposed on company detail (?year=) and year-scoped merge. */
+export const COMPANY_DETAIL_VISIT_YEARS = Object.freeze([2026, 2027]);
+
+/**
+ * @param {unknown} raw
+ * @returns {number}
+ */
+export function normalizeCompanyDetailYear(raw) {
+  if (raw == null || raw === "") return COMPANY_VISIT_YEAR;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || !COMPANY_DETAIL_VISIT_YEARS.includes(n)) {
+    return COMPANY_VISIT_YEAR;
+  }
+  return n;
+}
+
 /** Dropped from API responses; internal split-schema bookkeeping only. */
 const INTERNAL_STRIP = ["sourceCopyId", "nameKey", "migratedAt"];
 
@@ -102,8 +118,11 @@ export function mergeToLegacyShape(staticDoc, visitDoc) {
  * Latest visit for year (any status) — e.g. to detect pending vs no row.
  * @param {import("mongoose").Types.ObjectId} companyId
  */
-export async function findAnyLatestVisitForCompanyYear(companyId) {
-  const one = await CompanyVisit.find({ companyId, year: COMPANY_VISIT_YEAR })
+export async function findAnyLatestVisitForCompanyYear(
+  companyId,
+  year = COMPANY_VISIT_YEAR
+) {
+  const one = await CompanyVisit.find({ companyId, year })
     .sort({ migratedAt: -1, _id: -1 })
     .limit(1)
     .lean();
@@ -113,11 +132,12 @@ export async function findAnyLatestVisitForCompanyYear(companyId) {
 /**
  * Latest approved visit for the year (used for public detail + list merge).
  * @param {import("mongoose").Types.ObjectId} companyId
+ * @param {number} [year]
  */
-export async function findLatestVisitForCompany(companyId) {
+export async function findLatestVisitForCompany(companyId, year = COMPANY_VISIT_YEAR) {
   const one = await CompanyVisit.find({
     companyId,
-    year: COMPANY_VISIT_YEAR,
+    year,
     status: "approved",
   })
     .sort({ migratedAt: -1, _id: -1 })
@@ -127,14 +147,36 @@ export async function findLatestVisitForCompany(companyId) {
 }
 
 /**
+ * Approved visit years for this company (subset of {@link COMPANY_DETAIL_VISIT_YEARS}).
+ * @param {import("mongoose").Types.ObjectId|string} companyId
+ * @returns {Promise<number[]>}
+ */
+export async function getApprovedPlacementYearsForCompany(companyId) {
+  const cid = toObjectId(companyId);
+  if (!cid) return [];
+  const allowed = new Set(COMPANY_DETAIL_VISIT_YEARS);
+  const years = await CompanyVisit.distinct("year", {
+    companyId: cid,
+    status: "approved",
+  });
+  return years
+    .map((y) => Number(y))
+    .filter((y) => Number.isFinite(y) && allowed.has(y))
+    .sort((a, b) => a - b);
+}
+
+/**
  * @param {import("mongoose").Types.ObjectId} companyId
  * @param {import("mongoose").Types.ObjectId|undefined|null} visitId
+ * @param {number} [placementYear] when `visitId` is null, increment views for this year's approved visit
  */
-export async function incrementVisitViews(companyId, visitId) {
+export async function incrementVisitViews(companyId, visitId, placementYear) {
   if (visitId) {
     return CompanyVisit.updateOne({ _id: visitId }, { $inc: { views: 1 } });
   }
-  const v = await findLatestVisitForCompany(companyId);
+  const year =
+    placementYear != null ? normalizeCompanyDetailYear(placementYear) : COMPANY_VISIT_YEAR;
+  const v = await findLatestVisitForCompany(companyId, year);
   if (!v?._id) {
     return { acknowledged: true, modifiedCount: 0, matchedCount: 0 };
   }
@@ -143,9 +185,13 @@ export async function incrementVisitViews(companyId, visitId) {
 
 /**
  * @param {string} id
+ * @param {number} [placementYear] — must be normalized (see {@link normalizeCompanyDetailYear})
  * @returns {Promise<{ merged: Record<string, unknown> | null, visit: Record<string, unknown> | null, staticRow: Record<string, unknown> | null }>}
  */
-export async function getCompanyDetailLegacyMergedById(id) {
+export async function getCompanyDetailLegacyMergedById(
+  id,
+  placementYear = COMPANY_VISIT_YEAR
+) {
   const _id = toObjectId(id);
   if (!_id) {
     return { merged: null, visit: null, staticRow: null };
@@ -154,13 +200,13 @@ export async function getCompanyDetailLegacyMergedById(id) {
   if (!staticRow) {
     return { merged: null, visit: null, staticRow: null };
   }
-  const visitApproved = await findLatestVisitForCompany(_id);
+  const visitApproved = await findLatestVisitForCompany(_id, placementYear);
   if (visitApproved) {
     const merged = mergeToLegacyShape(staticRow, visitApproved);
     return { merged, visit: visitApproved, staticRow };
   }
-  // No approved visit: if any 2026 visit exists (e.g. pending), match old API — 404
-  const anyVisit = await findAnyLatestVisitForCompanyYear(_id);
+  // No approved visit for this year: if any visit exists for that year (e.g. pending), match old API — 404
+  const anyVisit = await findAnyLatestVisitForCompanyYear(_id, placementYear);
   if (anyVisit) {
     return { merged: null, visit: null, staticRow: null };
   }
@@ -275,11 +321,15 @@ export async function getCompanyCategoryPreviewLogos() {
 }
 
 /**
- * Merge for admin edit flows: any latest 2026 visit (any status) + `companies` row.
+ * Merge for admin edit flows: latest visit for `placementYear` (any status) + `companies` row.
  * @param {string} id
+ * @param {number} [placementYear]
  * @returns {Promise<{ merged: Record<string, unknown> | null, staticRow: Record<string, unknown> | null, visit: Record<string, unknown> | null } | null>}
  */
-export async function getCompanyMergedForAdminById(id) {
+export async function getCompanyMergedForAdminById(
+  id,
+  placementYear = COMPANY_VISIT_YEAR
+) {
   const _id = toObjectId(id);
   if (!_id) {
     return { merged: null, staticRow: null, visit: null };
@@ -288,23 +338,29 @@ export async function getCompanyMergedForAdminById(id) {
   if (!staticRow) {
     return { merged: null, staticRow: null, visit: null };
   }
-  const visit = await findAnyLatestVisitForCompanyYear(_id);
+  const year = normalizeCompanyDetailYear(placementYear);
+  const visit = await findAnyLatestVisitForCompanyYear(_id, year);
   const merged = mergeToLegacyShape(staticRow, visit);
   return { merged, staticRow, visit: visit ?? null };
 }
 
 /**
- * Creates an empty 2026 visit row if missing (e.g. before persisting visit-only fields from admin).
+ * Creates an empty visit row for `placementYear` if missing (e.g. before persisting visit-only fields from admin).
  * @param {string|import("mongoose").Types.ObjectId} companyId
+ * @param {number} [placementYear]
  */
-export async function ensureAdminVisitForYear(companyId) {
+export async function ensureAdminVisitForYear(
+  companyId,
+  placementYear = COMPANY_VISIT_YEAR
+) {
   const cid = toObjectId(companyId);
   if (!cid) return null;
-  const existing = await CompanyVisit.findOne({ companyId: cid, year: COMPANY_VISIT_YEAR });
+  const year = normalizeCompanyDetailYear(placementYear);
+  const existing = await CompanyVisit.findOne({ companyId: cid, year });
   if (existing) return existing;
   return CompanyVisit.create({
     companyId: cid,
-    year: COMPANY_VISIT_YEAR,
+    year,
     migratedAt: new Date(),
   });
 }
@@ -375,18 +431,24 @@ export async function deleteSplitCompany(companyId) {
 }
 
 /**
- * Apply same atomic totalGotIn adjustment as legacy admin (floor at 0), on 2026 visit.
+ * Apply same atomic totalGotIn adjustment as legacy admin (floor at 0), on the visit for `placementYear`.
  * @param {string|import("mongoose").Types.ObjectId} companyId
  * @param {number} delta
+ * @param {number} [placementYear]
  * @returns {Promise<{ _id: unknown, totalGotIn?: number } | null>}
  */
-export async function adjustVisitTotalGotIn(companyId, delta) {
+export async function adjustVisitTotalGotIn(
+  companyId,
+  delta,
+  placementYear = COMPANY_VISIT_YEAR
+) {
   const cid = toObjectId(companyId);
   if (!cid) return null;
   const d = Number(delta);
   if (Number.isNaN(d)) return null;
+  const year = normalizeCompanyDetailYear(placementYear);
   const doc = await CompanyVisit.findOneAndUpdate(
-    { companyId: cid, year: COMPANY_VISIT_YEAR },
+    { companyId: cid, year },
     [
       {
         $set: {
@@ -606,13 +668,18 @@ export async function createCompanyWithVisit(data) {
 }
 
 /**
- * Update all `company_visits` for `companyId` + `COMPANY_VISIT_YEAR` (same filter for every matching row).
+ * Update all `company_visits` for `companyId` + `placementYear` (same filter for every matching row).
  * Only dynamic fields from `data` are applied. Does not touch `companies`.
  * @param {string|import("mongoose").Types.ObjectId} companyId
  * @param {Record<string, unknown>} data
+ * @param {number} [placementYear]
  * @returns {Promise<import("mongodb").UpdateResult>}
  */
-export async function updateCompanyVisit(companyId, data) {
+export async function updateCompanyVisit(
+  companyId,
+  data,
+  placementYear = COMPANY_VISIT_YEAR
+) {
   const cid = toObjectId(companyId);
   if (!cid) {
     return { acknowledged: true, modifiedCount: 0, upsertedCount: 0, matchedCount: 0 };
@@ -622,8 +689,9 @@ export async function updateCompanyVisit(companyId, data) {
     return { acknowledged: true, modifiedCount: 0, upsertedCount: 0, matchedCount: 0 };
   }
   $set.migratedAt = new Date();
+  const year = normalizeCompanyDetailYear(placementYear);
   const result = await CompanyVisit.updateMany(
-    { companyId: cid, year: COMPANY_VISIT_YEAR },
+    { companyId: cid, year },
     { $set: $set }
   );
   if (result.modifiedCount > 0) {
@@ -659,10 +727,15 @@ export async function updateCompanyStatic(companyId, data) {
  * Apply both static and visit updates from a single merged payload (each layer picks its fields only).
  * @param {string|import("mongoose").Types.ObjectId} companyId
  * @param {Record<string, unknown>} mergedPayload
+ * @param {number} [placementYear] visit row to update (defaults to {@link COMPANY_VISIT_YEAR})
  */
-export async function persistMergedCompany(companyId, mergedPayload) {
+export async function persistMergedCompany(
+  companyId,
+  mergedPayload,
+  placementYear = COMPANY_VISIT_YEAR
+) {
   await updateCompanyStatic(companyId, mergedPayload);
-  await updateCompanyVisit(companyId, mergedPayload);
+  await updateCompanyVisit(companyId, mergedPayload, placementYear);
 }
 
 /**

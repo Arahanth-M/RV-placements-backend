@@ -6,8 +6,9 @@ import MissingCompany from "../../models/MissingCompany.js";
 import { seedApprovedSplitCompany } from "../helpers/seedSplitCompany.js";
 import User from "../../models/User.js";
 import { buildJwtPayloadFromUser } from "../../utils/jwtUserClaims.js";
+import { STUDENT_PROFILE_COLLECTION } from "../../config/constants.js";
 
-const STUDENT_COLLECTION = "betaTestUsers2026";
+const STUDENT_COLLECTION = STUDENT_PROFILE_COLLECTION;
 
 function authCookieForUser(user, options = {}) {
   const secret = process.env.JWT_SECRET;

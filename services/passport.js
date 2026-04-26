@@ -3,8 +3,12 @@ import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import keys from "../config/keys.js";
 import mongoose from "mongoose";
 import User from "../models/User.js";
-import { urls, ADMIN_EMAIL } from "../config/constants.js";
+import { urls, BETA_ACCESS_COLLECTION } from "../config/constants.js";
 import { sendWelcomeEmailWebhook } from "./webhookService.js";
+
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 /** Google may expose the avatar on photos[], _json.picture, or legacy profile.picture */
 function pictureFromGoogleProfile(profile) {
@@ -30,7 +34,6 @@ passport.use(
       try {
         const primaryEmail = profile?.emails?.[0]?.value || "";
         const normalizedEmail = primaryEmail.trim().toLowerCase();
-        const adminEmail = String(ADMIN_EMAIL || "").trim().toLowerCase();
 
         // 1. Basic Email Validation
         if (!normalizedEmail) {
@@ -45,11 +48,12 @@ passport.use(
 
         // 2. Strict Student/Admin Check
         const db = mongoose.connection.db;
-        const studentCollection = db.collection("betaTestUsers2026");
+        const studentCollection = db.collection(BETA_ACCESS_COLLECTION);
+        const escapedEmail = escapeRegex(normalizedEmail);
 
-        // Find record by Email (case-insensitive)
+        // Find by fixed roster email field (case-insensitive, trim-tolerant).
         const studentRecord = await studentCollection.findOne({
-          Email: { $regex: new RegExp(`^${normalizedEmail}$`, "i") }
+          Email: { $regex: new RegExp(`^\\s*${escapedEmail}\\s*$`, "i") },
         });
         const isBetaListed = Boolean(studentRecord);
 

@@ -13,12 +13,14 @@ import { companyDetailRedisKey } from "../services/companyDetailCache.js";
 import {
   addHelpfulVote,
   createCompanyWithVisit,
+  getApprovedPlacementYearsForCompany,
   getCompanyDetailLegacyMergedById,
   getCompanyMergedForAdminById,
   incrementVisitViews,
   getCompanyCategoryPreviewLogos,
   listApprovedCompaniesLegacyMerged,
   mergeToLegacyShape,
+  normalizeCompanyDetailYear,
 } from "../services/companyService.js";
 import User from "../models/User.js";
 import mongoose from "mongoose";
@@ -88,13 +90,22 @@ companyRouter.get("/preview-logos", async (req, res) => {
 
 companyRouter.get("/:id", authJWT, async (req, res) => {
   const id = req.params.id;
-  const key = companyDetailRedisKey(id);
+  const placementVisitYear = normalizeCompanyDetailYear(req.query?.year);
+  const key = companyDetailRedisKey(id, placementVisitYear);
+
   try {
     const touchUserActivity = () =>
       User.updateOne(
         { _id: req.user?._id },
         { $set: { lastActiveAt: new Date() } }
       ).catch(() => {});
+
+    let companyOid = null;
+    try {
+      companyOid = new mongoose.Types.ObjectId(id);
+    } catch {
+      companyOid = null;
+    }
 
     let cached = null;
     if (key) {
@@ -107,42 +118,46 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
     if (cached != null && cached !== "") {
       try {
         const parsed = JSON.parse(cached);
-        let companyOid;
-        try {
-          companyOid = new mongoose.Types.ObjectId(id);
-        } catch {
-          companyOid = null;
-        }
+        const placementYearsAvailable = companyOid
+          ? await getApprovedPlacementYearsForCompany(companyOid)
+          : [];
         await Promise.all([
           companyOid
-            ? incrementVisitViews(companyOid, null).catch(() => {})
+            ? incrementVisitViews(companyOid, null, placementVisitYear).catch(() => {})
             : Promise.resolve(),
           touchUserActivity(),
         ]);
-        console.log("HIT — company found in Redis and served from cache:", id);
-        return res.json(attachPlacementCategoryToCompany(parsed));
+        console.log("HIT — company found in Redis and served from cache:", id, "y=", placementVisitYear);
+        const withMeta = {
+          ...parsed,
+          placementVisitYear,
+          placementYearsAvailable,
+        };
+        return res.json(attachPlacementCategoryToCompany(withMeta));
       } catch {
         // Bad cache payload — fall through to MongoDB
       }
     }
 
-    console.log("MISS — company not in Redis; fetched from MongoDB:", id);
+    console.log("MISS — company not in Redis; fetched from MongoDB:", id, "y=", placementVisitYear);
 
-    const { merged: companyObj, visit: visitForViews } = await getCompanyDetailLegacyMergedById(id);
+    const { merged: companyObj, visit: visitForViews } = await getCompanyDetailLegacyMergedById(
+      id,
+      placementVisitYear
+    );
 
     if (!companyObj) {
       return res.status(404).json({ error: "Company not found" });
     }
 
-    let companyOid;
-    try {
-      companyOid = new mongoose.Types.ObjectId(id);
-    } catch {
+    if (!companyOid) {
       return res.status(404).json({ error: "Company not found" });
     }
 
+    const placementYearsAvailable = await getApprovedPlacementYearsForCompany(companyOid);
+
     await Promise.all([
-      incrementVisitViews(companyOid, visitForViews?._id ?? null).catch(() => {}),
+      incrementVisitViews(companyOid, visitForViews?._id ?? null, placementVisitYear).catch(() => {}),
       touchUserActivity(),
     ]);
 
@@ -183,11 +198,18 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
     delete companyObj.onlineQuestion_solution;
     delete companyObj.onlineQuestion_solutions;
 
-    const company = attachPlacementCategoryToCompany(companyObj);
+    const company = attachPlacementCategoryToCompany({
+      ...companyObj,
+      placementVisitYear,
+      placementYearsAvailable,
+    });
 
     if (key) {
       try {
-        await redis.set(key, JSON.stringify(company), {
+        const forCache = { ...company };
+        delete forCache.placementYearsAvailable;
+        delete forCache.placementVisitYear;
+        await redis.set(key, JSON.stringify(forCache), {
           EX: COMPANY_DETAIL_REDIS_TTL_SECONDS,
         });
       } catch {
