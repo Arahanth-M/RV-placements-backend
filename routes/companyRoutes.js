@@ -1,5 +1,4 @@
 import express from "express";
-import Company from "../models/Company.js";
 import authJWT from "../middleware/authJWT.js";
 import validateRequest from "../middleware/validateRequest.js";
 import { companyCreateSchema } from "../validations/company.validation.js";
@@ -8,9 +7,21 @@ import dotenv from "dotenv";
 import Submission from "../models/Submission.js";
 import { getCompanyFocusTags } from "../utils/companyFocusTags.js";
 import { attachPlacementCategoryToCompany } from "../utils/ctcCategory.js";
+import { projectCompanyListResponse } from "../utils/companyListProjection.js";
 import redis from "../utils/redis.js";
 import { companyDetailRedisKey } from "../services/companyDetailCache.js";
+import {
+  addHelpfulVote,
+  createCompanyWithVisit,
+  getCompanyDetailLegacyMergedById,
+  getCompanyMergedForAdminById,
+  incrementVisitViews,
+  getCompanyCategoryPreviewLogos,
+  listApprovedCompaniesLegacyMerged,
+  mergeToLegacyShape,
+} from "../services/companyService.js";
 import User from "../models/User.js";
+import mongoose from "mongoose";
 dotenv.config();
 
 /** Redis TTL for GET /api/companies/:id payload cache */
@@ -20,16 +31,26 @@ const companyRouter = express.Router();
 
 companyRouter.post("/", authJWT, validateRequest(companyCreateSchema), async (req, res) => {
   try {
-    const newCompany = new Company({  
+    // Legacy create path: single document — now `createCompanyWithVisit` → `companies` + `company_visits`
+    // const newCompany = new Company({
+    //   ...req.body,
+    //   submittedBy: {
+    //     name: req.user.username,
+    //     email: req.user.email,
+    //   },
+    // });
+    // await newCompany.save();
+    // res.status(201).json(newCompany);
+
+    const { company, visit } = await createCompanyWithVisit({
       ...req.body,
       submittedBy: {
-        name: req.user.username, 
+        name: req.user.username,
         email: req.user.email,
-      }
+      },
     });
-
-    await newCompany.save();
-    res.status(201).json(newCompany);
+    const merged = mergeToLegacyShape(company, visit);
+    return res.status(201).json(merged);
   } catch (err) {
     console.error("Error creating company:", err);
     res.status(500).json({ message: "Server error" });
@@ -37,21 +58,30 @@ companyRouter.post("/", authJWT, validateRequest(companyCreateSchema), async (re
 });
 companyRouter.get("/", async (req, res) => {
   try {
-    // Fetch approved companies with card fields + text fields used only for focus tags (not sent to client)
-    const companies = await Company.find(
-      { status: "approved" },
-      "name type offCampus eligibility roles count business_model date_of_visit messageDate messagedate message_date logo domain helpfulCount cluster onlineQuestions interviewQuestions interviewProcess Must_Do_Topics totalStudentsApplied totalClearedOA totalGotIn"
-    ).lean();
+    // New DB: `companies` + `company_visits` (2026) merged to legacy response shape
+    const companies = await listApprovedCompaniesLegacyMerged();
 
     const list = companies.map((c) => {
       const focusTags = getCompanyFocusTags(c);
       const { onlineQuestions, interviewQuestions, interviewProcess, Must_Do_Topics, ...rest } = c;
-      return attachPlacementCategoryToCompany({ ...rest, focusTags });
+      const withCategory = attachPlacementCategoryToCompany({ ...rest, focusTags });
+      return projectCompanyListResponse(withCategory);
     });
 
     return res.json(list);
   } catch (e) {
     console.error("❌ Error fetching companies:", e.message);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+/** Lightweight category-tile data (counts + 5 logo rows per bucket) — must stay above `GET /:id` */
+companyRouter.get("/preview-logos", async (req, res) => {
+  try {
+    const payload = await getCompanyCategoryPreviewLogos();
+    return res.json(payload);
+  } catch (e) {
+    console.error("❌ Error fetching preview logos:", e?.message);
     return res.status(500).json({ error: "Server error" });
   }
 });
@@ -77,11 +107,16 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
     if (cached != null && cached !== "") {
       try {
         const parsed = JSON.parse(cached);
+        let companyOid;
+        try {
+          companyOid = new mongoose.Types.ObjectId(id);
+        } catch {
+          companyOid = null;
+        }
         await Promise.all([
-          Company.updateOne(
-            { _id: id, status: "approved" },
-            { $inc: { views: 1 } }
-          ).catch(() => {}),
+          companyOid
+            ? incrementVisitViews(companyOid, null).catch(() => {})
+            : Promise.resolve(),
           touchUserActivity(),
         ]);
         console.log("HIT — company found in Redis and served from cache:", id);
@@ -93,28 +128,35 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
 
     console.log("MISS — company not in Redis; fetched from MongoDB:", id);
 
-    const [companyDoc] = await Promise.all([
-      Company.findOneAndUpdate(
-        {
-          _id: id,
-          status: "approved",
-        },
-        { $inc: { views: 1 } },
-        { new: true }
-      ),
-      touchUserActivity(),
-    ]);
+    const { merged: companyObj, visit: visitForViews } = await getCompanyDetailLegacyMergedById(id);
 
-    if (!companyDoc) {
+    if (!companyObj) {
       return res.status(404).json({ error: "Company not found" });
     }
 
-    // Convert Map -> Object for each role
-    const companyObj = companyDoc.toObject();
-    companyObj.roles = (companyObj.roles || []).map(role => ({
-      ...role,
-      ctc: role.ctc instanceof Map ? Object.fromEntries(role.ctc) : role.ctc
-    }));
+    let companyOid;
+    try {
+      companyOid = new mongoose.Types.ObjectId(id);
+    } catch {
+      return res.status(404).json({ error: "Company not found" });
+    }
+
+    await Promise.all([
+      incrementVisitViews(companyOid, visitForViews?._id ?? null).catch(() => {}),
+      touchUserActivity(),
+    ]);
+
+    // Convert Map -> Object for each role (if any Map slipped through)
+    if (Array.isArray(companyObj.roles)) {
+      companyObj.roles = companyObj.roles.map((role) => {
+        if (!role || typeof role !== "object") return role;
+        const ctc = role.ctc;
+        if (ctc instanceof Map) {
+          return { ...role, ctc: Object.fromEntries(ctc) };
+        }
+        return { ...role };
+      });
+    }
 
     // Ensure OA tab always has arrays (detail view expects these)
     if (!Array.isArray(companyObj.onlineQuestions)) {
@@ -172,43 +214,43 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
 // Increment helpful count for a company (one vote per user)
 companyRouter.post("/:id/helpful", authJWT, async (req, res) => {
   try {
-    // Check if user is authenticated
     if (!req.user || !req.user.email) {
       return res.status(401).json({ error: "You must be logged in to upvote" });
     }
 
-    const company = await Company.findById(req.params.id);
-    
-    if (!company) {
+    const userEmail = req.user.email;
+    const { id: companyIdParam } = req.params;
+    const companiesCol = mongoose.connection.db?.collection("companies");
+
+    // Upvote: `addHelpfulVote` updates `companies` (static); response reads fresh row below.
+
+    const { updateResult, alreadyVoted } = await addHelpfulVote(companyIdParam, userEmail);
+
+    let companyRow;
+    try {
+      companyRow = await companiesCol?.findOne({
+        _id: new mongoose.Types.ObjectId(companyIdParam),
+      });
+    } catch {
+      return res.status(404).json({ error: "Company not found" });
+    }
+    if (!companyRow) {
       return res.status(404).json({ error: "Company not found" });
     }
 
-    // Initialize helpfulUsers array if it doesn't exist
-    if (!company.helpfulUsers) {
-      company.helpfulUsers = [];
+    const helpfulCount = companyRow.helpfulCount ?? 0;
+
+    if (updateResult.modifiedCount > 0) {
+      return res.json({ helpfulCount, hasUpvoted: true });
     }
-
-    const userEmail = req.user.email;
-
-    // Check if user has already upvoted
-    if (company.helpfulUsers.includes(userEmail)) {
-      return res.status(400).json({ 
+    if (alreadyVoted) {
+      return res.status(400).json({
         error: "You have already upvoted this company",
-        helpfulCount: company.helpfulCount,
-        hasUpvoted: true
+        helpfulCount,
+        hasUpvoted: true,
       });
     }
-
-    // Add user email to helpfulUsers and increment count
-    company.helpfulUsers.push(userEmail);
-    company.helpfulCount = (company.helpfulCount || 0) + 1;
-    await company.save();
-
-    res.json({ 
-      message: "Helpful count updated",
-      helpfulCount: company.helpfulCount,
-      hasUpvoted: true
-    });
+    return res.json({ helpfulCount, hasUpvoted: false });
   } catch (error) {
     console.error("❌ Error updating helpful count:", error);
     res.status(500).json({ error: "Error updating helpful count" });
@@ -222,17 +264,19 @@ companyRouter.get("/:id/helpful/status", authJWT, async (req, res) => {
       return res.json({ hasUpvoted: false });
     }
 
-    const company = await Company.findById(req.params.id);
-    
-    if (!company) {
+    const loaded = await getCompanyMergedForAdminById(req.params.id);
+    if (!loaded?.staticRow || !loaded.merged) {
       return res.status(404).json({ error: "Company not found" });
     }
 
-    const hasUpvoted = company.helpfulUsers && company.helpfulUsers.includes(req.user.email);
+    const { merged } = loaded;
+    const helpfulUsers = merged.helpfulUsers;
+    const hasUpvoted =
+      Array.isArray(helpfulUsers) && helpfulUsers.includes(req.user.email);
 
-    res.json({ 
+    res.json({
       hasUpvoted: hasUpvoted || false,
-      helpfulCount: company.helpfulCount || 0
+      helpfulCount: merged.helpfulCount || 0,
     });
   } catch (error) {
     console.error("❌ Error checking helpful status:", error);

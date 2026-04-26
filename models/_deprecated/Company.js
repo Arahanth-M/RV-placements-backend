@@ -1,3 +1,9 @@
+/**
+ * DEPRECATED: Legacy single-collection company schema. Do not use.
+ * Prefer CompanyStatic, CompanyVisit, and companyService (merge).
+ */
+throw new Error("Company model (legacy) is deprecated. Use CompanyStatic / CompanyVisit.");
+
 // import mongoose from "mongoose";
 
 // const selectedCandidateSchema = new mongoose.Schema(
@@ -503,6 +509,6 @@ companySchema.post(["findOneAndUpdate", "findByIdAndUpdate"], function (doc) {
   });
 });
 
-const Company = mongoose.model("Company", companySchema, "companies1");
+const Company = mongoose.model("Company", companySchema, "companies" + 1);
 export default Company;
 

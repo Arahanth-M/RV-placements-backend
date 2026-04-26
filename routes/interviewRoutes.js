@@ -1,5 +1,5 @@
 import express from "express";
-import Company from "../models/Company.js";
+import { getCompanyMergedForAdminById } from "../services/companyService.js";
 import authJWT from "../middleware/authJWT.js";
 import checkBetaAccess from "../middleware/checkBetaAccess.js";
 import authorize from "../middleware/authorize.js";
@@ -110,15 +110,11 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
       });
     }
 
-    const companyData = await Company.findById(companyId)
-      .select(
-        "name onlineQuestions interviewQuestions interviewProcess Must_Do_Topics interview_questions prev_coding_ques"
-      )
-      .lean();
-
-    if (!companyData) {
+    const loaded = await getCompanyMergedForAdminById(String(companyId));
+    if (!loaded?.staticRow || !loaded.merged) {
       return res.status(404).json({ error: "Company not found" });
     }
+    const companyData = loaded.merged;
 
     let session = await getInProgressSession(userId, companyId);
     const createdNewSession = !session;
@@ -680,15 +676,11 @@ router.get("/preview-plan/:companyId", async (req, res) => {
       return res.status(400).json({ error: "companyId is required" });
     }
 
-    const companyData = await Company.findById(companyId)
-      .select(
-        "name onlineQuestions interviewQuestions interviewProcess Must_Do_Topics interview_questions prev_coding_ques"
-      )
-      .lean();
-
-    if (!companyData) {
+    const loaded = await getCompanyMergedForAdminById(String(companyId));
+    if (!loaded?.staticRow || !loaded.merged) {
       return res.status(404).json({ error: "Company not found" });
     }
+    const companyData = loaded.merged;
 
     const plan = await generateInterviewPlan(companyData);
     console.info("📋 Interview preview generated", {

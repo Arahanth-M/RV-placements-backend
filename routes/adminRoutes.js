@@ -15,12 +15,22 @@ import {
 } from "../validations/admin.validation.js";
 import User from "../models/User.js";
 import Submission from "../models/Submission.js";
-import Company from "../models/Company.js";
+import CompanyStatic from "../models/CompanyStatic.js";
 import MissingCompany from "../models/MissingCompany.js";
 import Notification from "../models/Notification.js";
 import { getAdminStats } from "../controllers/adminStatsController.js";
 import { invalidateAdminDashboardStatsCache } from "../services/adminDashboardStatsCache.js";
 import { invalidateCompanyDetailCache } from "../services/companyDetailCache.js";
+import {
+  adjustVisitTotalGotIn,
+  deleteSplitCompany,
+  ensureAdminVisitForYear,
+  getCompanyMergedForAdminById,
+  listAdminPaginatedCompaniesFromSplit,
+  persistMergedCompany,
+  updateCompanyStatic,
+  updateCompanyVisit,
+} from "../services/companyService.js";
 import { invalidateLeaderboardCache } from "./leaderboardRoutes.js";
 
 const adminRouter = express.Router();
@@ -29,6 +39,75 @@ const adminRouter = express.Router();
 adminRouter.use(authJWT);
 adminRouter.use(authorize(["admin"]));
 adminRouter.use(requireAdmin);
+
+function projectAdminCompanyListRow(merged, status) {
+  if (status === "approved") {
+    return {
+      _id: merged._id,
+      name: merged.name,
+      type: merged.type,
+      offCampus: merged.offCampus,
+      status: merged.status,
+      count: merged.count,
+      createdAt: merged.createdAt,
+      updatedAt: merged.updatedAt,
+      approvedAt: merged.approvedAt,
+      submittedBy: merged.submittedBy,
+    };
+  }
+  if (status === "pending") {
+    return {
+      _id: merged._id,
+      name: merged.name,
+      type: merged.type,
+      offCampus: merged.offCampus,
+      count: merged.count,
+      status: merged.status,
+      createdAt: merged.createdAt,
+      updatedAt: merged.updatedAt,
+      submittedBy: merged.submittedBy,
+      interviewExperience: merged.internshipExperience ?? merged.interviewExperience,
+      interviewQuestions: merged.interviewQuestions,
+      onlineQuestions: merged.onlineQuestions,
+      Must_Do_Topics: merged.Must_Do_Topics,
+    };
+  }
+  return {
+    _id: merged._id,
+    name: merged.name,
+    type: merged.type,
+    status: merged.status,
+    count: merged.count,
+    createdAt: merged.createdAt,
+    updatedAt: merged.updatedAt,
+  };
+}
+
+/** Avoid 500 when res.json stringifies values Mongoose/JSON dislikes (BigInt in Mixed, circular refs, etc.). */
+function companyToJsonSafePlainObject(doc) {
+  let plain = doc;
+  try {
+    if (doc && typeof doc.toObject === "function") {
+      plain = doc.toObject({ flattenMaps: true });
+    }
+  } catch (e) {
+    console.error("❌ company JSON: toObject failed:", e?.message || e);
+    plain = { _id: doc?._id, name: doc?.name, status: doc?.status, approvedAt: doc?.approvedAt };
+  }
+  const bigintReplacer = (_k, v) => (typeof v === "bigint" ? v.toString() : v);
+  try {
+    return JSON.parse(JSON.stringify(plain, bigintReplacer));
+  } catch (serializeErr) {
+    console.error("❌ company JSON: serialize failed:", serializeErr?.message || serializeErr);
+    const minimal = {
+      _id: plain?._id,
+      name: plain?.name,
+      status: plain?.status,
+      approvedAt: plain?.approvedAt,
+    };
+    return JSON.parse(JSON.stringify(minimal, bigintReplacer));
+  }
+}
 
 // Sanitize text for company content (remove script tags; keep other text as-is)
 function sanitizeText(text) {
@@ -89,7 +168,7 @@ adminRouter.get("/submissions", async (req, res) => {
     const [total, docs] = await Promise.all([
       Submission.countDocuments(query),
       Submission.find(query)
-        .populate("companyId", "name")
+        .populate({ path: "companyId", select: "name", model: "CompanyStatic" })
         .select("companyId type submittedBy isAnonymous status submittedAt approvedAt content")
         .sort({ submittedAt: -1 })
         .skip(skip)
@@ -116,7 +195,7 @@ adminRouter.get("/submissions", async (req, res) => {
 // Full submission (e.g. admin modal)
 adminRouter.get("/submissions/:id", async (req, res) => {
   try {
-    const submission = await Submission.findById(req.params.id).populate("companyId", "name");
+    const submission = await Submission.findById(req.params.id).populate({ path: "companyId", select: "name", model: "CompanyStatic" });
     if (!submission) {
       return res.status(404).json({ error: "Submission not found" });
     }
@@ -200,35 +279,28 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
       return res.status(404).json({ error: "Submission not found" });
     }
 
-    const company = await Company.findById(submission.companyId);
-    
-    if (!company) {
+    await ensureAdminVisitForYear(submission.companyId);
+    const loadedForSub = await getCompanyMergedForAdminById(String(submission.companyId));
+    if (!loadedForSub?.staticRow || !loadedForSub.merged) {
       return res.status(404).json({ error: "Company not found" });
     }
+    let merged = JSON.parse(JSON.stringify(loadedForSub.merged));
 
-    // Legacy support: if old field onlineQuestion_solution exists, migrate it
     const removeLegacySolutionField = () => {
       const legacyKeys = ["onlineQuestion_solution", "onlineQuestion_solutions"];
       legacyKeys.forEach((key) => {
-        if (typeof company.set === "function") {
-          company.set(key, undefined, { strict: false });
-        }
-        if (company._doc && Object.prototype.hasOwnProperty.call(company._doc, key)) {
-          delete company._doc[key];
-        }
+        if (key in merged) delete merged[key];
       });
     };
 
-    const legacySolutions = company.get?.("onlineQuestion_solution");
+    const legacySolutions = merged["onlineQuestion_solution"];
     if (
-      (!company.onlineQuestions_solution || company.onlineQuestions_solution.length === 0) &&
+      (!merged.onlineQuestions_solution || merged.onlineQuestions_solution.length === 0) &&
       Array.isArray(legacySolutions) &&
       legacySolutions.length > 0
     ) {
-      company.onlineQuestions_solution = legacySolutions;
-      company.markModified("onlineQuestions_solution");
+      merged.onlineQuestions_solution = legacySolutions;
     }
-    // Always remove the legacy field (even if empty) to prevent new writes
     removeLegacySolutionField();
 
     // Parse submission content
@@ -248,22 +320,22 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
       }
       if (questionText) {
         // Initialize arrays if they don't exist
-        if (!company.onlineQuestions) {
-          company.onlineQuestions = [];
+        if (!merged.onlineQuestions) {
+          merged.onlineQuestions = [];
         }
-        if (!company.onlineQuestions_solution) {
-          company.onlineQuestions_solution = [];
+        if (!merged.onlineQuestions_solution) {
+          merged.onlineQuestions_solution = [];
         }
         const ensureSolutionArraySync = () => {
-          while (company.onlineQuestions_solution.length < company.onlineQuestions.length) {
-            company.onlineQuestions_solution.push("");
+          while (merged.onlineQuestions_solution.length < merged.onlineQuestions.length) {
+            merged.onlineQuestions_solution.push("");
           }
         };
         
         const sanitizedQuestion = sanitizeText(questionText);
         
         if (sanitizedQuestion.length > 0) {
-          const existingIndex = company.onlineQuestions.findIndex(
+          const existingIndex = merged.onlineQuestions.findIndex(
             (q) => typeof q === "string" && q.trim() === sanitizedQuestion.trim()
           );
 
@@ -273,34 +345,30 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
           };
 
           if (existingIndex === -1) {
-            company.onlineQuestions.push(sanitizedQuestion);
-            company.markModified('onlineQuestions');
+            merged.onlineQuestions.push(sanitizedQuestion);
 
             ensureSolutionArraySync();
-            const newIndex = company.onlineQuestions.length - 1;
+            const newIndex = merged.onlineQuestions.length - 1;
 
             const sanitizedSolution = getSanitizedSolution();
-            company.onlineQuestions_solution[newIndex] = sanitizedSolution || "";
-            company.markModified('onlineQuestions_solution');
+            merged.onlineQuestions_solution[newIndex] = sanitizedSolution || "";
             
-            console.log('✅ Added online question to company:', company._id);
+            console.log('✅ Added online question to company:', merged._id);
           } else {
             console.log('ℹ️ Question already exists, updating solution text');
             ensureSolutionArraySync();
             const sanitizedSolution = getSanitizedSolution();
             if (sanitizedSolution) {
-              const existingSolution = company.onlineQuestions_solution[existingIndex] || "";
+              const existingSolution = merged.onlineQuestions_solution[existingIndex] || "";
               const combined = existingSolution
                 ? `${existingSolution}\n\n${sanitizedSolution}`
                 : sanitizedSolution;
-              company.onlineQuestions_solution[existingIndex] = combined;
-              company.markModified('onlineQuestions_solution');
+              merged.onlineQuestions_solution[existingIndex] = combined;
             } else if (
-              !company.onlineQuestions_solution[existingIndex] ||
-              typeof company.onlineQuestions_solution[existingIndex] !== "string"
+              !merged.onlineQuestions_solution[existingIndex] ||
+              typeof merged.onlineQuestions_solution[existingIndex] !== "string"
             ) {
-              company.onlineQuestions_solution[existingIndex] = "";
-              company.markModified('onlineQuestions_solution');
+              merged.onlineQuestions_solution[existingIndex] = "";
             }
           }
         } else {
@@ -315,22 +383,22 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
       }
       if (questionText) {
         // Initialize arrays if they don't exist
-        if (!company.interviewQuestions) {
-          company.interviewQuestions = [];
+        if (!merged.interviewQuestions) {
+          merged.interviewQuestions = [];
         }
-        if (!company.interviewQuestions_solution) {
-          company.interviewQuestions_solution = [];
+        if (!merged.interviewQuestions_solution) {
+          merged.interviewQuestions_solution = [];
         }
         const ensureSolutionArraySync = () => {
-          while (company.interviewQuestions_solution.length < company.interviewQuestions.length) {
-            company.interviewQuestions_solution.push("");
+          while (merged.interviewQuestions_solution.length < merged.interviewQuestions.length) {
+            merged.interviewQuestions_solution.push("");
           }
         };
         
         const sanitizedQuestion = sanitizeText(questionText);
         
         if (sanitizedQuestion.length > 0) {
-          const existingIndex = company.interviewQuestions.findIndex(
+          const existingIndex = merged.interviewQuestions.findIndex(
             (q) => typeof q === "string" && q.trim() === sanitizedQuestion.trim()
           );
 
@@ -340,34 +408,30 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
           };
 
           if (existingIndex === -1) {
-            company.interviewQuestions.push(sanitizedQuestion);
-            company.markModified('interviewQuestions');
+            merged.interviewQuestions.push(sanitizedQuestion);
 
             ensureSolutionArraySync();
-            const newIndex = company.interviewQuestions.length - 1;
+            const newIndex = merged.interviewQuestions.length - 1;
 
             const sanitizedSolution = getSanitizedSolution();
-            company.interviewQuestions_solution[newIndex] = sanitizedSolution || "";
-            company.markModified('interviewQuestions_solution');
+            merged.interviewQuestions_solution[newIndex] = sanitizedSolution || "";
             
-            console.log('✅ Added interview question to company:', company._id);
+            console.log('✅ Added interview question to company:', merged._id);
           } else {
             console.log('ℹ️ Question already exists, updating solution text');
             ensureSolutionArraySync();
             const sanitizedSolution = getSanitizedSolution();
             if (sanitizedSolution) {
-              const existingSolution = company.interviewQuestions_solution[existingIndex] || "";
+              const existingSolution = merged.interviewQuestions_solution[existingIndex] || "";
               const combined = existingSolution
                 ? `${existingSolution}\n\n${sanitizedSolution}`
                 : sanitizedSolution;
-              company.interviewQuestions_solution[existingIndex] = combined;
-              company.markModified('interviewQuestions_solution');
+              merged.interviewQuestions_solution[existingIndex] = combined;
             } else if (
-              !company.interviewQuestions_solution[existingIndex] ||
-              typeof company.interviewQuestions_solution[existingIndex] !== "string"
+              !merged.interviewQuestions_solution[existingIndex] ||
+              typeof merged.interviewQuestions_solution[existingIndex] !== "string"
             ) {
-              company.interviewQuestions_solution[existingIndex] = "";
-              company.markModified('interviewQuestions_solution');
+              merged.interviewQuestions_solution[existingIndex] = "";
             }
           }
         }
@@ -382,13 +446,13 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
         const sanitizedProcess = sanitizeText(processText);
         if (sanitizedProcess.length > 0) {
           // Initialize array if it doesn't exist
-          if (!company.interviewProcess || !Array.isArray(company.interviewProcess)) {
-            company.interviewProcess = [];
+          if (!merged.interviewProcess || !Array.isArray(merged.interviewProcess)) {
+            merged.interviewProcess = [];
           }
           
           // Check if this process already exists (compare content)
           // Handle both legacy string format and new JSON string format
-          const processExists = company.interviewProcess.some(process => {
+          const processExists = merged.interviewProcess.some(process => {
             try {
               // Try to parse as JSON (new format with metadata)
               const parsed = JSON.parse(process);
@@ -412,9 +476,8 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
               },
               isAnonymous: submission.isAnonymous === true || submission.isAnonymous === 'true'
             });
-            company.interviewProcess.push(processEntry);
-            company.markModified('interviewProcess');
-            console.log('✅ Added interview process to company:', company._id);
+            merged.interviewProcess.push(processEntry);
+            console.log('✅ Added interview process to company:', merged._id);
           } else {
             console.log('⚠️ Interview process already exists in company');
           }
@@ -430,15 +493,14 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
         const sanitizedTopic = sanitizeText(topicText);
         if (sanitizedTopic.length > 0) {
           // Initialize array if it doesn't exist
-          if (!company.Must_Do_Topics || !Array.isArray(company.Must_Do_Topics)) {
-            company.Must_Do_Topics = [];
+          if (!merged.Must_Do_Topics || !Array.isArray(merged.Must_Do_Topics)) {
+            merged.Must_Do_Topics = [];
           }
           
           // Append the new topic to the array (avoid duplicates)
-          if (!company.Must_Do_Topics.includes(sanitizedTopic)) {
-            company.Must_Do_Topics.push(sanitizedTopic);
-            company.markModified('Must_Do_Topics');
-            console.log('✅ Added must do topic to company:', company._id);
+          if (!merged.Must_Do_Topics.includes(sanitizedTopic)) {
+            merged.Must_Do_Topics.push(sanitizedTopic);
+            console.log('✅ Added must do topic to company:', merged._id);
           } else {
             console.log('⚠️ Must do topic already exists in company');
           }
@@ -448,58 +510,51 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
 
     // Final validation: ensure all array values don't exceed their max lengths
     // Also filter out empty strings that might cause validation issues
-    if (company.onlineQuestions) {
-      company.onlineQuestions = company.onlineQuestions
+    if (merged.onlineQuestions) {
+      merged.onlineQuestions = merged.onlineQuestions
         .map((q) => sanitizeText(q))
         .filter((q) => q && q.length > 0);
-      company.markModified('onlineQuestions');
     }
-    if (company.onlineQuestions_solution) {
-      company.onlineQuestions_solution = company.onlineQuestions_solution.map((s) => sanitizeText(s));
-      company.markModified('onlineQuestions_solution');
+    if (merged.onlineQuestions_solution) {
+      merged.onlineQuestions_solution = merged.onlineQuestions_solution.map((s) => sanitizeText(s));
     }
-    if (company.interviewQuestions) {
-      company.interviewQuestions = company.interviewQuestions
+    if (merged.interviewQuestions) {
+      merged.interviewQuestions = merged.interviewQuestions
         .map((q) => sanitizeText(q))
         .filter((q) => q && q.length > 0);
-      company.markModified('interviewQuestions');
     }
-    if (company.interviewQuestions_solution) {
-      company.interviewQuestions_solution = company.interviewQuestions_solution.map((s) => sanitizeText(s));
-      company.markModified('interviewQuestions_solution');
+    if (merged.interviewQuestions_solution) {
+      merged.interviewQuestions_solution = merged.interviewQuestions_solution.map((s) => sanitizeText(s));
     }
-    if (company.interviewProcess) {
+    if (merged.interviewProcess) {
       // Handle both array and legacy string format
-      if (Array.isArray(company.interviewProcess)) {
-        company.interviewProcess = company.interviewProcess
+      if (Array.isArray(merged.interviewProcess)) {
+        merged.interviewProcess = merged.interviewProcess
           .map((p) => sanitizeText(p))
           .filter((p) => p && p.length > 0);
-        company.markModified('interviewProcess');
-      } else if (typeof company.interviewProcess === 'string') {
+      } else if (typeof merged.interviewProcess === 'string') {
         // Convert legacy string to array
-        const sanitized = sanitizeText(company.interviewProcess);
+        const sanitized = sanitizeText(merged.interviewProcess);
         if (sanitized && sanitized.length > 0) {
-          company.interviewProcess = [sanitized];
-          company.markModified('interviewProcess');
+          merged.interviewProcess = [sanitized];
         }
       }
     }
     
     // Truncate Must_Do_Topics to max 200 characters
-    if (company.Must_Do_Topics && Array.isArray(company.Must_Do_Topics)) {
-      company.Must_Do_Topics = company.Must_Do_Topics.map(topic => {
+    if (merged.Must_Do_Topics && Array.isArray(merged.Must_Do_Topics)) {
+      merged.Must_Do_Topics = merged.Must_Do_Topics.map(topic => {
         if (typeof topic === 'string' && topic.length > 200) {
           return topic.substring(0, 200);
         }
         return topic || '';
       }).filter(topic => topic && topic.trim().length > 0);
-      company.markModified('Must_Do_Topics');
     }
     
     // Truncate mcqQuestions fields to their max lengths
     // Convert to plain objects first to ensure Mongoose recognizes changes
-    if (company.mcqQuestions && Array.isArray(company.mcqQuestions)) {
-      company.mcqQuestions = company.mcqQuestions.map((mcq, index) => {
+    if (merged.mcqQuestions && Array.isArray(merged.mcqQuestions)) {
+      merged.mcqQuestions = merged.mcqQuestions.map((mcq, index) => {
         if (!mcq || typeof mcq !== 'object') return mcq;
         
         // Convert to plain object if it's a Mongoose subdocument
@@ -543,10 +598,9 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
       });
       
       // Mark as modified
-      company.markModified('mcqQuestions');
       
       // Final verification pass - double check all lengths
-      company.mcqQuestions.forEach((mcq, index) => {
+      merged.mcqQuestions.forEach((mcq, index) => {
         if (mcq && typeof mcq === 'object') {
           if (mcq.question && typeof mcq.question === 'string' && mcq.question.length > 300) {
             console.error(`❌ FINAL CHECK FAILED: mcqQuestions[${index}].question still ${mcq.question.length} chars`);
@@ -562,20 +616,19 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
       });
       
       // Mark again after final verification
-      company.markModified('mcqQuestions');
     }
     
     // Truncate other string fields with maxlength constraints
-    if (company.eligibility && typeof company.eligibility === 'string' && company.eligibility.length > 500) {
-      company.eligibility = company.eligibility.substring(0, 500);
+    if (merged.eligibility && typeof merged.eligibility === 'string' && merged.eligibility.length > 500) {
+      merged.eligibility = merged.eligibility.substring(0, 500);
     }
-    if (company.business_model && typeof company.business_model === 'string' && company.business_model.length > 100) {
-      company.business_model = company.business_model.substring(0, 100);
+    if (merged.business_model && typeof merged.business_model === 'string' && merged.business_model.length > 100) {
+      merged.business_model = merged.business_model.substring(0, 100);
     }
     
     // Truncate jobDescription fields
-    if (company.jobDescription && Array.isArray(company.jobDescription)) {
-      company.jobDescription = company.jobDescription.map(jd => {
+    if (merged.jobDescription && Array.isArray(merged.jobDescription)) {
+      merged.jobDescription = merged.jobDescription.map(jd => {
         if (jd && typeof jd === 'object') {
           const truncatedJd = { ...jd };
           // Title max 100
@@ -586,16 +639,14 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
         }
         return jd;
       });
-      company.markModified('jobDescription');
     }
 
-    // Save the company and check for errors
+    // Persist to companies + company_visits (replaces single Company / companies1 save)
     try {
-      // Log current state before save for debugging
-      console.log('📊 Company data before save:');
-      if (company.mcqQuestions) {
-        company.mcqQuestions.forEach((mcq, idx) => {
-          if (mcq && typeof mcq === 'object') {
+      console.log("📊 Company data before persist:");
+      if (merged.mcqQuestions) {
+        merged.mcqQuestions.forEach((mcq, idx) => {
+          if (mcq && typeof mcq === "object") {
             console.log(`  mcqQuestions[${idx}]:`, {
               questionLength: mcq.question?.length || 0,
               optionALength: mcq.optionA?.length || 0,
@@ -606,43 +657,31 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
           }
         });
       }
-      
-      // Use validateBeforeSave: true to ensure validation runs
-      const savedCompany = await company.save({ validateBeforeSave: true });
-      console.log('✅ Company updated successfully:', savedCompany._id);
-      console.log('Updated fields:', {
-        onlineQuestions: savedCompany.onlineQuestions?.length || 0,
-        interviewQuestions: savedCompany.interviewQuestions?.length || 0,
-        interviewProcess: savedCompany.interviewProcess ? 'updated' : 'not updated'
-      });
+      await persistMergedCompany(String(submission.companyId), merged);
+      console.log("✅ Company updated successfully:", submission.companyId);
     } catch (saveError) {
-      console.error('❌ Error saving company:', saveError);
-      console.error('❌ Error details:', {
+      console.error("❌ Error persisting company:", saveError);
+      console.error("❌ Error details:", {
         name: saveError.name,
         message: saveError.message,
-        errors: saveError.errors
+        errors: saveError.errors,
       });
-      
-      // Log each validation error individually
       if (saveError.errors) {
-        Object.keys(saveError.errors).forEach(key => {
+        Object.keys(saveError.errors).forEach((key) => {
           console.error(`❌ Validation error for ${key}:`, saveError.errors[key].message);
         });
       }
-      
-      // Return more detailed error information
-      if (saveError.name === 'ValidationError') {
+      if (saveError.name === "ValidationError") {
         const errors = {};
-        Object.keys(saveError.errors || {}).forEach(key => {
+        Object.keys(saveError.errors || {}).forEach((key) => {
           errors[key] = saveError.errors[key].message;
         });
-        return res.status(400).json({ 
-          error: "Validation failed", 
+        return res.status(400).json({
+          error: "Validation failed",
           details: errors,
-          message: saveError.message 
+          message: saveError.message,
         });
       }
-      
       throw saveError;
     }
 
@@ -672,10 +711,15 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
 
     await invalidateAdminDashboardStatsCache();
 
-    res.json({ 
+    const reloadedSub = await getCompanyMergedForAdminById(String(submission.companyId));
+    const companyOut = reloadedSub?.merged
+      ? companyToJsonSafePlainObject(reloadedSub.merged)
+      : null;
+
+    res.json({
       message: "Submission approved and company updated successfully",
-      company: company,
-      submission: submission
+      company: companyOut,
+      submission: submission,
     });
   } catch (error) {
     console.error("❌ Error approving submission:", error.message);
@@ -698,29 +742,15 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
 adminRouter.get("/companies", async (req, res) => {
   try {
     const { status } = req.query;
-    const query = status ? { status } : {};
     const { page, limit, skip } = parseAdminPagination(req.query);
 
-    const approvedSelect =
-      "_id name type offCampus status count createdAt updatedAt approvedAt submittedBy";
-    const pendingSelect =
-      "_id name type offCampus count status createdAt updatedAt submittedBy interviewExperience interviewQuestions onlineQuestions Must_Do_Topics";
-    const selectFields =
-      status === "approved"
-        ? approvedSelect
-        : status === "pending"
-          ? pendingSelect
-          : "_id name type status count createdAt updatedAt";
+    const { total, items: mergedRows } = await listAdminPaginatedCompaniesFromSplit({
+      status: status && String(status),
+      skip,
+      limit,
+    });
 
-    const [total, companies] = await Promise.all([
-      Company.countDocuments(query),
-      Company.find(query)
-        .select(selectFields)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-    ]);
+    const companies = mergedRows.map((m) => projectAdminCompanyListRow(m, status));
 
     const totalPages = Math.max(1, Math.ceil(total / limit));
 
@@ -739,68 +769,24 @@ adminRouter.get("/companies", async (req, res) => {
 
 // Approve a company
 adminRouter.post("/companies/:id/approve", async (req, res) => {
-  /** Avoid 500 when res.json stringifies Mongoose docs (BigInt in Mixed, circular refs, etc.). */
-  function companyToJsonSafePlainObject(doc) {
-    let plain = doc;
-    try {
-      if (doc && typeof doc.toObject === "function") {
-        plain = doc.toObject({ flattenMaps: true });
-      }
-    } catch (e) {
-      console.error("❌ approve company: toObject failed:", e?.message || e);
-      plain = { _id: doc?._id, name: doc?.name, status: doc?.status, approvedAt: doc?.approvedAt };
-    }
-    const bigintReplacer = (_k, v) => (typeof v === "bigint" ? v.toString() : v);
-    try {
-      return JSON.parse(JSON.stringify(plain, bigintReplacer));
-    } catch (serializeErr) {
-      console.error(
-        "❌ approve company: response serialization failed:",
-        serializeErr?.message || serializeErr
-      );
-      const minimal = {
-        _id: plain?._id,
-        name: plain?.name,
-        status: plain?.status,
-        approvedAt: plain?.approvedAt,
-      };
-      return JSON.parse(JSON.stringify(minimal, bigintReplacer));
-    }
-  }
-
   try {
-    const company = await Company.findById(req.params.id);
-
-    if (!company) {
+    const loaded = await getCompanyMergedForAdminById(req.params.id);
+    if (!loaded || !loaded.staticRow) {
       return res.status(404).json({ error: "Company not found" });
     }
-
-    if (company.status === "approved") {
+    if (loaded.merged?.status === "approved") {
       return res.json({
         message: "Company already approved",
-        company: companyToJsonSafePlainObject(company),
+        company: companyToJsonSafePlainObject(loaded.merged),
         alreadyApproved: true,
       });
     }
 
-    company.status = "approved";
-    company.approvedAt = new Date();
-
-    // `save()` runs pre-save hooks (e.g. role CTC normalization) so the full company document
-    // is written consistently — `findByIdAndUpdate` skips those hooks.
-    try {
-      await company.save({ validateBeforeSave: true });
-    } catch (saveErr) {
-      if (saveErr?.name === "ValidationError") {
-        console.warn(
-          "⚠️ Company approval: validation failed on save; persisting without validators (legacy document):",
-          saveErr.message
-        );
-        await company.save({ validateBeforeSave: false });
-      } else {
-        throw saveErr;
-      }
-    }
+    const approvedAt = new Date();
+    await updateCompanyVisit(req.params.id, {
+      status: "approved",
+      approvedAt,
+    });
 
     try {
       await invalidateAdminDashboardStatsCache();
@@ -808,9 +794,10 @@ adminRouter.post("/companies/:id/approve", async (req, res) => {
       console.warn("⚠️ Failed to invalidate admin dashboard cache after company approval:", cacheErr?.message || cacheErr);
     }
 
+    const out = (await getCompanyMergedForAdminById(req.params.id))?.merged ?? null;
     res.json({
       message: "Company approved successfully",
-      company: companyToJsonSafePlainObject(company),
+      company: out ? companyToJsonSafePlainObject(out) : null,
       alreadyApproved: false,
     });
   } catch (error) {
@@ -824,13 +811,12 @@ adminRouter.post("/companies/:id/approve", async (req, res) => {
 // Reject a company (delete it from database)
 adminRouter.delete("/companies/:id/reject", async (req, res) => {
   try {
-    const company = await Company.findById(req.params.id);
-    
-    if (!company) {
+    const staticRow = await CompanyStatic.findById(req.params.id).lean();
+    if (!staticRow) {
       return res.status(404).json({ error: "Company not found" });
     }
 
-    await Company.findByIdAndDelete(req.params.id);
+    await deleteSplitCompany(req.params.id);
 
     await invalidateAdminDashboardStatsCache();
 
@@ -844,17 +830,15 @@ adminRouter.delete("/companies/:id/reject", async (req, res) => {
 // Delete approved company (remove it from database)
 adminRouter.delete("/companies/:id/delete", async (req, res) => {
   try {
-    const company = await Company.findById(req.params.id);
-    
-    if (!company) {
+    const loaded = await getCompanyMergedForAdminById(req.params.id);
+    if (!loaded || !loaded.staticRow) {
       return res.status(404).json({ error: "Company not found" });
     }
-
-    if (company.status !== 'approved') {
+    if (loaded.merged?.status !== "approved") {
       return res.status(400).json({ error: "Only approved companies can be deleted using this endpoint" });
     }
 
-    await Company.findByIdAndDelete(req.params.id);
+    await deleteSplitCompany(req.params.id);
 
     await invalidateAdminDashboardStatsCache();
 
@@ -871,31 +855,30 @@ adminRouter.put(
   validateRequest(adminOaQuestionUpdateSchema),
   async (req, res) => {
   try {
-    const company = await Company.findById(req.params.id);
-    if (!company) return res.status(404).json({ error: "Company not found" });
+    const loaded = await getCompanyMergedForAdminById(req.params.id);
+    if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
+    const merged = { ...loaded.merged };
     const index = parseInt(req.params.index, 10);
     if (isNaN(index) || index < 0) return res.status(400).json({ error: "Invalid index" });
     const { question, solution } = req.body || {};
-    if (!company.onlineQuestions || index >= company.onlineQuestions.length)
+    if (!merged.onlineQuestions || index >= merged.onlineQuestions.length)
       return res.status(404).json({ error: "Question not found" });
     if (question !== undefined && question !== null) {
-      company.onlineQuestions[index] = sanitizeText(question);
-      company.markModified("onlineQuestions");
+      merged.onlineQuestions = [...(merged.onlineQuestions || [])];
+      merged.onlineQuestions[index] = sanitizeText(question);
     }
-    // Ensure solution array exists and matches length
-    if (!company.onlineQuestions_solution) company.onlineQuestions_solution = [];
-    while (company.onlineQuestions_solution.length < company.onlineQuestions.length) {
-      company.onlineQuestions_solution.push("");
-      company.markModified("onlineQuestions_solution");
+    if (!merged.onlineQuestions_solution) merged.onlineQuestions_solution = [];
+    merged.onlineQuestions_solution = [...merged.onlineQuestions_solution];
+    while (merged.onlineQuestions_solution.length < (merged.onlineQuestions || []).length) {
+      merged.onlineQuestions_solution.push("");
     }
-
     if (solution !== undefined && solution !== null) {
-      company.onlineQuestions_solution[index] = sanitizeText(solution);
-      company.markModified("onlineQuestions_solution");
+      merged.onlineQuestions_solution[index] = sanitizeText(solution);
     }
-    
-    await company.save();
-    res.json({ message: "OA question updated", company });
+    await ensureAdminVisitForYear(req.params.id);
+    await persistMergedCompany(req.params.id, merged);
+    const out = (await getCompanyMergedForAdminById(req.params.id))?.merged;
+    res.json({ message: "OA question updated", company: out });
   } catch (error) {
     console.error("❌ Error updating OA question:", error.message);
     if (error.name === "ValidationError") {
@@ -907,19 +890,23 @@ adminRouter.put(
 
 adminRouter.delete("/companies/:id/oa-questions/:index", async (req, res) => {
   try {
-    const company = await Company.findById(req.params.id);
-    if (!company) return res.status(404).json({ error: "Company not found" });
+    const loaded = await getCompanyMergedForAdminById(req.params.id);
+    if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
+    const merged = JSON.parse(JSON.stringify(loaded.merged));
     const index = parseInt(req.params.index, 10);
     if (isNaN(index) || index < 0) return res.status(400).json({ error: "Invalid index" });
-    if (!company.onlineQuestions || index >= company.onlineQuestions.length)
+    if (!merged.onlineQuestions || index >= merged.onlineQuestions.length)
       return res.status(404).json({ error: "Question not found" });
-    company.onlineQuestions.splice(index, 1);
-    if (company.onlineQuestions_solution && index < company.onlineQuestions_solution.length)
-      company.onlineQuestions_solution.splice(index, 1);
-    company.markModified("onlineQuestions");
-    if (company.onlineQuestions_solution) company.markModified("onlineQuestions_solution");
-    await company.save();
-    res.json({ message: "OA question deleted", company });
+    merged.onlineQuestions = [...merged.onlineQuestions];
+    merged.onlineQuestions.splice(index, 1);
+    if (merged.onlineQuestions_solution && index < merged.onlineQuestions_solution.length) {
+      merged.onlineQuestions_solution = [...merged.onlineQuestions_solution];
+      merged.onlineQuestions_solution.splice(index, 1);
+    }
+    await ensureAdminVisitForYear(req.params.id);
+    await persistMergedCompany(req.params.id, merged);
+    const out = (await getCompanyMergedForAdminById(req.params.id))?.merged;
+    res.json({ message: "OA question deleted", company: out });
   } catch (error) {
     console.error("❌ Error deleting OA question:", error.message);
     res.status(500).json({ error: "Server error" });
@@ -931,31 +918,30 @@ adminRouter.put(
   validateRequest(adminInterviewQuestionUpdateSchema),
   async (req, res) => {
   try {
-    const company = await Company.findById(req.params.id);
-    if (!company) return res.status(404).json({ error: "Company not found" });
+    const loaded = await getCompanyMergedForAdminById(req.params.id);
+    if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
+    const merged = JSON.parse(JSON.stringify(loaded.merged));
     const index = parseInt(req.params.index, 10);
     if (isNaN(index) || index < 0) return res.status(400).json({ error: "Invalid index" });
     const { question, solution } = req.body || {};
-    if (!company.interviewQuestions || index >= company.interviewQuestions.length)
+    if (!merged.interviewQuestions || index >= merged.interviewQuestions.length)
       return res.status(404).json({ error: "Question not found" });
     if (question !== undefined && question !== null) {
-      company.interviewQuestions[index] = sanitizeText(question);
-      company.markModified("interviewQuestions");
+      merged.interviewQuestions = [...merged.interviewQuestions];
+      merged.interviewQuestions[index] = sanitizeText(question);
     }
-    // Ensure solution array exists and matches length
-    if (!company.interviewQuestions_solution) company.interviewQuestions_solution = [];
-    while (company.interviewQuestions_solution.length < company.interviewQuestions.length) {
-      company.interviewQuestions_solution.push("");
-      company.markModified("interviewQuestions_solution");
+    if (!merged.interviewQuestions_solution) merged.interviewQuestions_solution = [];
+    merged.interviewQuestions_solution = [...merged.interviewQuestions_solution];
+    while (merged.interviewQuestions_solution.length < merged.interviewQuestions.length) {
+      merged.interviewQuestions_solution.push("");
     }
-
     if (solution !== undefined && solution !== null) {
-      company.interviewQuestions_solution[index] = sanitizeText(solution);
-      company.markModified("interviewQuestions_solution");
+      merged.interviewQuestions_solution[index] = sanitizeText(solution);
     }
-
-    await company.save();
-    res.json({ message: "Interview question updated", company });
+    await ensureAdminVisitForYear(req.params.id);
+    await persistMergedCompany(req.params.id, merged);
+    const out = (await getCompanyMergedForAdminById(req.params.id))?.merged;
+    res.json({ message: "Interview question updated", company: out });
   } catch (error) {
     console.error("❌ Error updating interview question:", error.message);
     if (error.name === "ValidationError") {
@@ -967,19 +953,23 @@ adminRouter.put(
 
 adminRouter.delete("/companies/:id/interview-questions/:index", async (req, res) => {
   try {
-    const company = await Company.findById(req.params.id);
-    if (!company) return res.status(404).json({ error: "Company not found" });
+    const loaded = await getCompanyMergedForAdminById(req.params.id);
+    if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
+    const merged = JSON.parse(JSON.stringify(loaded.merged));
     const index = parseInt(req.params.index, 10);
     if (isNaN(index) || index < 0) return res.status(400).json({ error: "Invalid index" });
-    if (!company.interviewQuestions || index >= company.interviewQuestions.length)
+    if (!merged.interviewQuestions || index >= merged.interviewQuestions.length)
       return res.status(404).json({ error: "Question not found" });
-    company.interviewQuestions.splice(index, 1);
-    if (company.interviewQuestions_solution && index < company.interviewQuestions_solution.length)
-      company.interviewQuestions_solution.splice(index, 1);
-    company.markModified("interviewQuestions");
-    if (company.interviewQuestions_solution) company.markModified("interviewQuestions_solution");
-    await company.save();
-    res.json({ message: "Interview question deleted", company });
+    merged.interviewQuestions = [...merged.interviewQuestions];
+    merged.interviewQuestions.splice(index, 1);
+    if (merged.interviewQuestions_solution && index < merged.interviewQuestions_solution.length) {
+      merged.interviewQuestions_solution = [...merged.interviewQuestions_solution];
+      merged.interviewQuestions_solution.splice(index, 1);
+    }
+    await ensureAdminVisitForYear(req.params.id);
+    await persistMergedCompany(req.params.id, merged);
+    const out = (await getCompanyMergedForAdminById(req.params.id))?.merged;
+    res.json({ message: "Interview question deleted", company: out });
   } catch (error) {
     console.error("❌ Error deleting interview question:", error.message);
     res.status(500).json({ error: "Server error" });
@@ -991,11 +981,12 @@ adminRouter.put(
   validateRequest(adminInterviewProcessUpdateSchema),
   async (req, res) => {
   try {
-    const company = await Company.findById(req.params.id);
-    if (!company) return res.status(404).json({ error: "Company not found" });
+    const loaded = await getCompanyMergedForAdminById(req.params.id);
+    if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
+    const merged = JSON.parse(JSON.stringify(loaded.merged));
     const index = parseInt(req.params.index, 10);
     if (isNaN(index) || index < 0) return res.status(400).json({ error: "Invalid index" });
-    const arr = company.interviewProcess && Array.isArray(company.interviewProcess) ? company.interviewProcess : [];
+    const arr = merged.interviewProcess && Array.isArray(merged.interviewProcess) ? merged.interviewProcess : [];
     if (index >= arr.length) return res.status(404).json({ error: "Entry not found" });
     const { content } = req.body || {};
     if (content === undefined || content === null) return res.status(400).json({ error: "content required" });
@@ -1009,10 +1000,12 @@ adminRouter.put(
     } catch {
       newEntry = sanitized;
     }
-    company.interviewProcess[index] = newEntry;
-    company.markModified("interviewProcess");
-    await company.save();
-    res.json({ message: "Interview process updated", company });
+    merged.interviewProcess = [...arr];
+    merged.interviewProcess[index] = newEntry;
+    await ensureAdminVisitForYear(req.params.id);
+    await persistMergedCompany(req.params.id, merged);
+    const out = (await getCompanyMergedForAdminById(req.params.id))?.merged;
+    res.json({ message: "Interview process updated", company: out });
   } catch (error) {
     console.error("❌ Error updating interview process:", error.message);
     if (error.name === "ValidationError") {
@@ -1024,16 +1017,19 @@ adminRouter.put(
 
 adminRouter.delete("/companies/:id/interview-process/:index", async (req, res) => {
   try {
-    const company = await Company.findById(req.params.id);
-    if (!company) return res.status(404).json({ error: "Company not found" });
+    const loaded = await getCompanyMergedForAdminById(req.params.id);
+    if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
+    const merged = JSON.parse(JSON.stringify(loaded.merged));
     const index = parseInt(req.params.index, 10);
     if (isNaN(index) || index < 0) return res.status(400).json({ error: "Invalid index" });
-    if (!company.interviewProcess || !Array.isArray(company.interviewProcess) || index >= company.interviewProcess.length)
+    if (!merged.interviewProcess || !Array.isArray(merged.interviewProcess) || index >= merged.interviewProcess.length)
       return res.status(404).json({ error: "Entry not found" });
-    company.interviewProcess.splice(index, 1);
-    company.markModified("interviewProcess");
-    await company.save();
-    res.json({ message: "Interview process entry deleted", company });
+    merged.interviewProcess = [...merged.interviewProcess];
+    merged.interviewProcess.splice(index, 1);
+    await ensureAdminVisitForYear(req.params.id);
+    await persistMergedCompany(req.params.id, merged);
+    const out = (await getCompanyMergedForAdminById(req.params.id))?.merged;
+    res.json({ message: "Interview process entry deleted", company: out });
   } catch (error) {
     console.error("❌ Error deleting interview process:", error.message);
     res.status(500).json({ error: "Server error" });
@@ -1046,29 +1042,29 @@ adminRouter.put(
   validateRequest(adminCompanyStatsSchema),
   async (req, res) => {
   try {
-    const company = await Company.findById(req.params.id);
-    if (!company) return res.status(404).json({ error: "Company not found" });
+    const staticRow = await CompanyStatic.findById(req.params.id).lean();
+    if (!staticRow) return res.status(404).json({ error: "Company not found" });
     const { totalStudentsApplied, totalClearedOA, totalGotIn } = req.body || {};
+    const payload = {};
     if (totalStudentsApplied !== undefined) {
       const n = parseInt(totalStudentsApplied, 10);
       if (isNaN(n) || n < 0) return res.status(400).json({ error: "totalStudentsApplied must be a non-negative number" });
-      company.totalStudentsApplied = n;
+      payload.totalStudentsApplied = n;
     }
     if (totalClearedOA !== undefined) {
       const n = parseInt(totalClearedOA, 10);
       if (isNaN(n) || n < 0) return res.status(400).json({ error: "totalClearedOA must be a non-negative number" });
-      company.totalClearedOA = n;
+      payload.totalClearedOA = n;
     }
     if (totalGotIn !== undefined) {
       const n = parseInt(totalGotIn, 10);
       if (isNaN(n) || n < 0) return res.status(400).json({ error: "totalGotIn must be a non-negative number" });
-      company.totalGotIn = n;
+      payload.totalGotIn = n;
     }
-    company.markModified("totalStudentsApplied");
-    company.markModified("totalClearedOA");
-    company.markModified("totalGotIn");
-    await company.save();
-    res.json({ message: "Stats updated", company });
+    await ensureAdminVisitForYear(req.params.id);
+    await updateCompanyVisit(req.params.id, payload);
+    const out = (await getCompanyMergedForAdminById(req.params.id))?.merged;
+    res.json({ message: "Stats updated", company: out });
   } catch (error) {
     console.error("❌ Error updating company stats:", error.message);
     res.status(500).json({ error: "Server error" });
@@ -1081,38 +1077,16 @@ adminRouter.patch(
   async (req, res) => {
     try {
       const delta = Number(req.body?.delta);
-      const company = await Company.findOneAndUpdate(
-        { _id: req.params.id },
-        [
-          {
-            $set: {
-              totalGotIn: {
-                $max: [
-                  0,
-                  {
-                    $add: [
-                      { $ifNull: ["$totalGotIn", 0] },
-                      delta,
-                    ],
-                  },
-                ],
-              },
-            },
-          },
-        ],
-        { new: true }
-      ).select("_id totalGotIn");
-
-      if (!company) {
+      await ensureAdminVisitForYear(req.params.id);
+      const gotInDoc = await adjustVisitTotalGotIn(req.params.id, delta);
+      if (!gotInDoc) {
         return res.status(404).json({ error: "Company not found" });
       }
 
-      await invalidateCompanyDetailCache(company._id);
-
       return res.json({
         message: "Got in count updated",
-        companyId: company._id,
-        totalGotIn: company.totalGotIn ?? 0,
+        companyId: gotInDoc._id,
+        totalGotIn: gotInDoc.totalGotIn ?? 0,
       });
     } catch (error) {
       console.error("❌ Error adjusting totalGotIn:", error.message);
@@ -1178,23 +1152,20 @@ adminRouter.put(
       };
     });
 
-    const company = await Company.findByIdAndUpdate(
-      req.params.id,
-      { roles: normalizedRoles },
-      { new: true, runValidators: true }
-    );
-
-    if (!company) {
+    const staticRow = await CompanyStatic.findById(req.params.id).lean();
+    if (!staticRow) {
       return res.status(404).json({ error: "Company not found" });
     }
-
-    // Convert Map -> plain object for each role before sending back
-    const rolesResponse = (company.roles || []).map((role) => ({
-      ...(role.toObject ? role.toObject() : role),
+    await ensureAdminVisitForYear(req.params.id);
+    await updateCompanyVisit(req.params.id, { roles: normalizedRoles });
+    const loaded = await getCompanyMergedForAdminById(req.params.id);
+    const rolesAfterUpdate = loaded?.merged?.roles || [];
+    const rolesResponse = (rolesAfterUpdate || []).map((role) => ({
+      ...role,
       ctc:
-        role.ctc instanceof Map
+        role && role.ctc instanceof Map
           ? Object.fromEntries(role.ctc)
-          : role.ctc || {},
+          : (role && role.ctc) || {},
     }));
 
     res.json({ message: "Roles updated", roles: rolesResponse });
@@ -1218,18 +1189,15 @@ adminRouter.put(
     if (type !== undefined) updateData.type = sanitizeText(type);
     if (offCampus !== undefined) updateData.offCampus = Boolean(offCampus);
 
-    // Use findByIdAndUpdate with $set to bypass unrelated legacy validation
-    const company = await Company.findByIdAndUpdate(
-      req.params.id,
-      { $set: updateData },
-      { new: true, runValidators: true }
-    );
-
-    if (!company) {
+    const staticRow = await CompanyStatic.findById(req.params.id).lean();
+    if (!staticRow) {
       return res.status(404).json({ error: "Company not found" });
     }
+    await ensureAdminVisitForYear(req.params.id);
+    await persistMergedCompany(req.params.id, updateData);
+    const out = (await getCompanyMergedForAdminById(req.params.id))?.merged;
 
-    res.json({ message: "Company general info updated successfully", company });
+    res.json({ message: "Company general info updated successfully", company: out });
   } catch (error) {
     console.error("❌ Error updating company general info:", error.message);
     if (error.name === "ValidationError") {

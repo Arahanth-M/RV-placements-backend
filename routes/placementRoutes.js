@@ -1,6 +1,6 @@
 import express from "express";
-import Company from "../models/Company.js";
 import Submission from "../models/Submission.js";
+import { getCompanyMergedForAdminById } from "../services/companyService.js";
 import User from "../models/User.js";
 import authJWT from "../middleware/authJWT.js";
 import validateRequest from "../middleware/validateRequest.js";
@@ -51,11 +51,11 @@ router.post(
       return res.status(400).json({ error: "Company ID is required" });
     }
 
-    // Find the company
-    const company = await Company.findById(companyId);
-    if (!company) {
+    const loaded = await getCompanyMergedForAdminById(String(companyId));
+    if (!loaded?.staticRow || !loaded.merged) {
       return res.status(404).json({ error: "Company not found" });
     }
+    const company = loaded.merged;
 
     // Sanitize function to prevent XSS
     const sanitizeText = (text) => {

@@ -123,7 +123,7 @@ const interviewSessionSchema = new mongoose.Schema(
     },
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Company",
+      ref: "CompanyStatic",
     },
     role: {
       type: String,

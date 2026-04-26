@@ -1,7 +1,9 @@
 import User from "../models/User.js";
 import Submission from "../models/Submission.js";
-import Company from "../models/Company.js";
+import CompanyStatic from "../models/CompanyStatic.js";
+import CompanyVisit from "../models/CompanyVisit.js";
 import MissingCompany from "../models/MissingCompany.js";
+import { COMPANY_VISIT_YEAR } from "../services/companyService.js";
 
 function startOfDay(date = new Date()) {
   const next = new Date(date);
@@ -117,7 +119,7 @@ async function aggregateTopSubmittedCompanies(limit = 5) {
     { $limit: limit },
     {
       $lookup: {
-        from: "companies1",
+        from: "companies",
         localField: "_id",
         foreignField: "_id",
         as: "company",
@@ -130,6 +132,54 @@ async function aggregateTopSubmittedCompanies(limit = 5) {
         name: {
           $ifNull: [{ $arrayElemAt: ["$company.name", 0] }, "Unknown company"],
         },
+      },
+    },
+  ]);
+}
+
+async function findMostViewedApprovedCompanies(limit = 5) {
+  return CompanyVisit.aggregate([
+    { $match: { year: COMPANY_VISIT_YEAR, status: "approved" } },
+    { $sort: { views: -1, updatedAt: -1 } },
+    { $limit: limit },
+    {
+      $lookup: {
+        from: "companies",
+        localField: "companyId",
+        foreignField: "_id",
+        as: "c",
+      },
+    },
+    {
+      $project: {
+        _id: 1,
+        name: { $ifNull: [{ $arrayElemAt: ["$c.name", 0] }, ""] },
+        views: 1,
+        updatedAt: 1,
+      },
+    },
+  ]);
+}
+
+async function findMostHelpfulApprovedCompanies(limit = 5) {
+  return CompanyVisit.aggregate([
+    { $match: { year: COMPANY_VISIT_YEAR, status: "approved" } },
+    {
+      $lookup: {
+        from: "companies",
+        localField: "companyId",
+        foreignField: "_id",
+        as: "c",
+      },
+    },
+    { $unwind: { path: "$c", preserveNullAndEmptyArrays: false } },
+    { $sort: { "c.helpfulCount": -1, "c.updatedAt": -1 } },
+    { $limit: limit },
+    {
+      $project: {
+        _id: "$c._id",
+        name: "$c.name",
+        helpfulCount: "$c.helpfulCount",
       },
     },
   ]);
@@ -159,12 +209,12 @@ export async function computeAdminStatsSnapshot() {
     acceptanceTrendRaw,
   ] = await Promise.all([
     User.countDocuments(),
-    Company.countDocuments(),
+    CompanyStatic.countDocuments(),
     Submission.countDocuments({ status: "pending" }),
     Submission.countDocuments({ submittedAt: { $gte: todayStart } }),
     Submission.countDocuments({ status: "approved" }),
     Submission.countDocuments(),
-    Company.countDocuments({ status: "pending" }),
+    CompanyVisit.countDocuments({ year: COMPANY_VISIT_YEAR, status: "pending" }),
     MissingCompany.countDocuments(),
     User.countDocuments({ lastActiveAt: { $gte: todayStart } }),
     MissingCompany.find({})
@@ -172,16 +222,8 @@ export async function computeAdminStatsSnapshot() {
       .sort({ requestCount: -1, createdAt: -1 })
       .limit(5)
       .lean(),
-    Company.find({ status: "approved" })
-      .select("name views")
-      .sort({ views: -1, updatedAt: -1 })
-      .limit(5)
-      .lean(),
-    Company.find({ status: "approved" })
-      .select("name helpfulCount")
-      .sort({ helpfulCount: -1, updatedAt: -1 })
-      .limit(5)
-      .lean(),
+    findMostViewedApprovedCompanies(5),
+    findMostHelpfulApprovedCompanies(5),
     aggregateTopSubmittedCompanies(5),
     aggregateUsersByDay("createdAt", sevenDayStart),
     aggregateUsersByDay("lastActiveAt", sevenDayStart),

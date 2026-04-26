@@ -17,6 +17,7 @@ export default {
   collectCoverageFrom: [
     'routes/**/*.js',
     'models/**/*.js',
+    '!models/_deprecated/**',
     'services/**/*.js',
     'config/**/*.js',
     'utils/**/*.js',

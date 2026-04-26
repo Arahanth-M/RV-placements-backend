@@ -2,7 +2,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import { Worker } from "bullmq";
-import Company from "../models/Company.js";
+import { getCompanyMergedForAdminById } from "../services/companyService.js";
 import { connectRedis, redisUrl } from "../src/utils/redisClient.js";
 import { connectDB } from "../config/db.js";
 import { config } from "../config/constants.js";
@@ -117,11 +117,8 @@ async function processEvaluateAnswerJob(sessionId, answer) {
   }
 
   // Company context for MCP tools
-  const companyData = await Company.findById(session.companyId)
-    .select(
-      "name onlineQuestions interviewQuestions interviewProcess Must_Do_Topics interview_questions prev_coding_ques"
-    )
-    .lean();
+  const companyData =
+    (await getCompanyMergedForAdminById(String(session.companyId)))?.merged ?? null;
   const companyContext = await getCompanyContext(companyData || {});
 
   const questionSlot = currentRound.questions[currentQuestionIndex];

@@ -2,9 +2,9 @@ import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import app from '../../server.js';
 import Submission from '../../models/Submission.js';
-import Company from '../../models/Company.js';
 import User from '../../models/User.js';
 import { buildJwtPayloadFromUser } from '../../utils/jwtUserClaims.js';
+import { seedApprovedSplitCompany } from '../helpers/seedSplitCompany.js';
 
 /** Cookie header value for authJWT (same secret as tests/setup.js default). */
 const authCookieForUser = (user) => {
@@ -19,19 +19,20 @@ describe('Submissions API Routes', () => {
   let testUser;
 
   beforeEach(async () => {
-    testCompany = new Company({
+    const { staticRow } = await seedApprovedSplitCompany({
       name: 'Google Inc.',
       type: 'FTE',
       business_model: 'B2C',
       eligibility: 'CS/IT students',
-      date_of_visit: '2024-01-15'
+      date_of_visit: '2024-01-15',
     });
-    await testCompany.save();
+    testCompany = staticRow;
 
     testUser = new User({
       userId: 'testGoogleId123',
       username: 'test_user',
-      email: 'test@example.com'
+      email: 'test@example.com',
+      isBetaListed: true,
     });
     await testUser.save();
   });
@@ -267,7 +268,7 @@ describe('Submissions API Routes', () => {
         .findById(submission._id)
         .populate('companyId');
 
-      expect(populatedSubmission.companyId.name).toBe(testCompany.name);
+      expect(populatedSubmission.companyId.name).toBe('Google Inc.');
     });
   });
 });

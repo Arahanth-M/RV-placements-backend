@@ -1,5 +1,5 @@
 import InterviewSession from "../models/InterviewSession.js";
-import Company from "../models/Company.js";
+import { getCompanyMergedForAdminById } from "./companyService.js";
 import { getCompanyContext } from "./mcp/getCompanyContext.js";
 import { generateQuestion, normalizeExpectedPoints } from "./mcp/generateQuestion.js";
 import { generateRoundFeedback as generateRoundFeedbackMCP } from "./mcp/generateRoundFeedback.js";
@@ -132,11 +132,8 @@ export const startRound = async (sessionId) => {
   }
 
   // 3) Call MCP generateQuestion with companyContext + round context
-  const companyData = await Company.findById(session.companyId)
-    .select(
-      "name onlineQuestions interviewQuestions interviewProcess Must_Do_Topics interview_questions prev_coding_ques"
-    )
-    .lean();
+  const companyData =
+    (await getCompanyMergedForAdminById(String(session.companyId)))?.merged ?? null;
   const companyContext = await getCompanyContext(companyData || {});
   const { question, expectedPoints, expectedAnswerMode } = await generateQuestion({
     userId: String(session.userId || ""),
@@ -240,11 +237,8 @@ export const generateRoundFeedback = async (sessionId, roundNumber) => {
   }
 
   // Fetch company context for MCP round feedback tool input.
-  const companyData = await Company.findById(session.companyId)
-    .select(
-      "name onlineQuestions interviewQuestions interviewProcess Must_Do_Topics interview_questions prev_coding_ques"
-    )
-    .lean();
+  const companyData =
+    (await getCompanyMergedForAdminById(String(session.companyId)))?.merged ?? null;
   const companyContext = await getCompanyContext(companyData || {});
 
   // 3) Call MCP generateRoundFeedback (new tool)

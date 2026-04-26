@@ -1,6 +1,6 @@
 import { callLLM } from "./llmClient.js";
 import { parseJSONResponse } from "../utils/parseJSONResponse.js";
-import Company from "../models/Company.js";
+import { getCompanyMergedForAdminById } from "./companyService.js";
 import { getCompanyContext } from "./mcp/getCompanyContext.js";
 import { getNumberOfRounds } from "./mcp/getNumberOfRounds.js";
 import { generateFinalFeedback } from "./mcp/generateFinalFeedback.js";
@@ -317,11 +317,8 @@ export const generateFinalReport = async (session) => {
   try {
     const cid = session?.companyId;
     if (cid) {
-      const companyData = await Company.findById(cid)
-        .select(
-          "name onlineQuestions interviewQuestions interviewProcess Must_Do_Topics interview_questions prev_coding_ques"
-        )
-        .lean();
+      const companyData =
+        (await getCompanyMergedForAdminById(String(cid)))?.merged ?? null;
       companyContext = await getCompanyContext(companyData || {});
     }
   } catch (err) {

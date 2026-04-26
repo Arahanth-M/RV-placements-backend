@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 const submissionSchema = new mongoose.Schema({
   companyId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "Company",
+    ref: "CompanyStatic",
     required: true,
   },
   type: {
