@@ -9,6 +9,10 @@ import CompanyVisit from "../models/CompanyVisit.js";
 import { attachPlacementCategoryToCompany } from "../utils/ctcCategory.js";
 import {
   buildCategoryPreviewResponse,
+  companyHasAnyYearSummerPpoFromVisits,
+  companyHasDreamTierVisitFromVisits,
+  getListPlacementCategoryMetaFromVisits,
+  getSummerPlacementPrefFromVisits,
   sortCompaniesForCategoryPreview,
 } from "../utils/companyCategoryPreviewBuckets.js";
 import { invalidateCompanyDetailCache } from "./companyDetailCache.js";
@@ -76,6 +80,72 @@ function flattenRoleCtcForJson(legacy) {
     }
     return r;
   });
+}
+
+/**
+ * Lean visit doc → copy with plain-object `roles[].ctc` for CTC math (no DB writes).
+ * @param {Record<string, unknown>|null|undefined} visit
+ */
+function visitWithPlainRoleCtc(visit) {
+  if (!visit || typeof visit !== "object") return visit;
+  const roles = Array.isArray(visit.roles)
+    ? visit.roles.map((role) => {
+        if (!role || typeof role !== "object") return role;
+        const r = { ...role };
+        if (r.ctc instanceof Map) r.ctc = Object.fromEntries(r.ctc);
+        return r;
+      })
+    : visit.roles;
+  return { ...visit, roles };
+}
+
+/**
+ * All approved visits for placement-card years, grouped by companyId (read-only).
+ * @param {import("mongoose").Types.ObjectId[]} companyIds
+ */
+async function fetchApprovedVisitsForDetailYearsByCompany(companyIds) {
+  /** @type {Map<string, Record<string, unknown>[]>} */
+  const map = new Map();
+  if (!companyIds.length) return map;
+  const visits = await CompanyVisit.find({
+    companyId: { $in: companyIds },
+    year: { $in: [...COMPANY_DETAIL_VISIT_YEARS] },
+    status: "approved",
+  }).lean();
+  for (const v of visits) {
+    const plain = visitWithPlainRoleCtc(v);
+    const k = String(plain.companyId);
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(plain);
+  }
+  return map;
+}
+
+/**
+ * Which `company_visits` row drives merged list fields when multiple years exist.
+ * @param {Record<string, unknown>[]|undefined} visits — approved rows for 2026/2027 (plain ctc)
+ * @param {unknown} placementYearRaw — from `?year=`; null/undefined = prefer earliest year (2026-first)
+ * @returns {Record<string, unknown>|null}
+ */
+function pickPrimaryVisitForListing(visits, placementYearRaw = null) {
+  if (!Array.isArray(visits) || visits.length === 0) return null;
+  const sorted = [...visits].sort((a, b) => {
+    const ya = Number(a.year) || 0;
+    const yb = Number(b.year) || 0;
+    if (ya !== yb) return ya - yb;
+    const ma = a.migratedAt ? new Date(a.migratedAt).getTime() : 0;
+    const mb = b.migratedAt ? new Date(b.migratedAt).getTime() : 0;
+    if (ma !== mb) return mb - ma;
+    const ida = a._id ? String(a._id) : "";
+    const idb = b._id ? String(b._id) : "";
+    return ida.localeCompare(idb);
+  });
+  if (placementYearRaw == null || placementYearRaw === "") {
+    return sorted[0];
+  }
+  const pref = normalizeCompanyDetailYear(placementYearRaw);
+  const hit = sorted.find((v) => (Number(v.year) || 0) === pref);
+  return hit ?? sorted[0];
 }
 
 /**
@@ -216,33 +286,22 @@ export async function getCompanyDetailLegacyMergedById(
 }
 
 /**
- * One row per approved company across detail years (2026/2027), keeping only
- * one approved visit per company while preferring 2026 when present. This keeps
- * card ordering stable by 2026 visit dates, while still including 2027-only rows.
- * Uses one aggregation with `$lookup` on `companies` — avoids N+1.
+ * One row per approved company that has any visit in {@link COMPANY_DETAIL_VISIT_YEARS}.
+ * `placementYear` picks which visit merges into the card when that year exists; otherwise
+ * the other year is used (so 2027-only companies still appear when `?year=2026`).
  * @returns {Promise<Record<string, unknown>[]>}
  */
 export async function listApprovedCompaniesLegacyMerged(
   placementYear = null
 ) {
-  const yearFilter =
-    placementYear == null
-      ? { $in: COMPANY_DETAIL_VISIT_YEARS }
-      : normalizeCompanyDetailYear(placementYear);
   const pipeline = [
     {
       $match: {
-        year: yearFilter,
+        year: { $in: [...COMPANY_DETAIL_VISIT_YEARS] },
         status: "approved",
       },
     },
-    { $sort: { year: 1, migratedAt: -1, _id: -1 } },
-    {
-      $group: {
-        _id: "$companyId",
-        visit: { $first: "$$ROOT" },
-      },
-    },
+    { $group: { _id: "$companyId" } },
     {
       $lookup: {
         from: "companies",
@@ -256,41 +315,58 @@ export async function listApprovedCompaniesLegacyMerged(
   ];
 
   const rows = await CompanyVisit.aggregate(pipeline);
+  const companyIds = rows.map((r) => r._id);
+  const visitsByCompany = await fetchApprovedVisitsForDetailYearsByCompany(companyIds);
+
   const list = [];
   for (const row of rows) {
     const staticRow = row.c;
-    const visit = row.visit;
-    if (!staticRow || !visit) continue;
-    list.push(mergeToLegacyShape(staticRow, visit));
+    if (!staticRow) continue;
+    const allVisits = visitsByCompany.get(String(row._id)) ?? [];
+    const visit = pickPrimaryVisitForListing(allVisits, placementYear);
+    if (!visit) continue;
+    const merged = mergeToLegacyShape(staticRow, visit);
+    const placementAnyYearPpoOnCampus = companyHasAnyYearSummerPpoFromVisits(allVisits);
+    const placementHasDreamTierVisit = companyHasDreamTierVisitFromVisits(allVisits);
+    const placementMeta = getListPlacementCategoryMetaFromVisits(
+      allVisits,
+      visitWithPlainRoleCtc(visit)
+    );
+    const {
+      dreamDisplayType: placementDreamDisplayType,
+      dreamDetailYear: placementDreamDetailYear,
+      ...catMeta
+    } = placementMeta;
+    const summerPref = getSummerPlacementPrefFromVisits(allVisits);
+    list.push({
+      ...merged,
+      category: catMeta.category,
+      totalCtcRupees: catMeta.totalCtcRupees,
+      placementAnyYearPpoOnCampus,
+      placementHasDreamTierVisit,
+      placementDreamDisplayType,
+      placementDreamDetailYear,
+      placementSummerDisplayType: summerPref.displayType,
+      placementSummerDetailYear: summerPref.detailYear,
+    });
   }
   return list;
 }
 
 /**
- * Approved visits across detail years + static `companies` in one aggregation
- * (no N+1), minimal fields for category/logo previews. Prefers 2026 rows when
- * both years exist for a company; includes 2027-only companies.
+ * Minimal fields for category/logo previews — same inclusion rules as
+ * {@link listApprovedCompaniesLegacyMerged} (any approved year in range).
  * @returns {Promise<Record<string, unknown>[]>}
  */
 async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
-  const yearFilter =
-    placementYear == null
-      ? { $in: COMPANY_DETAIL_VISIT_YEARS }
-      : normalizeCompanyDetailYear(placementYear);
   const pipeline = [
     {
       $match: {
-        year: yearFilter,
+        year: { $in: [...COMPANY_DETAIL_VISIT_YEARS] },
         status: "approved",
       },
     },
-    { $sort: { year: 1, migratedAt: -1, _id: -1 } },
-    {
-      $group: {
-        _id: "$companyId",
-        visit: { $first: "$$ROOT" },
-      },
-    },
+    { $group: { _id: "$companyId" } },
     {
       $lookup: {
         from: "companies",
@@ -300,26 +376,57 @@ async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
       },
     },
     { $match: { "c.0": { $exists: true } } },
-    {
-      $project: {
-        _id: { $arrayElemAt: ["$c._id", 0] },
-        name: { $arrayElemAt: ["$c.name", 0] },
-        logo: { $arrayElemAt: ["$c.logo", 0] },
-        type: "$visit.type",
-        offCampus: { $eq: [{ $ifNull: ["$visit.offCampus", false] }, true] },
-        roles: "$visit.roles",
-        messageDate: "$visit.messageDate",
-        updatedAt: "$visit.updatedAt",
-        createdAt: "$visit.createdAt",
-      },
-    },
+    { $unwind: { path: "$c" } },
   ];
 
   const rows = await CompanyVisit.aggregate(pipeline);
+  const companyIds = rows.map((r) => r._id);
+  const visitsByCompany = await fetchApprovedVisitsForDetailYearsByCompany(companyIds);
+
+  const out = [];
   for (const row of rows) {
-    flattenRoleCtcForJson(row);
+    const staticRow = row.c;
+    if (!staticRow) continue;
+    const allVisits = visitsByCompany.get(String(row._id)) ?? [];
+    const primary = pickPrimaryVisitForListing(allVisits, placementYear);
+    if (!primary) continue;
+
+    const minimal = {
+      _id: staticRow._id,
+      name: staticRow.name,
+      logo: staticRow.logo,
+      type: primary.type,
+      offCampus: primary.offCampus === true,
+      roles: primary.roles,
+      messageDate: primary.messageDate,
+      updatedAt: primary.updatedAt,
+      createdAt: primary.createdAt,
+    };
+    flattenRoleCtcForJson(minimal);
+
+    const primaryVisit = {
+      type: minimal.type,
+      offCampus: minimal.offCampus,
+      roles: minimal.roles,
+    };
+    const placementMeta = getListPlacementCategoryMetaFromVisits(allVisits, primaryVisit);
+    const {
+      dreamDisplayType: placementDreamDisplayType,
+      dreamDetailYear: placementDreamDetailYear,
+      ...catMeta
+    } = placementMeta;
+    const summerPref = getSummerPlacementPrefFromVisits(allVisits);
+    minimal.category = catMeta.category;
+    minimal.totalCtcRupees = catMeta.totalCtcRupees;
+    minimal.placementDreamDisplayType = placementDreamDisplayType;
+    minimal.placementDreamDetailYear = placementDreamDetailYear;
+    minimal.placementSummerDisplayType = summerPref.displayType;
+    minimal.placementSummerDetailYear = summerPref.detailYear;
+    minimal.placementAnyYearPpoOnCampus = companyHasAnyYearSummerPpoFromVisits(allVisits);
+    minimal.placementHasDreamTierVisit = companyHasDreamTierVisitFromVisits(allVisits);
+    out.push(minimal);
   }
-  return rows;
+  return out;
 }
 
 /**
@@ -328,7 +435,20 @@ async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
  */
 export async function getCompanyCategoryPreviewLogos(placementYear = null) {
   const rows = await listApprovedMinimalRowsForCategoryPreview(placementYear);
-  const withCategory = rows.map((c) => attachPlacementCategoryToCompany(c));
+  const withCategory = rows.map((c) => {
+    const base = attachPlacementCategoryToCompany(c);
+    return {
+      ...base,
+      category: c.category,
+      totalCtcRupees: c.totalCtcRupees,
+      placementAnyYearPpoOnCampus: c.placementAnyYearPpoOnCampus,
+      placementHasDreamTierVisit: c.placementHasDreamTierVisit,
+      placementDreamDisplayType: c.placementDreamDisplayType,
+      placementDreamDetailYear: c.placementDreamDetailYear,
+      placementSummerDisplayType: c.placementSummerDisplayType,
+      placementSummerDetailYear: c.placementSummerDetailYear,
+    };
+  });
   const ordered = sortCompaniesForCategoryPreview(withCategory);
   return buildCategoryPreviewResponse(ordered, 5);
 }

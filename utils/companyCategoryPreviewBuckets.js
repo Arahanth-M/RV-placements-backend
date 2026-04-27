@@ -3,7 +3,15 @@
  * (placementTier === null, 2026 CS category tiles).
  */
 
+import { getCompanyPlacementMeta } from "./ctcCategory.js";
+
 const PLACEMENT_CATEGORY_OPEN_DREAM = "open dream";
+
+/** @param {unknown} raw */
+function normalizePlacementDetailYear(raw) {
+  const y = Number(raw);
+  return Number.isFinite(y) && (y === 2026 || y === 2027) ? y : undefined;
+}
 
 /**
  * @param {unknown} value
@@ -114,6 +122,119 @@ function isOffCampusCompany(company) {
   return company?.offCampus === true;
 }
 
+/** @param {Record<string, unknown>|null|undefined} visit */
+export function visitIsPpo(visit) {
+  return normalizeType(visit?.type).includes("ppo");
+}
+
+/** @param {Record<string, unknown>|null|undefined} visit */
+export function visitIsMarkedOffCampus(visit) {
+  return visit?.offCampus === true;
+}
+
+/**
+ * True if any approved visit is an on-campus PPO (summer-internship tile).
+ * @param {Record<string, unknown>[]|undefined} visits
+ */
+export function companyHasAnyYearSummerPpoFromVisits(visits) {
+  if (!Array.isArray(visits)) return false;
+  return visits.some((v) => visitIsPpo(v) && !visitIsMarkedOffCampus(v));
+}
+
+/**
+ * True if any approved visit belongs in Dream / Open dream (non-PPO FTE-style visit).
+ * @param {Record<string, unknown>[]|undefined} visits
+ */
+export function companyHasDreamTierVisitFromVisits(visits) {
+  if (!Array.isArray(visits)) return false;
+  return visits.some(
+    (v) =>
+      !visitIsPpo(v) &&
+      !visitIsMarkedOffCampus(v) &&
+      !isInternshipOnlyCompany({ roles: v.roles })
+  );
+}
+
+/** @param {Record<string, unknown>|null|undefined} visit */
+function visitDisplayType(visit) {
+  const t = visit?.type;
+  if (typeof t !== "string") return undefined;
+  const s = t.trim();
+  return s || undefined;
+}
+
+/**
+ * Summer tile: latest on-campus PPO visit wins (display type + detail year for deep links).
+ * @returns {{ displayType?: string, detailYear?: number }}
+ * @param {Record<string, unknown>[]|undefined} visits
+ */
+export function getSummerPlacementPrefFromVisits(visits) {
+  if (!Array.isArray(visits)) return { displayType: undefined, detailYear: undefined };
+  const ppo = visits.filter((v) => visitIsPpo(v) && !visitIsMarkedOffCampus(v));
+  if (ppo.length === 0) return { displayType: undefined, detailYear: undefined };
+  ppo.sort((a, b) => (Number(b.year) || 0) - (Number(a.year) || 0));
+  const v = ppo[0];
+  return {
+    displayType: visitDisplayType(v),
+    detailYear: normalizePlacementDetailYear(v?.year),
+  };
+}
+
+/**
+ * Dream vs open-dream from the best qualifying (non-PPO, on-campus, not internship-only) visit.
+ * Falls back to primary visit meta when no such visit exists.
+ * @returns {{ category: string, totalCtcRupees: number, dreamDisplayType?: string, dreamDetailYear?: number }}
+ * @param {Record<string, unknown>[]|undefined} visits
+ * @param {Record<string, unknown>|null|undefined} primaryVisit
+ */
+export function getListPlacementCategoryMetaFromVisits(visits, primaryVisit) {
+  const list = Array.isArray(visits) ? visits : [];
+  const dreamTiers = list.filter(
+    (v) =>
+      !visitIsPpo(v) &&
+      !visitIsMarkedOffCampus(v) &&
+      !isInternshipOnlyCompany({ roles: v.roles })
+  );
+  if (dreamTiers.length === 0) {
+    const meta = getCompanyPlacementMeta({ roles: primaryVisit?.roles });
+    return {
+      ...meta,
+      dreamDisplayType: visitDisplayType(primaryVisit),
+      dreamDetailYear: normalizePlacementDetailYear(primaryVisit?.year),
+    };
+  }
+  let bestIdx = 0;
+  let best = getCompanyPlacementMeta({ roles: dreamTiers[0].roles });
+  for (let i = 1; i < dreamTiers.length; i++) {
+    const m = getCompanyPlacementMeta({ roles: dreamTiers[i].roles });
+    if (m.totalCtcRupees > best.totalCtcRupees) {
+      best = m;
+      bestIdx = i;
+    }
+  }
+  return {
+    ...best,
+    dreamDisplayType: visitDisplayType(dreamTiers[bestIdx]),
+    dreamDetailYear: normalizePlacementDetailYear(dreamTiers[bestIdx]?.year),
+  };
+}
+
+function summerTileEligibleCompany(c) {
+  if (c.placementAnyYearPpoOnCampus === true) return true;
+  if (c.placementAnyYearPpoOnCampus === false) return false;
+  return isPpoCompany(c) && !isOffCampusCompany(c);
+}
+
+function dreamTileBaseCompany(c) {
+  if (c.placementHasDreamTierVisit === true) return !isOffCampusCompany(c);
+  if (c.placementHasDreamTierVisit === false) return false;
+  return (
+    !isOffCampusCompany(c) &&
+    !isPpoCompany(c) &&
+    !isInternshipOnlyCompany(c)
+  );
+}
+
 /**
  * @param {Record<string, unknown>[]} companies — already `attachPlacementCategoryToCompany`’d
  * @returns {Record<string, unknown>[]}
@@ -154,9 +275,7 @@ function toLogoItem(c) {
  * @returns {{ counts: object, logos: object }}
  */
 export function buildCategoryPreviewResponse(orderedCompanies, logoLimit = 5) {
-  const allSummer = orderedCompanies.filter(
-    (c) => isPpoCompany(c) && !isOffCampusCompany(c)
-  );
+  const allSummer = orderedCompanies.filter((c) => summerTileEligibleCompany(c));
   const allOff = orderedCompanies.filter(isOffCampusCompany);
   const allInternshipOnly = orderedCompanies.filter(
     (c) =>
@@ -166,17 +285,13 @@ export function buildCategoryPreviewResponse(orderedCompanies, logoLimit = 5) {
   );
   const allDream = orderedCompanies.filter(
     (c) =>
-      !isOffCampusCompany(c) &&
-      !isPpoCompany(c) &&
-      c.category !== PLACEMENT_CATEGORY_OPEN_DREAM &&
-      !isInternshipOnlyCompany(c)
+      dreamTileBaseCompany(c) &&
+      c.category !== PLACEMENT_CATEGORY_OPEN_DREAM
   );
   const allOpenDream = orderedCompanies.filter(
     (c) =>
-      !isOffCampusCompany(c) &&
-      !isPpoCompany(c) &&
-      c.category === PLACEMENT_CATEGORY_OPEN_DREAM &&
-      !isInternshipOnlyCompany(c)
+      dreamTileBaseCompany(c) &&
+      c.category === PLACEMENT_CATEGORY_OPEN_DREAM
   );
 
   return {

@@ -48,5 +48,11 @@ export function projectCompanyListResponse(c) {
     category: c.category,
     totalCtcRupees: c.totalCtcRupees,
     roles,
+    placementAnyYearPpoOnCampus: c.placementAnyYearPpoOnCampus,
+    placementHasDreamTierVisit: c.placementHasDreamTierVisit,
+    placementDreamDisplayType: c.placementDreamDisplayType,
+    placementDreamDetailYear: c.placementDreamDetailYear,
+    placementSummerDisplayType: c.placementSummerDisplayType,
+    placementSummerDetailYear: c.placementSummerDetailYear,
   };
 }

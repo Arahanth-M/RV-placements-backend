@@ -68,7 +68,17 @@ companyRouter.get("/", async (req, res) => {
       const focusTags = getCompanyFocusTags(c);
       const { onlineQuestions, interviewQuestions, interviewProcess, Must_Do_Topics, ...rest } = c;
       const withCategory = attachPlacementCategoryToCompany({ ...rest, focusTags });
-      return projectCompanyListResponse(withCategory);
+      return projectCompanyListResponse({
+        ...withCategory,
+        category: c.category,
+        totalCtcRupees: c.totalCtcRupees,
+        placementAnyYearPpoOnCampus: c.placementAnyYearPpoOnCampus,
+        placementHasDreamTierVisit: c.placementHasDreamTierVisit,
+        placementDreamDisplayType: c.placementDreamDisplayType,
+        placementDreamDetailYear: c.placementDreamDetailYear,
+        placementSummerDisplayType: c.placementSummerDisplayType,
+        placementSummerDetailYear: c.placementSummerDetailYear,
+      });
     });
 
     return res.json(list);
