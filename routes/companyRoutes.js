@@ -60,8 +60,9 @@ companyRouter.post("/", authJWT, validateRequest(companyCreateSchema), async (re
 });
 companyRouter.get("/", async (req, res) => {
   try {
-    // New DB: `companies` + `company_visits` (2026) merged to legacy response shape
-    const companies = await listApprovedCompaniesLegacyMerged();
+    const selectedYear = req.query?.year;
+    // New DB: `companies` + approved `company_visits` (year-aware when `?year=` is sent)
+    const companies = await listApprovedCompaniesLegacyMerged(selectedYear);
 
     const list = companies.map((c) => {
       const focusTags = getCompanyFocusTags(c);
@@ -80,7 +81,8 @@ companyRouter.get("/", async (req, res) => {
 /** Lightweight category-tile data (counts + 5 logo rows per bucket) — must stay above `GET /:id` */
 companyRouter.get("/preview-logos", async (req, res) => {
   try {
-    const payload = await getCompanyCategoryPreviewLogos();
+    const selectedYear = req.query?.year;
+    const payload = await getCompanyCategoryPreviewLogos(selectedYear);
     return res.json(payload);
   } catch (e) {
     console.error("❌ Error fetching preview logos:", e?.message);

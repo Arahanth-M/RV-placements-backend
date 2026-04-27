@@ -216,19 +216,27 @@ export async function getCompanyDetailLegacyMergedById(
 }
 
 /**
- * One row per approved company for 2026 (latest visit if duplicates).
- * Uses one aggregation with `$lookup` on `companies` — avoids N+1 per-company `findOne` (split schema is fine; the old loop was not).
+ * One row per approved company across detail years (2026/2027), keeping only
+ * one approved visit per company while preferring 2026 when present. This keeps
+ * card ordering stable by 2026 visit dates, while still including 2027-only rows.
+ * Uses one aggregation with `$lookup` on `companies` — avoids N+1.
  * @returns {Promise<Record<string, unknown>[]>}
  */
-export async function listApprovedCompaniesLegacyMerged() {
+export async function listApprovedCompaniesLegacyMerged(
+  placementYear = null
+) {
+  const yearFilter =
+    placementYear == null
+      ? { $in: COMPANY_DETAIL_VISIT_YEARS }
+      : normalizeCompanyDetailYear(placementYear);
   const pipeline = [
     {
       $match: {
-        year: COMPANY_VISIT_YEAR,
+        year: yearFilter,
         status: "approved",
       },
     },
-    { $sort: { migratedAt: -1, _id: -1 } },
+    { $sort: { year: 1, migratedAt: -1, _id: -1 } },
     {
       $group: {
         _id: "$companyId",
@@ -259,19 +267,24 @@ export async function listApprovedCompaniesLegacyMerged() {
 }
 
 /**
- * Approved 2026 visits + static `companies` in one aggregation (no N+1), minimal fields
- * for category-bucket / logo preview (see `getCompanyCategoryPreviewLogos`).
+ * Approved visits across detail years + static `companies` in one aggregation
+ * (no N+1), minimal fields for category/logo previews. Prefers 2026 rows when
+ * both years exist for a company; includes 2027-only companies.
  * @returns {Promise<Record<string, unknown>[]>}
  */
-async function listApprovedMinimalRowsForCategoryPreview() {
+async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
+  const yearFilter =
+    placementYear == null
+      ? { $in: COMPANY_DETAIL_VISIT_YEARS }
+      : normalizeCompanyDetailYear(placementYear);
   const pipeline = [
     {
       $match: {
-        year: COMPANY_VISIT_YEAR,
+        year: yearFilter,
         status: "approved",
       },
     },
-    { $sort: { migratedAt: -1, _id: -1 } },
+    { $sort: { year: 1, migratedAt: -1, _id: -1 } },
     {
       $group: {
         _id: "$companyId",
@@ -313,8 +326,8 @@ async function listApprovedMinimalRowsForCategoryPreview() {
  * Small JSON for 2026 category tiles: counts per bucket + up to 5 logo rows each.
  * @returns {Promise<{ counts: object, logos: object }>}
  */
-export async function getCompanyCategoryPreviewLogos() {
-  const rows = await listApprovedMinimalRowsForCategoryPreview();
+export async function getCompanyCategoryPreviewLogos(placementYear = null) {
+  const rows = await listApprovedMinimalRowsForCategoryPreview(placementYear);
   const withCategory = rows.map((c) => attachPlacementCategoryToCompany(c));
   const ordered = sortCompaniesForCategoryPreview(withCategory);
   return buildCategoryPreviewResponse(ordered, 5);
