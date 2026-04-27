@@ -27,7 +27,7 @@ import mongoose from "mongoose";
 dotenv.config();
 
 /** Redis TTL for GET /api/companies/:id payload cache */
-const COMPANY_DETAIL_REDIS_TTL_SECONDS = 3 * 60 * 60;
+const COMPANY_DETAIL_REDIS_TTL_SECONDS = 30;
 
 const companyRouter = express.Router();
 
