@@ -100,6 +100,56 @@ companyRouter.get("/preview-logos", async (req, res) => {
   }
 });
 
+companyRouter.post("/helpful/status/batch", authJWT, async (req, res) => {
+  try {
+    if (!req.user || !req.user.email) {
+      return res.status(401).json({ error: "You must be logged in to view helpful status" });
+    }
+
+    const rawCompanyIds = Array.isArray(req.body?.companyIds) ? req.body.companyIds : [];
+    const uniqueIds = [...new Set(rawCompanyIds.map((id) => String(id || "").trim()).filter(Boolean))];
+
+    if (uniqueIds.length === 0) {
+      return res.json({ statuses: {} });
+    }
+
+    const objectIds = uniqueIds
+      .map((id) => {
+        try {
+          return new mongoose.Types.ObjectId(id);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+
+    if (objectIds.length === 0) {
+      return res.json({ statuses: {} });
+    }
+
+    const companiesCol = mongoose.connection.db?.collection("companies");
+    const rows =
+      (await companiesCol
+        ?.find({ _id: { $in: objectIds } })
+        .project({ _id: 1, helpfulUsers: 1, helpfulCount: 1 })
+        .toArray()) || [];
+
+    const statuses = {};
+    for (const row of rows) {
+      const helpfulUsers = Array.isArray(row.helpfulUsers) ? row.helpfulUsers : [];
+      statuses[String(row._id)] = {
+        hasUpvoted: helpfulUsers.includes(req.user.email),
+        helpfulCount: row.helpfulCount ?? 0,
+      };
+    }
+
+    return res.json({ statuses });
+  } catch (error) {
+    console.error("❌ Error fetching batch helpful status:", error);
+    return res.status(500).json({ error: "Error fetching helpful status" });
+  }
+});
+
 companyRouter.get("/:id", authJWT, async (req, res) => {
   const id = req.params.id;
   const placementVisitYear = normalizeCompanyDetailYear(req.query?.year);
