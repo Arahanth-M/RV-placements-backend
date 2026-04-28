@@ -64,6 +64,7 @@ export const urls = {
 // API Routes
 export const routes = {
   AUTH: '/api/auth',
+  LOGO: '/api/logo',
   COMPANIES: '/api/companies',
   MISSING_COMPANIES: '/api/missing-companies',
   SUBMISSIONS: '/api/submissions',
