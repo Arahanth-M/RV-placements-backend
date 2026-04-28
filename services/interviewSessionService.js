@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import InterviewSession from "../models/InterviewSession.js";
 import { getCompanyMergedForAdminById } from "./companyService.js";
 import { getCompanyContext } from "./mcp/getCompanyContext.js";
@@ -10,8 +11,75 @@ const updateOptions = {
   runValidators: true,
 };
 
+const UNKNOWN_COMPANY_NAME = "Unknown Company";
+
 const expectedPointsFromStrings = (points, defaults = {}) =>
   normalizeExpectedPoints(points, defaults);
+
+const toSafeString = (value) =>
+  typeof value === "string" ? value.trim() : "";
+
+const getCompanyRefId = (companyRef) => {
+  if (!companyRef) return "";
+  if (typeof companyRef === "string") return companyRef.trim();
+  if (typeof companyRef?._id !== "undefined" && companyRef._id !== null) {
+    return String(companyRef._id).trim();
+  }
+  if (
+    typeof companyRef?.toString === "function" &&
+    companyRef.toString !== Object.prototype.toString
+  ) {
+    return String(companyRef).trim();
+  }
+  return "";
+};
+
+const getCompanyRefName = (companyRef) => {
+  const directName =
+    toSafeString(companyRef?.name) || toSafeString(companyRef?.companyName);
+  return directName && directName !== UNKNOWN_COMPANY_NAME ? directName : "";
+};
+
+const getLegacyCompanyNameById = async (companyId) => {
+  const objectId = mongoose.isValidObjectId(companyId)
+    ? new mongoose.Types.ObjectId(companyId)
+    : null;
+  if (!objectId) {
+    return "";
+  }
+
+  const legacyCompany = await mongoose.connection
+    .collection("companies1")
+    .findOne({ _id: objectId }, { projection: { name: 1 } });
+
+  return toSafeString(legacyCompany?.name);
+};
+
+export const resolveInterviewCompanyName = async (session, companyNameCache = new Map()) => {
+  const directName =
+    (toSafeString(session?.companyName) || getCompanyRefName(session?.companyId)) ?? "";
+  if (directName && directName !== UNKNOWN_COMPANY_NAME) {
+    return directName;
+  }
+
+  const companyId = getCompanyRefId(session?.companyId);
+  if (!companyId) {
+    return UNKNOWN_COMPANY_NAME;
+  }
+
+  if (companyNameCache.has(companyId)) {
+    return companyNameCache.get(companyId);
+  }
+
+  const loadedCompany = await getCompanyMergedForAdminById(companyId);
+  const resolvedName =
+    toSafeString(loadedCompany?.merged?.name) ||
+    toSafeString(loadedCompany?.staticRow?.name) ||
+    (await getLegacyCompanyNameById(companyId)) ||
+    UNKNOWN_COMPANY_NAME;
+  companyNameCache.set(companyId, resolvedName);
+  return resolvedName;
+};
 
 export const createSession = async (userId, companyId) => {
   return InterviewSession.create({
@@ -43,7 +111,6 @@ export const getUserSessions = async (userId) => {
     userId,
     state: INTERVIEW_STATES.INTERVIEW_COMPLETE,
   })
-    .populate("companyId", "name type")
     .sort({ updatedAt: -1 });
 };
 
@@ -59,7 +126,6 @@ export const getUserSessionSummaries = async (userId) => {
     .select(
       "userId companyId role currentRound currentQuestionIndex roundStatus state roundsPlan roundsDetails totalRounds currentRoundIndex difficultyLevel currentQuestion finalReport.overallScore createdAt updatedAt"
     )
-    .populate("companyId", "name type")
     .sort({ updatedAt: -1 })
     .lean();
 };
@@ -78,7 +144,6 @@ export const getUserSessionSummariesPaginated = async (userId, page = 1, limit =
       .select(
         "userId companyId role currentRound currentQuestionIndex roundStatus state roundsPlan roundsDetails totalRounds currentRoundIndex difficultyLevel currentQuestion finalReport.overallScore createdAt updatedAt"
       )
-      .populate("companyId", "name type")
       .sort({ updatedAt: -1 })
       .skip(skip)
       .limit(limitNumber)
@@ -99,9 +164,7 @@ export const getUserSessionSummariesPaginated = async (userId, page = 1, limit =
 
 /** Full session detail for a single session, restricted to owner. */
 export const getUserSessionDetail = async (userId, sessionId) => {
-  return InterviewSession.findOne({ _id: sessionId, userId })
-    .populate("companyId", "name type")
-    .lean();
+  return InterviewSession.findOne({ _id: sessionId, userId }).lean();
 };
 
 export const discardInProgressSession = async (sessionId) => {
@@ -279,16 +342,16 @@ export const generateRoundFeedback = async (sessionId, roundNumber) => {
 /** Average scores by round type + one progress point per session (chronological) for analytics UI. */
 export const buildUserInterviewAnalytics = async (userId) => {
   const sessions = await InterviewSession.find({ userId })
-    .populate("companyId", "name")
     .sort({ updatedAt: 1 })
     .lean();
 
   const skillTotals = {};
   const progress = [];
+  const companyNameCache = new Map();
 
   for (const session of sessions) {
     const rounds = Array.isArray(session.rounds) ? session.rounds : [];
-    const companyName = session.companyId?.name || "Unknown Company";
+    const companyName = await resolveInterviewCompanyName(session, companyNameCache);
 
     for (const round of rounds) {
       const type = round.type || "General";

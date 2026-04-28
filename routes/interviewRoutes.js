@@ -20,6 +20,7 @@ import {
   updateSession,
   discardInProgressSession,
   startRound,
+  resolveInterviewCompanyName,
 } from "../services/interviewSessionService.js";
 import { generateInterviewPlan } from "../services/interviewEngine.js";
 import { interviewQueue } from "../services/queues/interviewQueue.js";
@@ -64,6 +65,65 @@ function roundIndexFromCurrentRound(session) {
   const currentRoundNumber = Number(session.currentRound) || 1;
   return Math.max(0, Math.min(rounds.length - 1, currentRoundNumber - 1));
 }
+
+const buildSessionSummaryPayload = async (session, companyNameCache) => {
+  const companyName = await resolveInterviewCompanyName(session, companyNameCache);
+  return {
+    _id: session._id,
+    userId: session.userId,
+    companyId: session.companyId?._id || session.companyId || null,
+    companyName,
+    companyType: session.companyId?.type || session.companyType || "",
+    role: session.role || "",
+    currentRound: session.currentRound || "",
+    currentQuestionIndex: session.currentQuestionIndex || 0,
+    roundStatus: session.roundStatus || "IN_PROGRESS",
+    interviewStatus: toClientInterviewStatus(session.state),
+    roundsPlan: session.roundsPlan || [],
+    roundsDetails: session.roundsDetails || [],
+    totalRounds: session.totalRounds || 0,
+    currentRoundIndex: roundIndexFromCurrentRound(session),
+    difficultyLevel: session.difficultyLevel || "",
+    currentQuestion: session.currentQuestion || null,
+    status: toClientStatus(session.state),
+    state: session.state || INTERVIEW_STATES.PREVIEW,
+    finalScore:
+      typeof session?.finalReport?.overallScore === "number"
+        ? session.finalReport.overallScore
+        : null,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+  };
+};
+
+const buildSessionDetailPayload = async (session, companyNameCache) => {
+  const companyName = await resolveInterviewCompanyName(session, companyNameCache);
+  return {
+    _id: session._id,
+    userId: session.userId,
+    companyId: session.companyId?._id || session.companyId || null,
+    companyName,
+    companyType: session.companyId?.type || session.companyType || "",
+    role: session.role || "",
+    history: session.history || [],
+    currentRound: session.currentRound || "",
+    currentQuestionIndex: session.currentQuestionIndex || 0,
+    roundStatus: session.roundStatus || "IN_PROGRESS",
+    interviewStatus: toClientInterviewStatus(session.state),
+    rounds: session.rounds || [],
+    roundsPlan: session.roundsPlan || [],
+    roundsDetails: session.roundsDetails || [],
+    totalRounds: session.totalRounds || 0,
+    currentRoundIndex: roundIndexFromCurrentRound(session),
+    difficultyLevel: session.difficultyLevel || "",
+    currentQuestion: session.currentQuestion || null,
+    status: toClientStatus(session.state),
+    state: session.state || INTERVIEW_STATES.PREVIEW,
+    finalReport: session.finalReport || null,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+  };
+};
 
 const clampPage = (value) => Math.max(1, Number(value) || 1);
 const clampLimit = (value) => Math.min(50, Math.max(1, Number(value) || 10));
@@ -247,7 +307,13 @@ router.get("/sessions/:userId", async (req, res) => {
     const page = clampPage(req.query.page);
     const limit = clampLimit(req.query.limit);
     const cached = await getCachedInterviewSummaries(userId, page, limit);
+    const companyNameCache = new Map();
     if (cached) {
+      const items = await Promise.all(
+        (Array.isArray(cached?.items) ? cached.items : []).map((session) =>
+          buildSessionSummaryPayload(session, companyNameCache)
+        )
+      );
       recordLatencyMetric("sessions", Date.now() - startedAt);
       console.info("[interview-sessions] cache hit", {
         userId,
@@ -255,37 +321,17 @@ router.get("/sessions/:userId", async (req, res) => {
         limit,
         durationMs: Date.now() - startedAt,
       });
-      return res.json(cached);
+      return res.json({
+        ...cached,
+        items,
+      });
     }
 
     const { items, pagination } = await getUserSessionSummariesPaginated(userId, page, limit);
     const payload = {
-      items: items.map((session) => ({
-        _id: session._id,
-        userId: session.userId,
-        companyId: session.companyId?._id || session.companyId || null,
-        companyName: session.companyId?.name || "Unknown Company",
-        companyType: session.companyId?.type || "",
-        role: session.role || "",
-        currentRound: session.currentRound || "",
-        currentQuestionIndex: session.currentQuestionIndex || 0,
-        roundStatus: session.roundStatus || "IN_PROGRESS",
-        interviewStatus: toClientInterviewStatus(session.state),
-        roundsPlan: session.roundsPlan || [],
-        roundsDetails: session.roundsDetails || [],
-        totalRounds: session.totalRounds || 0,
-        currentRoundIndex: roundIndexFromCurrentRound(session),
-        difficultyLevel: session.difficultyLevel || "",
-        currentQuestion: session.currentQuestion || null,
-        status: toClientStatus(session.state),
-        state: session.state || INTERVIEW_STATES.PREVIEW,
-        finalScore:
-          typeof session?.finalReport?.overallScore === "number"
-            ? session.finalReport.overallScore
-            : null,
-        createdAt: session.createdAt,
-        updatedAt: session.updatedAt,
-      })),
+      items: await Promise.all(
+        items.map((session) => buildSessionSummaryPayload(session, companyNameCache))
+      ),
       pagination,
     };
     await setCachedInterviewSummaries(userId, page, limit, payload);
@@ -321,12 +367,13 @@ router.get("/session/:sessionId", async (req, res) => {
       if (!isSessionOwner(cached, userId)) {
         return res.status(403).json({ error: "Forbidden" });
       }
+      const payload = await buildSessionDetailPayload(cached, new Map());
       recordLatencyMetric("sessionDetail", Date.now() - startedAt);
       console.info("[interview-session-detail] cache hit", {
         sessionId,
         durationMs: Date.now() - startedAt,
       });
-      return res.json(cached);
+      return res.json(payload);
     }
 
     const session = await getUserSessionDetail(userId, sessionId);
@@ -334,31 +381,7 @@ router.get("/session/:sessionId", async (req, res) => {
       return res.status(404).json({ error: "Session not found" });
     }
 
-    const payload = {
-      _id: session._id,
-      userId: session.userId,
-      companyId: session.companyId?._id || session.companyId || null,
-      companyName: session.companyId?.name || "Unknown Company",
-      companyType: session.companyId?.type || "",
-      role: session.role || "",
-      history: session.history || [],
-      currentRound: session.currentRound || "",
-      currentQuestionIndex: session.currentQuestionIndex || 0,
-      roundStatus: session.roundStatus || "IN_PROGRESS",
-      interviewStatus: toClientInterviewStatus(session.state),
-      rounds: session.rounds || [],
-      roundsPlan: session.roundsPlan || [],
-      roundsDetails: session.roundsDetails || [],
-      totalRounds: session.totalRounds || 0,
-      currentRoundIndex: roundIndexFromCurrentRound(session),
-      difficultyLevel: session.difficultyLevel || "",
-      currentQuestion: session.currentQuestion || null,
-      status: toClientStatus(session.state),
-      state: session.state || INTERVIEW_STATES.PREVIEW,
-      finalReport: session.finalReport || null,
-      createdAt: session.createdAt,
-      updatedAt: session.updatedAt,
-    };
+    const payload = await buildSessionDetailPayload(session, new Map());
     await setCachedInterviewDetail(sessionId, payload);
     recordLatencyMetric("sessionDetail", Date.now() - startedAt);
     console.info("[interview-session-detail] cache miss", {
@@ -480,11 +503,12 @@ router.get("/interview-status/:sessionId", async (req, res) => {
     const hasActiveQuestion = Boolean(effectiveCurrentQuestion);
 
     const roundType = session.rounds[currentRoundIndex]?.type;
+    const companyName = await resolveInterviewCompanyName(session, new Map());
     const selectedTips = buildInterviewTips({
       roundType,
       difficulty: currentRoundDoc?.difficulty || session.difficultyLevel,
       currentQuestion: effectiveCurrentQuestion || prevQuestion?.question || "",
-      companyName: session.companyId?.name || "",
+      companyName,
       currentQuestionIndex,
       desiredCount: 8,
     });
