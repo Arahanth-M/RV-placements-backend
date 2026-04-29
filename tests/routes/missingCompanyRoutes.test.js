@@ -6,7 +6,10 @@ import MissingCompany from "../../models/MissingCompany.js";
 import { seedApprovedSplitCompany } from "../helpers/seedSplitCompany.js";
 import User from "../../models/User.js";
 import { buildJwtPayloadFromUser } from "../../utils/jwtUserClaims.js";
-import { STUDENT_PROFILE_COLLECTION } from "../../config/constants.js";
+import {
+  STUDENT_PROFILE_COLLECTION,
+  STUDENT_EMAIL_FIELD,
+} from "../../config/constants.js";
 
 const STUDENT_COLLECTION = STUDENT_PROFILE_COLLECTION;
 
@@ -28,7 +31,7 @@ describe("Missing Company Routes", () => {
       });
 
       await mongoose.connection.db.collection(STUDENT_COLLECTION).insertOne({
-        Email: "beta1@example.com",
+        [STUDENT_EMAIL_FIELD]: "beta1@example.com",
         "FTE Company name": "Atlassian",
       });
 
@@ -65,7 +68,7 @@ describe("Missing Company Routes", () => {
       });
 
       await mongoose.connection.db.collection(STUDENT_COLLECTION).insertOne({
-        Email: "beta-name-of-company@example.com",
+        [STUDENT_EMAIL_FIELD]: "beta-name-of-company@example.com",
         "Name of Company": "Zepto",
       });
 
@@ -112,7 +115,7 @@ describe("Missing Company Routes", () => {
       });
 
       await mongoose.connection.db.collection(STUDENT_COLLECTION).insertOne({
-        Email: "beta2@example.com",
+        [STUDENT_EMAIL_FIELD]: "beta2@example.com",
         "FTE Company name": "Google",
       });
 

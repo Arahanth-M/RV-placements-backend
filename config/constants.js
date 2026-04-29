@@ -123,6 +123,10 @@ export const BETA_ACCESS_COLLECTION =
 export const STUDENT_PROFILE_COLLECTION =
   process.env.STUDENT_PROFILE_COLLECTION?.trim() || "users27_monday";
 
+// Email column name in the exported student roster collection.
+export const STUDENT_EMAIL_FIELD =
+  process.env.STUDENT_EMAIL_FIELD?.trim() || "Email Address";
+
 // Default values
 export const defaults = {
   PAGINATION: {

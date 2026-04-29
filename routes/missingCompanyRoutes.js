@@ -5,7 +5,11 @@ import authJWT from "../middleware/authJWT.js";
 import checkBetaAccess from "../middleware/checkBetaAccess.js";
 import MissingCompany from "../models/MissingCompany.js";
 import User from "../models/User.js";
-import { config, STUDENT_PROFILE_COLLECTION } from "../config/constants.js";
+import {
+  config,
+  STUDENT_PROFILE_COLLECTION,
+  STUDENT_EMAIL_FIELD,
+} from "../config/constants.js";
 import { buildJwtPayloadFromUser } from "../utils/jwtUserClaims.js";
 
 const router = express.Router();
@@ -141,9 +145,17 @@ router.post("/", authJWT, checkBetaAccess, async (req, res) => {
     }
 
     const escapedEmail = escapeRegex(String(dbUser.email).trim().toLowerCase());
-    const studentRecord = await usersCollection.findOne({
-      Email: { $regex: new RegExp(`^\\s*${escapedEmail}\\s*$`, "i") },
+    let studentRecord = await usersCollection.findOne({
+      [STUDENT_EMAIL_FIELD]: dbUser.email,
     });
+
+    if (!studentRecord) {
+      studentRecord = await usersCollection.findOne({
+        [STUDENT_EMAIL_FIELD]: {
+          $regex: new RegExp(`^\\s*${escapedEmail}\\s*$`, "i"),
+        },
+      });
+    }
 
     const placementCompanies = extractPlacementCompanyNames(studentRecord);
     const allowedCompanySet = new Set(

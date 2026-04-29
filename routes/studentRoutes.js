@@ -10,7 +10,11 @@ import {
   invalidateStudentProfileCacheByEmail,
   invalidateStudentProfileCacheByEmails,
 } from "../services/studentProfileCache.js";
-import { ADMIN_EMAIL, STUDENT_PROFILE_COLLECTION } from "../config/constants.js";
+import {
+  ADMIN_EMAIL,
+  STUDENT_PROFILE_COLLECTION,
+  STUDENT_EMAIL_FIELD,
+} from "../config/constants.js";
 import validateRequest from "../middleware/validateRequest.js";
 import { profileCacheInvalidateSchema } from "../validations/student.validation.js";
 
@@ -147,9 +151,17 @@ router.get("/profile", authJWT, checkBetaAccess, authorize(["student", "admin"])
     const db = mongoose.connection.db;
     const usersCollection = db.collection(STUDENT_COLLECTION);
     const escapedEmail = email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const studentRecord = await usersCollection.findOne({
-      Email: { $regex: new RegExp(`^\\s*${escapedEmail}\\s*$`, "i") },
+    let studentRecord = await usersCollection.findOne({
+      [STUDENT_EMAIL_FIELD]: email,
     });
+
+    if (!studentRecord) {
+      studentRecord = await usersCollection.findOne({
+        [STUDENT_EMAIL_FIELD]: {
+          $regex: new RegExp(`^\\s*${escapedEmail}\\s*$`, "i"),
+        },
+      });
+    }
 
     if (!studentRecord) {
       console.log(`❓ [Profile] No profile record found in ${STUDENT_COLLECTION} for: ${email}`);

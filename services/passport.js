@@ -3,7 +3,11 @@ import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import keys from "../config/keys.js";
 import mongoose from "mongoose";
 import User from "../models/User.js";
-import { urls, BETA_ACCESS_COLLECTION } from "../config/constants.js";
+import {
+  urls,
+  BETA_ACCESS_COLLECTION,
+  STUDENT_EMAIL_FIELD,
+} from "../config/constants.js";
 import { sendWelcomeEmailWebhook } from "./webhookService.js";
 
 function escapeRegex(value) {
@@ -56,9 +60,9 @@ passport.use(
         const betaLookupPromise = (async () => {
           console.time("auth:beta_lookup");
           try {
-            // Exact-match on Email lets MongoDB use the existing { Email: 1 } index.
+            // Exact-match on the roster email field lets MongoDB use its single-field index.
             let betaRecord = await studentCollection.findOne(
-              { Email: normalizedEmail },
+              { [STUDENT_EMAIL_FIELD]: normalizedEmail },
               { projection: { _id: 1 } }
             );
 
@@ -66,7 +70,9 @@ passport.use(
             if (!betaRecord) {
               betaRecord = await studentCollection.findOne(
                 {
-                  Email: { $regex: new RegExp(`^\\s*${escapedEmail}\\s*$`, "i") },
+                  [STUDENT_EMAIL_FIELD]: {
+                    $regex: new RegExp(`^\\s*${escapedEmail}\\s*$`, "i"),
+                  },
                 },
                 { projection: { _id: 1 } }
               );
