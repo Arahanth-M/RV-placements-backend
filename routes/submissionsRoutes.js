@@ -11,6 +11,48 @@ import { normalizeCompanyDetailYear } from "../services/companyService.js";
 
 
 const submissionRouter = express.Router();
+const escapeRegex = (value) => String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+submissionRouter.get(
+  "/mine",
+  authJWT,
+  checkBetaAccess,
+  authorize(["student", "admin"]),
+  async (req, res) => {
+    try {
+      const email = (req.user?.email || "").trim().toLowerCase();
+
+      if (!email) {
+        return res.status(401).json({ error: messages.ERROR.NOT_AUTHENTICATED });
+      }
+
+      const submissions = await Submission.find({
+        "submittedBy.email": {
+          $regex: new RegExp(`^${escapeRegex(email)}$`, "i"),
+        },
+      })
+        .sort({ submittedAt: -1, _id: -1 })
+        .populate("companyId", "name")
+        .lean();
+
+      const payload = submissions.map((submission) => ({
+        _id: submission._id,
+        type: submission.type,
+        content: submission.content,
+        status: submission.status,
+        submittedAt: submission.submittedAt,
+        placementYear: submission.placementYear ?? null,
+        companyId: submission.companyId?._id || null,
+        companyName: submission.companyId?.name || "Unknown company",
+      }));
+
+      return res.json({ submissions: payload });
+    } catch (error) {
+      console.error("Error fetching user submissions:", error);
+      return res.status(500).json({ error: "Error fetching submissions" });
+    }
+  }
+);
 
 submissionRouter.post(
   "/",

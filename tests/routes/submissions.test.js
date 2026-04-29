@@ -226,6 +226,54 @@ describe('Submissions API Routes', () => {
     });
   });
 
+  describe('GET /api/submissions/mine', () => {
+    it('should return only the authenticated user submissions with company names', async () => {
+      await Submission.insertMany([
+        {
+          companyId: testCompany._id,
+          type: 'mustDoTopics',
+          content: 'Practice graphs and DP',
+          submittedBy: {
+            name: testUser.username,
+            email: testUser.email,
+          },
+          submittedAt: new Date('2026-04-28T10:00:00.000Z'),
+        },
+        {
+          companyId: testCompany._id,
+          type: 'interviewProcess',
+          content: 'OA, technical, HR',
+          submittedBy: {
+            name: testUser.username,
+            email: testUser.email,
+          },
+          submittedAt: new Date('2026-04-29T10:00:00.000Z'),
+        },
+        {
+          companyId: testCompany._id,
+          type: 'onlineQuestions',
+          content: 'Should not be returned',
+          submittedBy: {
+            name: 'other_user',
+            email: 'other@example.com',
+          },
+          submittedAt: new Date('2026-04-30T10:00:00.000Z'),
+        },
+      ]);
+
+      const response = await request(app)
+        .get('/api/submissions/mine')
+        .set('Cookie', authCookieForUser(testUser))
+        .expect(200);
+
+      expect(Array.isArray(response.body.submissions)).toBe(true);
+      expect(response.body.submissions).toHaveLength(2);
+      expect(response.body.submissions[0].type).toBe('interviewProcess');
+      expect(response.body.submissions[0].companyName).toBe('Google Inc.');
+      expect(response.body.submissions[1].type).toBe('mustDoTopics');
+    });
+  });
+
   describe('Database Integration', () => {
     it('should save submission to database with correct user info', async () => {
       const submissionData = {
