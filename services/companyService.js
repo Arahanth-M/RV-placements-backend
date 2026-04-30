@@ -66,6 +66,55 @@ function toObjectId(m) {
 }
 
 /**
+ * Match a visit row by company id even when external writers stored `companyId`
+ * as a string instead of an ObjectId.
+ * @param {string|import("mongoose").Types.ObjectId} companyId
+ * @returns {Record<string, unknown>|null}
+ */
+function buildCompanyVisitCompanyExprMatch(companyId) {
+  const cid = toObjectId(companyId);
+  if (!cid) return null;
+  return {
+    $expr: {
+      $eq: [{ $toString: "$companyId" }, String(cid)],
+    },
+  };
+}
+
+/**
+ * Effective placement year for visit rows. External writers may omit `year`;
+ * treat that as the default company visit year for admin/public reads.
+ * @param {number} [placementYear]
+ * @returns {Record<string, unknown>}
+ */
+function buildCompanyVisitYearExprMatch(placementYear = COMPANY_VISIT_YEAR) {
+  const year = normalizeCompanyDetailYear(placementYear);
+  return {
+    $expr: {
+      $eq: [{ $ifNull: ["$year", COMPANY_VISIT_YEAR] }, year],
+    },
+  };
+}
+
+/**
+ * Match company visit rows by company + effective year, tolerating string `companyId`
+ * and missing `year` from external writers like n8n.
+ * @param {string|import("mongoose").Types.ObjectId} companyId
+ * @param {number} [placementYear]
+ * @returns {Record<string, unknown>|null}
+ */
+function buildCompanyVisitCompanyYearMatch(
+  companyId,
+  placementYear = COMPANY_VISIT_YEAR
+) {
+  const companyMatch = buildCompanyVisitCompanyExprMatch(companyId);
+  if (!companyMatch) return null;
+  return {
+    $and: [companyMatch, buildCompanyVisitYearExprMatch(placementYear)],
+  };
+}
+
+/**
  * Same as legacy GET /:id — roles[].ctc Map → plain object for JSON.
  * @param {Record<string, unknown>} legacy
  */
@@ -149,6 +198,37 @@ function pickPrimaryVisitForListing(visits, placementYearRaw = null) {
 }
 
 /**
+ * @param {Record<string, unknown>[]|undefined} visits
+ * @returns {{ 2026: number, 2027: number }}
+ */
+function buildTotalGotInByYearFromVisits(visits) {
+  const out = { 2026: 0, 2027: 0 };
+  if (!Array.isArray(visits) || visits.length === 0) return out;
+
+  for (const year of COMPANY_DETAIL_VISIT_YEARS) {
+    const perYear = visits
+      .filter((v) => Number(v?.year) === year)
+      .sort((a, b) => {
+        const ma = a?.migratedAt ? new Date(a.migratedAt).getTime() : 0;
+        const mb = b?.migratedAt ? new Date(b.migratedAt).getTime() : 0;
+        if (ma !== mb) return mb - ma;
+        const ida = a?._id ? String(a._id) : "";
+        const idb = b?._id ? String(b._id) : "";
+        return idb.localeCompare(ida);
+      });
+    const latest = perYear[0];
+    out[year] = Number(latest?.totalGotIn) || 0;
+  }
+
+  return out;
+}
+
+/**
+ * Placement-card classification should follow the selected year's primary approved visit,
+ * not any historical approved visit for the same company.
+ * @param {Record<string, unknown>|null|undefined} visit
+ */
+/**
  * @param {Record<string, unknown>} staticDoc
  * @param {Record<string, unknown>|null|undefined} visitDoc
  * @returns {Record<string, unknown>}
@@ -192,7 +272,9 @@ export async function findAnyLatestVisitForCompanyYear(
   companyId,
   year = COMPANY_VISIT_YEAR
 ) {
-  const one = await CompanyVisit.find({ companyId, year })
+  const match = buildCompanyVisitCompanyYearMatch(companyId, year);
+  if (!match) return null;
+  const one = await CompanyVisit.find(match)
     .sort({ migratedAt: -1, _id: -1 })
     .limit(1)
     .lean();
@@ -205,10 +287,11 @@ export async function findAnyLatestVisitForCompanyYear(
  * @param {number} [year]
  */
 export async function findLatestVisitForCompany(companyId, year = COMPANY_VISIT_YEAR) {
+  const match = buildCompanyVisitCompanyYearMatch(companyId, year);
+  if (!match) return null;
   const one = await CompanyVisit.find({
-    companyId,
-    year,
     status: "approved",
+    ...match,
   })
     .sort({ migratedAt: -1, _id: -1 })
     .limit(1)
@@ -270,9 +353,15 @@ export async function getCompanyDetailLegacyMergedById(
   if (!staticRow) {
     return { merged: null, visit: null, staticRow: null };
   }
+  const visitsByCompany = await fetchApprovedVisitsForDetailYearsByCompany([_id]);
+  const allApprovedVisits = visitsByCompany.get(String(_id)) ?? [];
+  const totalGotInByYear = buildTotalGotInByYearFromVisits(allApprovedVisits);
   const visitApproved = await findLatestVisitForCompany(_id, placementYear);
   if (visitApproved) {
-    const merged = mergeToLegacyShape(staticRow, visitApproved);
+    const merged = {
+      ...mergeToLegacyShape(staticRow, visitApproved),
+      totalGotInByYear,
+    };
     return { merged, visit: visitApproved, staticRow };
   }
   // No approved visit for this year: if any visit exists for that year (e.g. pending), match old API — 404
@@ -281,7 +370,10 @@ export async function getCompanyDetailLegacyMergedById(
     return { merged: null, visit: null, staticRow: null };
   }
   // No visit row for this year — legacy fallback: static only
-  const merged = mergeToLegacyShape(staticRow, null);
+  const merged = {
+    ...mergeToLegacyShape(staticRow, null),
+    totalGotInByYear,
+  };
   return { merged, visit: null, staticRow };
 }
 
@@ -323,6 +415,7 @@ export async function listApprovedCompaniesLegacyMerged(
     const staticRow = row.c;
     if (!staticRow) continue;
     const allVisits = visitsByCompany.get(String(row._id)) ?? [];
+    const totalGotInByYear = buildTotalGotInByYearFromVisits(allVisits);
     const visit = pickPrimaryVisitForListing(allVisits, placementYear);
     if (!visit) continue;
     const merged = mergeToLegacyShape(staticRow, visit);
@@ -340,6 +433,7 @@ export async function listApprovedCompaniesLegacyMerged(
     const summerPref = getSummerPlacementPrefFromVisits(allVisits);
     list.push({
       ...merged,
+      totalGotInByYear,
       category: catMeta.category,
       totalCtcRupees: catMeta.totalCtcRupees,
       placementAnyYearPpoOnCampus,
@@ -406,6 +500,7 @@ async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
 
     const primaryVisit = {
       type: minimal.type,
+      year: primary.year,
       offCampus: minimal.offCampus,
       roles: minimal.roles,
     };
@@ -489,7 +584,8 @@ export async function ensureAdminVisitForYear(
   const cid = toObjectId(companyId);
   if (!cid) return null;
   const year = normalizeCompanyDetailYear(placementYear);
-  const existing = await CompanyVisit.findOne({ companyId: cid, year });
+  const match = buildCompanyVisitCompanyYearMatch(cid, year);
+  const existing = match ? await CompanyVisit.findOne(match) : null;
   if (existing) return existing;
   return CompanyVisit.create({
     companyId: cid,
@@ -499,28 +595,60 @@ export async function ensureAdminVisitForYear(
 }
 
 /**
- * Paginated admin company list from `companies` + `company_visits` (2026). When `status` is set, filters by visit status.
- * @param {{ status?: string, skip: number, limit: number }} opts
+ * Paginated admin company list from `companies` + `company_visits`.
+ * When `status` is set, filters by visit status and optionally by visit year.
+ * `placementYear = null` means "all supported placement years".
+ * @param {{ status?: string, skip: number, limit: number, placementYear?: number|null|string }} opts
  * @returns {Promise<{ total: number, items: Record<string, unknown>[] }>}
  */
-export async function listAdminPaginatedCompaniesFromSplit({ status, skip, limit }) {
+export async function listAdminPaginatedCompaniesFromSplit({
+  status,
+  skip,
+  limit,
+  placementYear = COMPANY_VISIT_YEAR,
+}) {
+  const useAllYears =
+    placementYear == null ||
+    placementYear === "" ||
+    String(placementYear).toLowerCase() === "all";
+  const year = useAllYears ? null : normalizeCompanyDetailYear(placementYear);
   if (status) {
-    const match = { year: COMPANY_VISIT_YEAR, status: String(status) };
     const pipeline = [
-      { $match: match },
+      {
+        $addFields: {
+          companyIdForJoin: {
+            $convert: { input: "$companyId", to: "objectId", onError: null, onNull: null },
+          },
+          effectiveYear: { $ifNull: ["$year", COMPANY_VISIT_YEAR] },
+        },
+      },
+      {
+        $match: {
+          status: String(status),
+          companyIdForJoin: { $ne: null },
+          effectiveYear:
+            year == null ? { $in: [...COMPANY_DETAIL_VISIT_YEARS] } : year,
+        },
+      },
       { $sort: { migratedAt: -1, _id: -1 } },
-      { $group: { _id: "$companyId", visit: { $first: "$$ROOT" } } },
+      {
+        $group: {
+          _id: { companyId: "$companyIdForJoin", year: "$effectiveYear" },
+          visit: { $first: "$$ROOT" },
+        },
+      },
+      { $addFields: { companyIdForJoin: "$_id.companyId", visitYear: "$_id.year" } },
       {
         $lookup: {
           from: "companies",
-          localField: "_id",
+          localField: "companyIdForJoin",
           foreignField: "_id",
           as: "s",
         },
       },
       { $unwind: { path: "$s", preserveNullAndEmptyArrays: false } },
       { $addFields: { _sort: "$s.createdAt" } },
-      { $sort: { _sort: -1, _id: -1 } },
+      { $sort: { visitYear: -1, _sort: -1, companyIdForJoin: -1 } },
       {
         $facet: {
           totalCount: [{ $count: "n" }],
@@ -532,7 +660,10 @@ export async function listAdminPaginatedCompaniesFromSplit({ status, skip, limit
     const facet = agg[0] || {};
     const total = facet.totalCount?.[0]?.n ?? 0;
     const page = facet.page || [];
-    const items = page.map((row) => mergeToLegacyShape(row.s, row.visit));
+    const items = page.map((row) => ({
+      ...mergeToLegacyShape(row.s, row.visit),
+      placementYear: Number(row.visitYear) || null,
+    }));
     return { total, items };
   }
   const total = await CompanyStatic.countDocuments({});
@@ -543,8 +674,14 @@ export async function listAdminPaginatedCompaniesFromSplit({ status, skip, limit
     .lean();
   const items = [];
   for (const s of statics) {
-    const v = await findAnyLatestVisitForCompanyYear(/** @type {import("mongoose").Types.ObjectId} */ (s._id));
-    items.push(mergeToLegacyShape(s, v));
+    const v = await findAnyLatestVisitForCompanyYear(
+      /** @type {import("mongoose").Types.ObjectId} */ (s._id),
+      year == null ? COMPANY_VISIT_YEAR : year
+    );
+    items.push({
+      ...mergeToLegacyShape(s, v),
+      placementYear: Number(v?.year ?? (year == null ? COMPANY_VISIT_YEAR : year)) || null,
+    });
   }
   return { total, items };
 }
@@ -557,10 +694,48 @@ export async function listAdminPaginatedCompaniesFromSplit({ status, skip, limit
 export async function deleteSplitCompany(companyId) {
   const cid = toObjectId(companyId);
   if (!cid) return { ok: false };
-  await CompanyVisit.deleteMany({ companyId: cid });
+  const visitMatch = buildCompanyVisitCompanyExprMatch(cid);
+  if (!visitMatch) return { ok: false };
+  await CompanyVisit.deleteMany(visitMatch);
   await CompanyStatic.deleteOne({ _id: cid });
   await invalidateCompanyDetailCache(cid);
   return { ok: true };
+}
+
+/**
+ * Delete one `company_visits` row for `placementYear`. If no visits remain for the company,
+ * also delete the `companies` row so orphan static rows are not left behind.
+ * @param {string|import("mongoose").Types.ObjectId} companyId
+ * @param {number} [placementYear]
+ * @returns {Promise<{ ok: boolean, deletedVisit: boolean, deletedCompany: boolean }>}
+ */
+export async function deleteCompanyVisitForYear(
+  companyId,
+  placementYear = COMPANY_VISIT_YEAR
+) {
+  const cid = toObjectId(companyId);
+  if (!cid) return { ok: false, deletedVisit: false, deletedCompany: false };
+  const match = buildCompanyVisitCompanyYearMatch(cid, placementYear);
+  if (!match) return { ok: false, deletedVisit: false, deletedCompany: false };
+
+  const visitDelete = await CompanyVisit.deleteOne(match);
+  const deletedVisit = (visitDelete?.deletedCount ?? 0) > 0;
+  if (!deletedVisit) {
+    return { ok: false, deletedVisit: false, deletedCompany: false };
+  }
+
+  const anyYearMatch = buildCompanyVisitCompanyExprMatch(cid);
+  const remainingVisits = anyYearMatch
+    ? await CompanyVisit.countDocuments(anyYearMatch)
+    : 0;
+  let deletedCompany = false;
+  if (remainingVisits === 0) {
+    const staticDelete = await CompanyStatic.deleteOne({ _id: cid });
+    deletedCompany = (staticDelete?.deletedCount ?? 0) > 0;
+  }
+
+  await invalidateCompanyDetailCache(cid);
+  return { ok: true, deletedVisit: true, deletedCompany };
 }
 
 /**
@@ -580,14 +755,17 @@ export async function adjustVisitTotalGotIn(
   const d = Number(delta);
   if (Number.isNaN(d)) return null;
   const year = normalizeCompanyDetailYear(placementYear);
+  const match = buildCompanyVisitCompanyYearMatch(cid, year);
+  if (!match) return null;
   const doc = await CompanyVisit.findOneAndUpdate(
-    { companyId: cid, year },
+    match,
     [
       {
         $set: {
           totalGotIn: {
             $max: [0, { $add: [{ $ifNull: ["$totalGotIn", 0] }, d] }],
           },
+          year,
           migratedAt: new Date(),
         },
       },
@@ -821,13 +999,83 @@ export async function updateCompanyVisit(
   if (Object.keys($set).length === 0) {
     return { acknowledged: true, modifiedCount: 0, upsertedCount: 0, matchedCount: 0 };
   }
-  $set.migratedAt = new Date();
   const year = normalizeCompanyDetailYear(placementYear);
+  const match = buildCompanyVisitCompanyYearMatch(cid, year);
+  if (!match) {
+    return { acknowledged: true, modifiedCount: 0, upsertedCount: 0, matchedCount: 0 };
+  }
+  $set.migratedAt = new Date();
+  $set.year = year;
   const result = await CompanyVisit.updateMany(
-    { companyId: cid, year },
+    match,
     { $set: $set }
   );
   if (result.modifiedCount > 0) {
+    await invalidateCompanyDetailCache(cid);
+  }
+  return result;
+}
+
+/**
+ * Normalize one company visit row during admin approval so externally inserted rows
+ * (e.g. n8n) are brought into canonical shape without a separate DB migration.
+ * This explicitly:
+ * - stores `companyId` as an ObjectId
+ * - stores `year` on the row
+ * - marks status as approved
+ * - backfills all modeled `company_visits` fields when they are missing
+ * @param {string|import("mongoose").Types.ObjectId} companyId
+ * @param {number} [placementYear]
+ * @param {Date} [approvedAt]
+ * @returns {Promise<import("mongodb").UpdateResult>}
+ */
+export async function approveAndNormalizeCompanyVisit(
+  companyId,
+  placementYear = COMPANY_VISIT_YEAR,
+  approvedAt = new Date()
+) {
+  const cid = toObjectId(companyId);
+  if (!cid) {
+    return { acknowledged: true, modifiedCount: 0, upsertedCount: 0, matchedCount: 0 };
+  }
+  const year = normalizeCompanyDetailYear(placementYear);
+  const match = buildCompanyVisitCompanyYearMatch(cid, year);
+  if (!match) {
+    return { acknowledged: true, modifiedCount: 0, upsertedCount: 0, matchedCount: 0 };
+  }
+
+  const result = await CompanyVisit.updateMany(match, [
+    {
+      $set: {
+        companyId: cid,
+        year,
+        type: { $ifNull: ["$type", ""] },
+        roles: { $ifNull: ["$roles", []] },
+        onlineQuestions: { $ifNull: ["$onlineQuestions", []] },
+        onlineQuestions_solution: { $ifNull: ["$onlineQuestions_solution", []] },
+        interviewQuestions: { $ifNull: ["$interviewQuestions", []] },
+        interviewQuestions_solution: { $ifNull: ["$interviewQuestions_solution", []] },
+        interviewProcess: { $ifNull: ["$interviewProcess", []] },
+        eligibility: { $ifNull: ["$eligibility", ""] },
+        date_of_visit: { $ifNull: ["$date_of_visit", ""] },
+        messageDate: { $ifNull: ["$messageDate", null] },
+        cluster: { $ifNull: ["$cluster", ""] },
+        count: { $ifNull: ["$count", ""] },
+        selectedCandidates: { $ifNull: ["$selectedCandidates", []] },
+        status: "approved",
+        totalClearedOA: { $ifNull: ["$totalClearedOA", 0] },
+        totalGotIn: { $ifNull: ["$totalGotIn", 0] },
+        totalStudentsApplied: { $ifNull: ["$totalStudentsApplied", 0] },
+        views: { $ifNull: ["$views", 0] },
+        internshipExperience: { $ifNull: ["$internshipExperience", []] },
+        mcqQuestions: { $ifNull: ["$mcqQuestions", []] },
+        approvedAt,
+        migratedAt: new Date(),
+      },
+    },
+  ]);
+
+  if (result.matchedCount > 0) {
     await invalidateCompanyDetailCache(cid);
   }
   return result;

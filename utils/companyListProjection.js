@@ -45,6 +45,7 @@ export function projectCompanyListResponse(c) {
     focusTags: c.focusTags,
     helpfulCount: c.helpfulCount,
     totalGotIn: c.totalGotIn,
+    totalGotInByYear: c.totalGotInByYear,
     category: c.category,
     totalCtcRupees: c.totalCtcRupees,
     roles,

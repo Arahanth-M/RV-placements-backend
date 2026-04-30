@@ -107,6 +107,11 @@ if (process.env.NODE_ENV !== "test") {
     if (req.path.startsWith("/api/interview")) {
       return next();
     }
+    // Helpful-status batch is UI-polled and auth-protected; avoid tripping the
+    // global limiter and surfacing it as a misleading browser "CORS" error.
+    if (req.path === "/api/companies/helpful/status/batch") {
+      return next();
+    }
     return globalLimiter(req, res, next);
   });
 }
