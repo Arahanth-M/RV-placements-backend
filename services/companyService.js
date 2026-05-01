@@ -35,6 +35,22 @@ export function normalizeCompanyDetailYear(raw) {
   return n;
 }
 
+/**
+ * Canonical `type` / `cluster` for `company_visits` composite uniqueness (empty string = default slot).
+ * @param {unknown} type
+ * @param {unknown} cluster
+ * @returns {{ type: string, cluster: string }}
+ */
+export function normalizeVisitKeyParts(type, cluster) {
+  return {
+    type: type == null || String(type).trim() === "" ? "" : String(type).trim(),
+    cluster:
+      cluster == null || String(cluster).trim() === ""
+        ? ""
+        : String(cluster).trim(),
+  };
+}
+
 /** Dropped from API responses; internal split-schema bookkeeping only. */
 const INTERNAL_STRIP = ["sourceCopyId", "nameKey", "migratedAt"];
 
@@ -78,6 +94,7 @@ const DYNAMIC_KEY_SET = new Set([
   "ppoConversionConverted",
   "ppoConversionAcceptanceRate",
   "ppoConversionType",
+  "ppoConversionNotApplicable",
   "ppoBranchStats",
   "interview_difficulty_level",
   "difficulty_ratings",
@@ -166,6 +183,32 @@ function buildCompanyVisitCompanyYearMatch(
   return {
     $and: [companyMatch, buildCompanyVisitYearExprMatch(placementYear)],
   };
+}
+
+/**
+ * Single visit row to mutate for (companyId, year): explicit hint, else latest by migratedAt/_id.
+ * @param {import("mongoose").Types.ObjectId} cid
+ * @param {number} placementYear
+ * @param {Record<string, unknown>|null} [hintVisitDoc]
+ */
+async function resolveVisitAnchorDoc(cid, placementYear, hintVisitDoc = null) {
+  const year = normalizeCompanyDetailYear(placementYear);
+  if (hintVisitDoc && hintVisitDoc._id) {
+    const byHint = await CompanyVisit.findOne({
+      _id: hintVisitDoc._id,
+      companyId: cid,
+    })
+      .select("_id")
+      .lean();
+    if (byHint) return byHint;
+  }
+  const match = buildCompanyVisitCompanyYearMatch(cid, year);
+  if (!match) return null;
+  const latest = await CompanyVisit.findOne(match)
+    .sort({ migratedAt: -1, _id: -1 })
+    .select("_id")
+    .lean();
+  return latest ?? null;
 }
 
 /**
@@ -641,11 +684,16 @@ export async function ensureAdminVisitForYear(
   if (!cid) return null;
   const year = normalizeCompanyDetailYear(placementYear);
   const match = buildCompanyVisitCompanyYearMatch(cid, year);
-  const existing = match ? await CompanyVisit.findOne(match) : null;
+  const existing = match
+    ? await CompanyVisit.findOne(match).sort({ migratedAt: -1, _id: -1 })
+    : null;
   if (existing) return existing;
+  const { type, cluster } = normalizeVisitKeyParts("", "");
   return CompanyVisit.create({
     companyId: cid,
     year,
+    type,
+    cluster,
     migratedAt: new Date(),
   });
 }
@@ -774,7 +822,15 @@ export async function deleteCompanyVisitForYear(
   const match = buildCompanyVisitCompanyYearMatch(cid, placementYear);
   if (!match) return { ok: false, deletedVisit: false, deletedCompany: false };
 
-  const visitDelete = await CompanyVisit.deleteOne(match);
+  const visitToDelete = await CompanyVisit.findOne(match)
+    .sort({ migratedAt: -1, _id: -1 })
+    .select("_id")
+    .lean();
+  if (!visitToDelete?._id) {
+    return { ok: false, deletedVisit: false, deletedCompany: false };
+  }
+
+  const visitDelete = await CompanyVisit.deleteOne({ _id: visitToDelete._id });
   const deletedVisit = (visitDelete?.deletedCount ?? 0) > 0;
   if (!deletedVisit) {
     return { ok: false, deletedVisit: false, deletedCompany: false };
@@ -811,10 +867,10 @@ export async function adjustVisitTotalGotIn(
   const d = Number(delta);
   if (Number.isNaN(d)) return null;
   const year = normalizeCompanyDetailYear(placementYear);
-  const match = buildCompanyVisitCompanyYearMatch(cid, year);
-  if (!match) return null;
-  const doc = await CompanyVisit.findOneAndUpdate(
-    match,
+  const anchor = await resolveVisitAnchorDoc(cid, placementYear, null);
+  if (!anchor?._id) return null;
+  const doc = await CompanyVisit.findByIdAndUpdate(
+    anchor._id,
     [
       {
         $set: {
@@ -964,10 +1020,13 @@ export async function createCompanyWithVisit(data) {
   const company = await CompanyStatic.create(staticDoc);
   const newCompanyId = company._id;
 
+  const keyParts = normalizeVisitKeyParts(d0.type, d0.cluster);
   const visitDoc = omitUndefinedWrite({
     ...d0,
     companyId: newCompanyId,
     year: COMPANY_VISIT_YEAR,
+    type: keyParts.type,
+    cluster: keyParts.cluster,
     migratedAt: now,
   });
 
@@ -986,17 +1045,19 @@ export async function createCompanyWithVisit(data) {
 }
 
 /**
- * Update all `company_visits` for `companyId` + `placementYear` (same filter for every matching row).
+ * Update one anchored `company_visits` row for `companyId` + `placementYear`.
  * Only dynamic fields from `data` are applied. Does not touch `companies`.
  * @param {string|import("mongoose").Types.ObjectId} companyId
  * @param {Record<string, unknown>} data
  * @param {number} [placementYear]
+ * @param {Record<string, unknown>|null} [hintVisitDoc]
  * @returns {Promise<import("mongodb").UpdateResult>}
  */
 export async function updateCompanyVisit(
   companyId,
   data,
-  placementYear = COMPANY_VISIT_YEAR
+  placementYear = COMPANY_VISIT_YEAR,
+  hintVisitDoc = null
 ) {
   const cid = toObjectId(companyId);
   if (!cid) {
@@ -1007,16 +1068,13 @@ export async function updateCompanyVisit(
     return { acknowledged: true, modifiedCount: 0, upsertedCount: 0, matchedCount: 0 };
   }
   const year = normalizeCompanyDetailYear(placementYear);
-  const match = buildCompanyVisitCompanyYearMatch(cid, year);
-  if (!match) {
-    return { acknowledged: true, modifiedCount: 0, upsertedCount: 0, matchedCount: 0 };
-  }
   $set.migratedAt = new Date();
   $set.year = year;
-  const result = await CompanyVisit.updateMany(
-    match,
-    { $set: $set }
-  );
+  const anchor = await resolveVisitAnchorDoc(cid, placementYear, hintVisitDoc);
+  if (!anchor?._id) {
+    return { acknowledged: true, modifiedCount: 0, upsertedCount: 0, matchedCount: 0 };
+  }
+  const result = await CompanyVisit.updateOne({ _id: anchor._id }, { $set });
   if (result.modifiedCount > 0) {
     await invalidateCompanyDetailCache(cid);
   }
@@ -1123,7 +1181,9 @@ export async function persistMergedCompany(
   placementYear = COMPANY_VISIT_YEAR
 ) {
   await updateCompanyStatic(companyId, mergedPayload);
-  await updateCompanyVisit(companyId, mergedPayload, placementYear);
+  await ensureAdminVisitForYear(companyId, placementYear);
+  const { visit } = await getCompanyMergedForAdminById(companyId, placementYear);
+  await updateCompanyVisit(companyId, mergedPayload, placementYear, visit);
 }
 
 /**

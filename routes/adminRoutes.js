@@ -1212,6 +1212,7 @@ adminRouter.put(
       ppoConversionConverted,
       ppoConversionAcceptanceRate,
       ppoConversionType,
+      ppoConversionNotApplicable,
       ppoBranchStats,
     } = req.body || {};
     const payload = {};
@@ -1247,6 +1248,9 @@ adminRouter.put(
     if (ppoConversionType !== undefined) {
       payload.ppoConversionType = sanitizeText(ppoConversionType);
     }
+    if (ppoConversionNotApplicable !== undefined) {
+      payload.ppoConversionNotApplicable = Boolean(ppoConversionNotApplicable);
+    }
     if (ppoBranchStats !== undefined) {
       if (!Array.isArray(ppoBranchStats)) {
         return res.status(400).json({ error: "ppoBranchStats must be an array" });
@@ -1264,18 +1268,34 @@ adminRouter.put(
         seen.add(code);
         const gotIn = Number.parseInt(String(row?.gotIn ?? 0), 10);
         const converted = Number.parseInt(String(row?.converted ?? 0), 10);
+        const convertedNotApplicable = Boolean(row?.convertedNotApplicable);
         if (Number.isNaN(gotIn) || gotIn < 0 || Number.isNaN(converted) || converted < 0) {
           return res.status(400).json({ error: `Invalid stats for branch: ${code}` });
         }
-        normalized.push({ branchCode: code, gotIn, converted });
+        normalized.push({
+          branchCode: code,
+          gotIn,
+          converted: convertedNotApplicable ? 0 : converted,
+          convertedNotApplicable,
+        });
       }
       payload.ppoBranchStats = normalized;
       const gotInTotal = normalized.reduce((sum, item) => sum + (item.gotIn || 0), 0);
-      const convertedTotal = normalized.reduce((sum, item) => sum + (item.converted || 0), 0);
+      const gotInTotalWithKnownConversion = normalized.reduce(
+        (sum, item) => sum + (item.convertedNotApplicable ? 0 : (item.gotIn || 0)),
+        0
+      );
+      const convertedTotal = normalized.reduce(
+        (sum, item) => sum + (item.convertedNotApplicable ? 0 : (item.converted || 0)),
+        0
+      );
       payload.ppoConversionGotIn = gotInTotal;
       payload.ppoConversionConverted = convertedTotal;
+      payload.ppoConversionNotApplicable = normalized.some((item) => item.convertedNotApplicable);
       payload.ppoConversionAcceptanceRate =
-        gotInTotal > 0 ? Number(((convertedTotal / gotInTotal) * 100).toFixed(2)) : 0;
+        gotInTotalWithKnownConversion > 0
+          ? Number(((convertedTotal / gotInTotalWithKnownConversion) * 100).toFixed(2))
+          : 0;
     }
 
     const hasGotIn = payload.ppoConversionGotIn !== undefined;
@@ -1303,7 +1323,8 @@ adminRouter.put(
       payload.ppoConversionAcceptanceRate = Number(n.toFixed(2));
     }
     await ensureAdminVisitForYear(req.params.id, y);
-    await updateCompanyVisit(req.params.id, payload, y);
+    const statsVisitCtx = await getCompanyMergedForAdminById(req.params.id, y);
+    await updateCompanyVisit(req.params.id, payload, y, statsVisitCtx?.visit);
     const out = (await getCompanyMergedForAdminById(req.params.id, y))?.merged;
     res.json({ message: "Stats updated", company: out });
   } catch (error) {
@@ -1400,7 +1421,8 @@ adminRouter.put(
       return res.status(404).json({ error: "Company not found" });
     }
     await ensureAdminVisitForYear(req.params.id, y);
-    await updateCompanyVisit(req.params.id, { roles: normalizedRoles }, y);
+    const rolesVisitCtx = await getCompanyMergedForAdminById(req.params.id, y);
+    await updateCompanyVisit(req.params.id, { roles: normalizedRoles }, y, rolesVisitCtx?.visit);
     const loaded = await getCompanyMergedForAdminById(req.params.id, y);
     const rolesAfterUpdate = loaded?.merged?.roles || [];
     const rolesResponse = (rolesAfterUpdate || []).map((role) => ({

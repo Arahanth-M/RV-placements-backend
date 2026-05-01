@@ -9,7 +9,8 @@ const companyVisitSchema = new mongoose.Schema(
       required: true,
     },
     year: { type: Number, required: true },
-    type: { type: String, trim: true },
+    /** Part of composite uniqueness with companyId + year + cluster (empty string when unset). */
+    type: { type: String, trim: true, default: "" },
     roles: [{ type: mongoose.Schema.Types.Mixed }],
     onlineQuestions: [{ type: String, trim: true }],
     onlineQuestions_solution: [{ type: String, trim: true }],
@@ -20,7 +21,8 @@ const companyVisitSchema = new mongoose.Schema(
     date_of_visit: { type: String, trim: true },
     /** Optional; e.g. from `companies1_copy` / backfill. Type preserved (Date, string, etc.) */
     messageDate: { type: mongoose.Schema.Types.Mixed },
-    cluster: { type: String, trim: true },
+    /** Part of composite uniqueness with companyId + year + type (empty string when unset). */
+    cluster: { type: String, trim: true, default: "" },
     count: { type: String, trim: true },
     selectedCandidates: [{ type: mongoose.Schema.Types.Mixed }],
     status: { type: String, trim: true },
@@ -46,7 +48,10 @@ const companyVisitSchema = new mongoose.Schema(
 );
 
 companyVisitSchema.index({ year: 1 });
-companyVisitSchema.index({ companyId: 1, year: 1 }, { unique: true });
+companyVisitSchema.index(
+  { companyId: 1, year: 1, type: 1, cluster: 1 },
+  { unique: true }
+);
 
 companyVisitSchema.pre("deleteOne", { document: false, query: true }, async function () {
   const f = this.getFilter() || {};

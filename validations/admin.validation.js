@@ -31,6 +31,7 @@ export const adminCompanyStatsSchema = Joi.object({
     .try(Joi.number().min(0), Joi.string().trim().pattern(/^\d+(\.\d+)?$/))
     .optional(),
   ppoConversionType: Joi.string().max(200).allow("").optional(),
+  ppoConversionNotApplicable: Joi.boolean().optional(),
   ppoBranchStats: Joi.array()
     .items(
       Joi.object({
@@ -41,6 +42,7 @@ export const adminCompanyStatsSchema = Joi.object({
           .required(),
         gotIn: nonNegIntField.required(),
         converted: nonNegIntField.required(),
+        convertedNotApplicable: Joi.boolean().optional(),
       }).unknown(false)
     )
     .max(6)

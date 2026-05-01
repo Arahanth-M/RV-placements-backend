@@ -49,11 +49,13 @@ export function projectCompanyListResponse(c) {
     ppoConversionConverted: Number(c.ppoConversionConverted) || 0,
     ppoConversionAcceptanceRate: Number(c.ppoConversionAcceptanceRate) || 0,
     ppoConversionType: c.ppoConversionType || "",
+    ppoConversionNotApplicable: Boolean(c.ppoConversionNotApplicable),
     ppoBranchStats: Array.isArray(c.ppoBranchStats)
       ? c.ppoBranchStats.map((item) => ({
           branchCode: String(item?.branchCode || "").toLowerCase(),
           gotIn: Number(item?.gotIn) || 0,
           converted: Number(item?.converted) || 0,
+          convertedNotApplicable: Boolean(item?.convertedNotApplicable),
         }))
       : [],
     totalGotInByYear: c.totalGotInByYear,
