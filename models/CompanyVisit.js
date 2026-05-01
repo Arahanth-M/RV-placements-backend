@@ -27,6 +27,17 @@ const companyVisitSchema = new mongoose.Schema(
     totalClearedOA: { type: Number, default: 0, min: 0 },
     totalGotIn: { type: Number, default: 0, min: 0 },
     totalStudentsApplied: { type: Number, default: 0, min: 0 },
+    ppoConversionGotIn: { type: Number, default: 0, min: 0 },
+    ppoConversionConverted: { type: Number, default: 0, min: 0 },
+    ppoConversionAcceptanceRate: { type: Number, default: 0, min: 0 },
+    ppoConversionType: { type: String, trim: true },
+    ppoBranchStats: [
+      {
+        branchCode: { type: String, trim: true, lowercase: true },
+        gotIn: { type: Number, default: 0, min: 0 },
+        converted: { type: Number, default: 0, min: 0 },
+      },
+    ],
     views: { type: Number, default: 0, min: 0 },
     internshipExperience: [{ type: String, trim: true }],
     mcqQuestions: [{ type: mongoose.Schema.Types.Mixed }],

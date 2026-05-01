@@ -38,6 +38,60 @@ export function normalizeCompanyDetailYear(raw) {
 /** Dropped from API responses; internal split-schema bookkeeping only. */
 const INTERNAL_STRIP = ["sourceCopyId", "nameKey", "migratedAt"];
 
+/** Stored on `companies` (CompanyStatic); visit overlay must not replace these keys. */
+const STATIC_STORAGE_KEY_SET = new Set([
+  "name",
+  "logo",
+  "business_model",
+  "must_do_topics",
+  "about",
+  "prev_coding_ques",
+  "helpfulCount",
+  "helpfulUsers",
+  "nameKey",
+  "submittedBy",
+]);
+
+/** Legacy / API keys → `companies` field names (no value coercion). */
+const LEGACY_TO_STATIC = {
+  Must_Do_Topics: "must_do_topics",
+  "About The Company": "about",
+};
+
+const DYNAMIC_KEY_SET = new Set([
+  "type",
+  "eligibility",
+  "roles",
+  "onlineQuestions",
+  "onlineQuestions_solution",
+  "interviewQuestions",
+  "interviewQuestions_solution",
+  "interviewProcess",
+  "selectedCandidates",
+  "mcqQuestions",
+  "internshipExperience",
+  "count",
+  "totalStudentsApplied",
+  "totalClearedOA",
+  "totalGotIn",
+  "ppoConversionGotIn",
+  "ppoConversionConverted",
+  "ppoConversionAcceptanceRate",
+  "ppoConversionType",
+  "ppoBranchStats",
+  "interview_difficulty_level",
+  "difficulty_ratings",
+  "difficulty_rating_count",
+  "date_of_visit",
+  "messageDate",
+  "cluster",
+  "views",
+  "status",
+  "offCampus",
+  "approvedAt",
+  "jobDescription",
+]);
+
 /**
  * @param {Record<string, unknown>} doc
  * @param {string[]} [extra]
@@ -254,6 +308,8 @@ export function mergeToLegacyShape(staticDoc, visitDoc) {
     const skip = new Set(["_id", "companyId", "year", "migratedAt", "sourceCopyId"]);
     for (const [key, val] of Object.entries(visitDoc)) {
       if (skip.has(key)) continue;
+      if (STATIC_STORAGE_KEY_SET.has(key)) continue;
+      if (Object.prototype.hasOwnProperty.call(LEGACY_TO_STATIC, key)) continue;
       if (val !== undefined) {
         out[key] = val;
       }
@@ -779,55 +835,6 @@ export async function adjustVisitTotalGotIn(
 // ---------------------------------------------------------------------------
 // WRITE operations (companies + company_visits only — never companies1)
 // ---------------------------------------------------------------------------
-
-/** Stored on `companies` (and accepted by static updates). */
-const STATIC_STORAGE_KEY_SET = new Set([
-  "name",
-  "logo",
-  "business_model",
-  "must_do_topics",
-  "about",
-  "prev_coding_ques",
-  "helpfulCount",
-  "helpfulUsers",
-  "nameKey",
-  "submittedBy",
-]);
-
-/** Legacy / API keys → `companies` field names (no value coercion). */
-const LEGACY_TO_STATIC = {
-  Must_Do_Topics: "must_do_topics",
-  "About The Company": "about",
-};
-
-const DYNAMIC_KEY_SET = new Set([
-  "type",
-  "eligibility",
-  "roles",
-  "onlineQuestions",
-  "onlineQuestions_solution",
-  "interviewQuestions",
-  "interviewQuestions_solution",
-  "interviewProcess",
-  "selectedCandidates",
-  "mcqQuestions",
-  "internshipExperience",
-  "count",
-  "totalStudentsApplied",
-  "totalClearedOA",
-  "totalGotIn",
-  "interview_difficulty_level",
-  "difficulty_ratings",
-  "difficulty_rating_count",
-  "date_of_visit",
-  "messageDate",
-  "cluster",
-  "views",
-  "status",
-  "offCampus",
-  "approvedAt",
-  "jobDescription",
-]);
 
 /**
  * @param {unknown} v

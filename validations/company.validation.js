@@ -65,6 +65,23 @@ const optionalCompanyBody = {
   totalStudentsApplied: Joi.number().integer().min(0),
   totalClearedOA: Joi.number().integer().min(0),
   totalGotIn: Joi.number().integer().min(0),
+  ppoConversionGotIn: Joi.number().integer().min(0),
+  ppoConversionConverted: Joi.number().integer().min(0),
+  ppoConversionAcceptanceRate: Joi.number().min(0),
+  ppoConversionType: t(200).allow(""),
+  ppoBranchStats: Joi.array()
+    .items(
+      Joi.object({
+        branchCode: Joi.string()
+          .trim()
+          .lowercase()
+          .valid("cd", "cy", "ise", "cse", "aiml", "bt")
+          .required(),
+        gotIn: Joi.number().integer().min(0).required(),
+        converted: Joi.number().integer().min(0).required(),
+      }).unknown(false)
+    )
+    .max(6),
 };
 
 export const companyCreateSchema = Joi.object({
