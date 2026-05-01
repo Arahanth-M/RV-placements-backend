@@ -22,7 +22,6 @@ import { profileCacheInvalidateSchema } from "../validations/student.validation.
 import {
   buildLoginEmailFindQuery,
   buildUsnFindQuery,
-  resolveSemanticPrimaryCompany,
 } from "../utils/studentRecordLookup.js";
 
 const router = express.Router();
@@ -182,16 +181,16 @@ router.get("/profile", authJWT, checkBetaAccess, authorize(["student", "admin", 
     const placementCompanies = placementCompanyNames.map((companyName) => ({
       companyName,
     }));
-    const semanticCompany = resolveSemanticPrimaryCompany(studentRecord);
-    const primaryCompanyName =
-      placementCompanyNames[0] ||
-      null;
+    const primaryCompanyName = placementCompanyNames[0] || null;
     const responsePayload = {
+      profileSource: "students_split",
       student: studentRecord,
       placements,
       placementCompanies,
       primaryCompanyName,
       companyId: null,
+      Name: normalizeText(studentRecord?.name) || null,
+      Company: primaryCompanyName,
     };
 
     console.log(

@@ -18,6 +18,11 @@ const placementDataSchema = new mongoose.Schema(
       trim: true,
       required: true,
     },
+    stipend: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     createdBy: {
       type: String,
       trim: true,
