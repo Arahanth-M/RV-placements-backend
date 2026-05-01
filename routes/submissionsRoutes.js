@@ -1,6 +1,5 @@
 import express from "express";
 import Submission from "../models/Submission.js";
-import User from "../models/User.js";
 import authJWT from "../middleware/authJWT.js";
 import checkBetaAccess from "../middleware/checkBetaAccess.js";
 import authorize from "../middleware/authorize.js";
@@ -8,6 +7,7 @@ import validateRequest from "../middleware/validateRequest.js";
 import { submissionInputSchema } from "../validations/submission.validation.js";
 import { messages } from "../config/constants.js";
 import { normalizeCompanyDetailYear } from "../services/companyService.js";
+import { getAuthUserModel } from "../utils/authUserModel.js";
 
 
 const submissionRouter = express.Router();
@@ -17,7 +17,7 @@ submissionRouter.get(
   "/mine",
   authJWT,
   checkBetaAccess,
-  authorize(["student", "admin"]),
+  authorize(["student", "admin", "spc"]),
   async (req, res) => {
     try {
       const email = (req.user?.email || "").trim().toLowerCase();
@@ -58,7 +58,7 @@ submissionRouter.post(
   "/",
   authJWT,
   checkBetaAccess,
-  authorize(["student", "admin"]),
+  authorize(["student", "admin", "spc"]),
   validateRequest(submissionInputSchema),
   async (req, res) => {
   try {
@@ -81,11 +81,12 @@ submissionRouter.post(
         email: req.user.email,
       }
     });
+    const AuthUserModel = getAuthUserModel(req);
     await Promise.all([
       newSubmission.save(),
-      User.updateOne(
+      AuthUserModel.updateOne(
         { _id: req.user._id },
-        { $set: { lastActiveAt: new Date() } }
+        { $set: { lastLoginAt: new Date(), lastActiveAt: new Date() } }
       ),
     ]);
 

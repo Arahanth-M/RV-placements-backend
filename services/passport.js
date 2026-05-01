@@ -1,15 +1,11 @@
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import keys from "../config/keys.js";
-import mongoose from "mongoose";
+import Student from "../models/Student.js";
 import User from "../models/User.js";
-import {
-  urls,
-  BETA_ACCESS_COLLECTION,
-  STUDENT_EMAIL_FIELD,
-} from "../config/constants.js";
+import User1 from "../models/User1.js";
+import { urls } from "../config/constants.js";
 import { sendWelcomeEmailWebhook } from "./webhookService.js";
-import { buildLoginEmailFindQuery } from "../utils/studentRecordLookup.js";
 
 /** Google may expose the avatar on photos[], _json.picture, or legacy profile.picture */
 function pictureFromGoogleProfile(profile) {
@@ -30,14 +26,17 @@ passport.use(
       // Use relative callback URL so it works for localhost, root domain, and www domain.
       callbackURL: urls.GOOGLE_CALLBACK_PATH,
       proxy: true,
+      passReqToCallback: true,
     },
-    async (accessToken, refreshToken, profile, done) => {
+    async (req, accessToken, refreshToken, profile, done) => {
       console.time("auth:total");
       try {
         const primaryEmail = profile?.emails?.[0]?.value || "";
         const normalizedEmail = primaryEmail.trim().toLowerCase();
         const picture = pictureFromGoogleProfile(profile);
         const displayName = profile.displayName?.trim() || "";
+        const flow = req?.cookies?.oauth_flow || "";
+        const isAdminLogin = flow === "admin";
 
         // 1. Basic Email Validation
         if (!normalizedEmail) {
@@ -50,100 +49,103 @@ passport.use(
           return done(null, false, { reason: "domain" });
         }
 
-        // 2. Strict Student/Admin Check
-        const db = mongoose.connection.db;
-        const studentCollection = db.collection(BETA_ACCESS_COLLECTION);
-        const betaLookupPromise = (async () => {
-          console.time("auth:beta_lookup");
-          try {
-            const betaRecord = await studentCollection.findOne(
-              buildLoginEmailFindQuery(normalizedEmail, [STUDENT_EMAIL_FIELD]),
-              { projection: { _id: 1 } }
-            );
-            return betaRecord;
-          } finally {
-            console.timeEnd("auth:beta_lookup");
+        if (isAdminLogin) {
+          const [existingAdminByGoogleId, existingAdminByEmail] = await Promise.all([
+            User.findOne({ userId: profile.id }),
+            User.findOne({ email: normalizedEmail }),
+          ]);
+          const adminUser = existingAdminByGoogleId || existingAdminByEmail;
+
+          if (adminUser) {
+            adminUser.userId = profile.id;
+            adminUser.email = normalizedEmail;
+            if (displayName) adminUser.username = displayName;
+            if (picture) adminUser.picture = picture;
+            adminUser.lastActiveAt = new Date();
+            await adminUser.save();
+            return done(null, adminUser);
           }
-        })();
+
+          const createdAdminUser = await new User({
+            userId: profile.id,
+            username: displayName,
+            email: normalizedEmail,
+            picture,
+            fillForm: false,
+            isBetaListed: true,
+            lastActiveAt: new Date(),
+          }).save();
+
+          return done(null, createdAdminUser);
+        }
 
         console.time("auth:db_parallel");
-        const [studentRecord, existingUser] = await Promise.all([
-          betaLookupPromise,
-          User.findOne({ userId: profile.id }),
+        const [existingUserByGoogleId, existingUserByEmail, studentRecord] = await Promise.all([
+          User1.findOne({ googleId: profile.id }),
+          User1.findOne({ email: normalizedEmail }),
+          Student.findOne({ email: normalizedEmail }).select("_id name email").lean(),
         ]);
         console.timeEnd("auth:db_parallel");
-        const isBetaListed = Boolean(studentRecord);
 
-        // 3. Authenticate or Create User
+        if (!studentRecord) {
+          return done(null, false, { reason: "not_found" });
+        }
+
+        const existingUser = existingUserByGoogleId || existingUserByEmail;
+
         if (existingUser) {
-          const now = new Date();
-          let shouldUpdate = false;
-
-          if (existingUser.email !== normalizedEmail) {
-            existingUser.email = normalizedEmail;
-            shouldUpdate = true;
-          }
-
-          if (existingUser.isBetaListed !== isBetaListed) {
-            existingUser.isBetaListed = isBetaListed;
-            shouldUpdate = true;
-          }
-
-          if (picture && existingUser.picture !== picture) {
-            existingUser.picture = picture;
-            shouldUpdate = true;
-          }
-
-          if (displayName && existingUser.username !== displayName) {
+          existingUser.googleId = profile.id;
+          existingUser.email = normalizedEmail;
+          if (displayName) {
             existingUser.username = displayName;
-            shouldUpdate = true;
+          } else if (!existingUser.username) {
+            existingUser.username = studentRecord?.name || "";
+          }
+          if (picture) {
+            existingUser.profilePicture = picture;
+          }
+          existingUser.lastLoginAt = new Date();
+          if (!existingUser.role) {
+            existingUser.role = "student";
           }
 
-          const lastActiveAtMs = existingUser.lastActiveAt
-            ? new Date(existingUser.lastActiveAt).getTime()
-            : 0;
-          if (!lastActiveAtMs || now.getTime() - lastActiveAtMs >= 5 * 60 * 1000) {
-            existingUser.lastActiveAt = now;
-            shouldUpdate = true;
-          }
-
-          if (shouldUpdate) {
-            console.time("auth:user_update_save");
-            try {
-              await existingUser.save();
-            } finally {
-              console.timeEnd("auth:user_update_save");
-            }
+          console.time("auth:user_update_save");
+          try {
+            await existingUser.save();
+          } finally {
+            console.timeEnd("auth:user_update_save");
           }
 
           return done(null, existingUser);
         }
 
-        // New authorized user - create local account
         console.time("auth:user_create");
         let user;
         try {
-          user = await new User({
-            userId: profile.id,
-            username: profile.displayName,
+          user = await new User1({
+            googleId: profile.id,
+            username: displayName || studentRecord?.name || "",
             email: normalizedEmail,
-            picture,
-            fillForm: false,
-            isBetaListed,
-            lastActiveAt: new Date(),
+            profilePicture: picture,
+            role: "student",
+            lastLoginAt: new Date(),
           }).save();
         } finally {
           console.timeEnd("auth:user_create");
         }
 
-        console.log(`👤 New User Created: ${profile.displayName} (${normalizedEmail})`);
+        console.log(
+          `👤 New User1 Created: ${displayName || studentRecord?.name || "User"} (${normalizedEmail})`
+        );
 
-        // Send welcome email (non-blocking)
-        sendWelcomeEmailWebhook(primaryEmail, profile.displayName).catch((err) => {
+        sendWelcomeEmailWebhook(
+          primaryEmail,
+          displayName || studentRecord?.name || "Student"
+        ).catch((err) => {
           console.error("Webhook error:", err);
         });
 
-        done(null, user);
+        return done(null, user);
       } catch (err) {
         console.error("Passport strategy error:", err);
         done(err, null);

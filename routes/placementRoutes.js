@@ -1,8 +1,11 @@
 import express from "express";
+import PlacementData from "../models/PlacementData.js";
 import Submission from "../models/Submission.js";
+import Student from "../models/Student.js";
 import { getCompanyMergedForAdminById } from "../services/companyService.js";
-import User from "../models/User.js";
+import User1 from "../models/User1.js";
 import authJWT from "../middleware/authJWT.js";
+import requireSPC from "../middleware/requireSPC.js";
 import validateRequest from "../middleware/validateRequest.js";
 import { placementDataSchema } from "../validations/placement.validation.js";
 import { config, messages } from "../config/constants.js";
@@ -138,9 +141,9 @@ router.post(
     // Save all submissions
     await Submission.insertMany(submissions);
 
-    // Update user's fillForm field to true
+    // Touch the authenticated student account record after submission.
     if (req.user && req.user._id) {
-      await User.findByIdAndUpdate(req.user._id, { fillForm: true });
+      await User1.findByIdAndUpdate(req.user._id, { lastLoginAt: new Date() }).catch(() => {});
     }
 
     res.json({ 
@@ -154,6 +157,125 @@ router.post(
   } catch (error) {
     console.error("❌ Error creating placement submissions:", error.message);
     res.status(500).json({ error: messages.ERROR.SAVE_ERROR });
+  }
+});
+
+router.post("/spc/submit", authJWT, requireSPC, async (req, res) => {
+  try {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const name = String(req.body?.name || "").trim();
+    const usn = String(req.body?.usn || "").trim().toUpperCase();
+    const companyPlaced = String(req.body?.companyPlaced || "").trim();
+    const typeOfOffer = String(req.body?.typeOfOffer || "").trim();
+
+    if (!email) {
+      return res.status(400).json({ message: "Email of student is required" });
+    }
+    if (!name) {
+      return res.status(400).json({ message: "Name is required" });
+    }
+    if (!usn) {
+      return res.status(400).json({ message: "USN is required" });
+    }
+    if (!companyPlaced) {
+      return res.status(400).json({ message: "Company placed is required" });
+    }
+    if (!typeOfOffer) {
+      return res.status(400).json({ message: "Type of offer is required" });
+    }
+
+    const [studentByEmail, studentByUsn] = await Promise.all([
+      Student.findOne({ email }),
+      Student.findOne({ usn }),
+    ]);
+
+    if (
+      studentByEmail &&
+      studentByUsn &&
+      String(studentByEmail._id) !== String(studentByUsn._id)
+    ) {
+      return res.status(400).json({
+        message: "Email and USN belong to different student records",
+      });
+    }
+
+    let student = studentByEmail || studentByUsn;
+    if (!student) {
+      student = await Student.create({
+        email,
+        name,
+        usn,
+      });
+    } else {
+      let shouldSave = false;
+      if (student.email !== email) {
+        student.email = email;
+        shouldSave = true;
+      }
+      if (student.usn !== usn) {
+        student.usn = usn;
+        shouldSave = true;
+      }
+      if (student.name !== name) {
+        student.name = name;
+        shouldSave = true;
+      }
+      if (shouldSave) {
+        await student.save();
+      }
+    }
+
+    const duplicate = await PlacementData.findOne({
+      studentId: student._id,
+      companyPlaced,
+      typeOfOffer,
+    });
+
+    if (duplicate) {
+      return res.status(400).json({ message: "Duplicate entry" });
+    }
+
+    const placement = await PlacementData.create({
+      studentId: student._id,
+      companyPlaced,
+      typeOfOffer,
+      createdBy: req.user?.id || req.user?._id || req.user?.email || "",
+    });
+
+    return res.json({
+      message: "Placement data submitted successfully",
+      studentId: student._id,
+      placementId: placement._id,
+    });
+  } catch (error) {
+    console.error("❌ Error submitting SPC placement data:", error.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.get("/student/status", authJWT, async (req, res) => {
+  try {
+    const email = req.user.email?.trim().toLowerCase();
+    if (!email) {
+      return res.json({ isPlaced: false, data: [] });
+    }
+
+    const student = await Student.findOne({ email }).select("_id").lean();
+    if (!student?._id) {
+      return res.json({ isPlaced: false, data: [] });
+    }
+
+    const records = await PlacementData.find({ studentId: student._id })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.json({
+      isPlaced: records.length > 0,
+      data: records,
+    });
+  } catch (error) {
+    console.error("❌ Error fetching student placement status:", error.message);
+    return res.status(500).json({ message: "Server error" });
   }
 });
 
