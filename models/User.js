@@ -53,4 +53,4 @@ const userSchema = new Schema({
 userSchema.index({ createdAt: 1 });
 userSchema.index({ lastActiveAt: 1 });
 
-export default mongoose.model("User", userS
+export default mongoose.model("User", userSchema);
