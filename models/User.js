@@ -30,7 +30,7 @@ const userSchema = new Schema({
   },
   role: {
     type: String,
-    enum: ["student", "admin", "company"],
+    enum: ["student", "admin", "company", "spc"],
     default: "student"
   },
   isBetaListed: {

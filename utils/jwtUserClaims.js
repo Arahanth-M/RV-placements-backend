@@ -5,22 +5,32 @@
 export function buildJwtPayloadFromUser(user, options = {}) {
   const doc = user.toObject ? user.toObject() : user;
   const isAdminSession = options?.isAdminSession === true;
+  const email = doc.email || doc.emailId || "";
+  const userId = doc.userId || doc.googleId || "";
+  const username =
+    doc.username ||
+    doc.userName ||
+    (email.includes("@") ? email.split("@")[0] : email) ||
+    "Student";
+  const picture = doc.picture || doc.profilePicture || "";
+  const role =
+    isAdminSession ? "admin" : String(doc.role || "student").trim().toLowerCase();
   return {
-    userId: doc.userId,
-    email: doc.email,
+    userId,
+    email,
     _id: String(doc._id),
-    username: doc.username,
-    picture: doc.picture,
-    fillForm: doc.fillForm ?? false,
+    username,
+    picture,
+    fillForm: false,
     points: doc.points ?? 0,
     isPremium: doc.isPremium ?? false,
-    isBetaListed: doc.isBetaListed === true,
+    isBetaListed: true,
     hasSubmittedMissingCompanyRequest:
       doc.hasSubmittedMissingCompanyRequest === true,
     membershipType: doc.membershipType,
     companyId: doc.companyId,
     isAdminSession,
-    role: isAdminSession ? "admin" : (doc.role || "student"),
+    role,
     createdAt: doc.createdAt
       ? new Date(doc.createdAt).toISOString()
       : new Date().toISOString(),

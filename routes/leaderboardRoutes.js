@@ -1,5 +1,5 @@
 import express from "express";
-import User from "../models/User.js";
+import User1 from "../models/User1.js";
 import Submission from "../models/Submission.js";
 import authJWT from "../middleware/authJWT.js";
 import { redisUrl } from "../src/utils/redisClient.js";
@@ -88,8 +88,8 @@ leaderboardRouter.get("/previous-day-top", authJWT, async (req, res) => {
 
     let payload = null;
     if (top?._id) {
-      const user = await User.findOne({ email: top._id })
-        .select("userId username picture email")
+      const user = await User1.findOne({ email: top._id })
+        .select("googleId username profilePicture email")
         .lean();
 
       payload = {
@@ -97,9 +97,9 @@ leaderboardRouter.get("/previous-day-top", authJWT, async (req, res) => {
         windowStart: previousDayStart.toISOString(),
         windowEndExclusive: currentDayStart.toISOString(),
         refreshAt: nextDayStart.toISOString(),
-        userId: user?.userId || null,
+        userId: user?.googleId || null,
         username: user?.username || top.submittedByName || top._id || "Anonymous",
-        picture: user?.picture || null,
+        picture: user?.profilePicture || null,
         email: top._id,
         approvedSubmissionCount: top.approvedSubmissionCount ?? 0,
       };
@@ -142,17 +142,17 @@ leaderboardRouter.get("/", authJWT, async (req, res) => {
       }
     }
 
-    const users = await User.find({})
-      .select("userId username picture points")
+    const users = await User1.find({})
+      .select("googleId username profilePicture points")
       .sort({ points: -1 })
       .limit(100)
       .lean();
 
     const leaderboard = users.map((u, index) => ({
       rank: index + 1,
-      userId: u.userId,
+      userId: u.googleId,
       username: u.username || "Anonymous",
-      picture: u.picture || null,
+      picture: u.profilePicture || null,
       points: u.points ?? 0,
     }));
 

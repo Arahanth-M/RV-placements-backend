@@ -14,6 +14,8 @@ import {
   adminMissingCompanyStatusSchema,
 } from "../validations/admin.validation.js";
 import User from "../models/User.js";
+import User1 from "../models/User1.js";
+import Student from "../models/Student.js";
 import Submission from "../models/Submission.js";
 import CompanyStatic from "../models/CompanyStatic.js";
 import MissingCompany from "../models/MissingCompany.js";
@@ -153,6 +155,113 @@ adminRouter.get("/stats/users", async (req, res) => {
   } catch (error) {
     console.error("❌ Error fetching user count:", error.message);
     res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Assign SPC role to an existing user (admin-only via router middleware)
+adminRouter.post("/assign-spc", async (req, res) => {
+  try {
+    const normalizedEmail = String(req.body?.email || "").trim().toLowerCase();
+    const normalizedUsn = String(req.body?.usn || "").trim().toUpperCase();
+
+    if (!normalizedEmail) {
+      return res.status(400).json({ error: "Email is required" });
+    }
+    if (!normalizedUsn) {
+      return res.status(400).json({ error: "USN is required" });
+    }
+
+    const studentRecord = await Student.findOne({
+      email: normalizedEmail,
+      usn: normalizedUsn,
+    }).select("_id email usn name");
+
+    if (!studentRecord) {
+      return res.status(404).json({ error: "Student not found for the provided email and USN" });
+    }
+
+    const usernameFallback =
+      String(studentRecord?.name || "").trim() ||
+      normalizedEmail.split("@")[0] ||
+      "student";
+    const user = await User1.findOneAndUpdate(
+      { email: normalizedEmail },
+      {
+        $set: {
+          username: usernameFallback,
+          role: "spc",
+        },
+        $setOnInsert: {
+          profilePicture: "",
+          points: 0,
+          lastLoginAt: new Date(),
+        },
+      },
+      {
+        new: true,
+        upsert: true,
+      }
+    );
+
+    return res.json({
+      message: "SPC role assigned successfully",
+      user: {
+        _id: user._id,
+        email: user.email,
+        username: user.username,
+        role: user.role,
+      },
+      student: {
+        email: normalizedEmail,
+        usn: normalizedUsn,
+      },
+    });
+  } catch (error) {
+    console.error("❌ Error assigning SPC role:", error.message);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+adminRouter.get("/spcs", async (req, res) => {
+  try {
+    const spcs = await User1.find({ role: "spc" })
+      .select("_id username email profilePicture role createdAt updatedAt")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.json({ items: spcs });
+  } catch (error) {
+    console.error("❌ Error fetching SPC users:", error.message);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+adminRouter.patch("/spcs/:id/revoke", async (req, res) => {
+  try {
+    const user = await User1.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    if (user.role !== "spc") {
+      return res.status(400).json({ error: "User is not currently an SPC" });
+    }
+
+    user.role = "student";
+    await user.save();
+
+    return res.json({
+      message: "SPC access revoked successfully",
+      user: {
+        _id: user._id,
+        email: user.email,
+        username: user.username,
+        role: user.role,
+      },
+    });
+  } catch (error) {
+    console.error("❌ Error revoking SPC access:", error.message);
+    return res.status(500).json({ error: "Server error" });
   }
 });
 
@@ -722,7 +831,9 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
         ? POINTS_INTERVIEW_EXPERIENCE
         : POINTS_QUESTION; // onlineQuestions, interviewQuestions, mustDoTopics
 
-    const contributor = await User.findOne({ email: submission.submittedBy?.email });
+    const contributor =
+      (await User1.findOne({ email: submission.submittedBy?.email })) ||
+      (await User.findOne({ email: submission.submittedBy?.email }));
     if (contributor) {
       contributor.points = (contributor.points || 0) + pointsToAdd;
       await contributor.save();

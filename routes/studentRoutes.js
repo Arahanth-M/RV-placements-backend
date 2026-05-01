@@ -4,6 +4,8 @@ import authJWT from "../middleware/authJWT.js";
 import checkBetaAccess from "../middleware/checkBetaAccess.js";
 import authorize from "../middleware/authorize.js";
 import requireAdmin from "../middleware/requireAdmin.js";
+import PlacementData from "../models/PlacementData.js";
+import Student from "../models/Student.js";
 import {
   getCachedStudentProfile,
   setCachedStudentProfile,
@@ -87,7 +89,7 @@ router.get(
   "/student-data/:usn",
   authJWT,
   checkBetaAccess,
-  authorize(["student", "admin"]),
+  authorize(["student", "admin", "spc"]),
   async (req, res) => {
   try {
     const { usn } = req.params;
@@ -124,14 +126,14 @@ router.get(
   "/student-data-by-name/:username",
   authJWT,
   checkBetaAccess,
-  authorize(["student", "admin"]),
+  authorize(["student", "admin", "spc"]),
   (req, res) => {
   console.warn(`⚠️ [DEPRECATED] Name-based lookup attempted for: "${req.params.username}". Use /profile instead.`);
   return res.status(410).json({ error: "Name-based lookup is disabled. Use /api/students/profile instead." });
 });
 
 // Get student profile by logged-in user email
-router.get("/profile", authJWT, checkBetaAccess, authorize(["student", "admin"]), async (req, res) => {
+router.get("/profile", authJWT, checkBetaAccess, authorize(["student", "admin", "spc"]), async (req, res) => {
   try {
     if (!req.user || !req.user.email) {
       return res.status(401).json({ error: "Unauthorized" });
@@ -148,60 +150,52 @@ router.get("/profile", authJWT, checkBetaAccess, authorize(["student", "admin"])
     }
     console.log(`🧊 [Profile] Cache miss for ${email}`);
 
-    const db = mongoose.connection.db;
-    const usersCollection = db.collection(STUDENT_COLLECTION);
-    const escapedEmail = email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    let studentRecord = await usersCollection.findOne({
-      [STUDENT_EMAIL_FIELD]: email,
-    });
+    const studentRecord = await Student.findOne({ email }).lean();
 
     if (!studentRecord) {
-      studentRecord = await usersCollection.findOne({
-        [STUDENT_EMAIL_FIELD]: {
-          $regex: new RegExp(`^\\s*${escapedEmail}\\s*$`, "i"),
-        },
-      });
-    }
-
-    if (!studentRecord) {
-      console.log(`❓ [Profile] No profile record found in ${STUDENT_COLLECTION} for: ${email}`);
+      console.log(`❓ [Profile] No profile record found in students for: ${email}`);
 
       // If user is admin, provide specialized error
       if (email === adminEmail) {
         return res.status(404).json({
           error: "Admin Profile Not Found",
-          message: `Admins do not have a student profile stored in ${STUDENT_COLLECTION}.`
+          message: "Admins do not have a student profile stored in students."
         });
       }
 
       return res.status(404).json({ error: "Profile not found" });
     }
 
-    const placementCompanyNames = extractPlacementCompanyNames(studentRecord);
+    const placements = await PlacementData.find({ studentId: studentRecord._id })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const placementCompanyMap = new Map();
+    for (const placement of placements) {
+      const companyName = normalizeText(placement?.companyPlaced);
+      if (!companyName) continue;
+      const key = companyName.toLowerCase();
+      if (!placementCompanyMap.has(key)) {
+        placementCompanyMap.set(key, companyName);
+      }
+    }
+    const placementCompanyNames = Array.from(placementCompanyMap.values());
     const placementCompanies = placementCompanyNames.map((companyName) => ({
       companyName,
     }));
     const primaryCompanyName =
-      normalizeText(studentRecord?.Company) ||
-      normalizeText(studentRecord?.company) ||
-      normalizeText(studentRecord?.Company_Name) ||
       placementCompanyNames[0] ||
       null;
-    const hasLegacyCompanyField =
-      Boolean(normalizeText(studentRecord?.Company)) ||
-      Boolean(normalizeText(studentRecord?.company));
     const responsePayload = {
-      ...studentRecord,
-      ...(primaryCompanyName && !hasLegacyCompanyField
-        ? { Company: primaryCompanyName }
-        : {}),
+      student: studentRecord,
+      placements,
       placementCompanies,
       primaryCompanyName,
-      companyId: normalizeCompanyId(studentRecord?.companyId) || null,
+      companyId: null,
     };
 
     console.log(
-      `✅ [Profile] Found 1 record, ${placementCompanies.length} associated compan${placementCompanies.length === 1 ? "y" : "ies"} for ${email}`
+      `✅ [Profile] Found student record and ${placements.length} placement entr${placements.length === 1 ? "y" : "ies"} for ${email}`
     );
 
     await setCachedStudentProfile(email, responsePayload);

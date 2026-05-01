@@ -22,8 +22,8 @@ import {
   mergeToLegacyShape,
   normalizeCompanyDetailYear,
 } from "../services/companyService.js";
-import User from "../models/User.js";
 import mongoose from "mongoose";
+import { getAuthUserModel } from "../utils/authUserModel.js";
 dotenv.config();
 
 /** Redis TTL for GET /api/companies/:id payload cache */
@@ -156,10 +156,11 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
   const key = companyDetailRedisKey(id, placementVisitYear);
 
   try {
+    const AuthUserModel = getAuthUserModel(req);
     const touchUserActivity = () =>
-      User.updateOne(
+      AuthUserModel.updateOne(
         { _id: req.user?._id },
-        { $set: { lastActiveAt: new Date() } }
+        { $set: { lastLoginAt: new Date(), lastActiveAt: new Date() } }
       ).catch(() => {});
 
     let companyOid = null;
