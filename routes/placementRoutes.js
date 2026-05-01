@@ -167,6 +167,9 @@ router.post("/spc/submit", authJWT, requireSPC, async (req, res) => {
     const usn = String(req.body?.usn || "").trim().toUpperCase();
     const companyPlaced = String(req.body?.companyPlaced || "").trim();
     const typeOfOffer = String(req.body?.typeOfOffer || "").trim();
+    const stipend = String(req.body?.stipend ?? "").trim();
+    const base = String(req.body?.base ?? "").trim();
+    const ctc = String(req.body?.ctc ?? "").trim();
 
     if (!email) {
       return res.status(400).json({ message: "Email of student is required" });
@@ -239,6 +242,9 @@ router.post("/spc/submit", authJWT, requireSPC, async (req, res) => {
       studentId: student._id,
       companyPlaced,
       typeOfOffer,
+      stipend,
+      base,
+      ctc,
       createdBy: req.user?.id || req.user?._id || req.user?.email || "",
     });
 

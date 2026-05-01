@@ -132,6 +132,16 @@ export function visitIsMarkedOffCampus(visit) {
   return visit?.offCampus === true;
 }
 
+/** Single approved row qualifies for Dream / Open dream merge slot (non-PPO FTE-style). */
+export function visitQualifiesDreamTierRow(visit) {
+  if (!visit || typeof visit !== "object") return false;
+  return (
+    !visitIsPpo(visit) &&
+    !visitIsMarkedOffCampus(visit) &&
+    !isInternshipOnlyCompany({ roles: visit.roles })
+  );
+}
+
 /**
  * True if any approved visit is an on-campus PPO (summer-internship tile).
  * @param {Record<string, unknown>[]|undefined} visits
@@ -147,12 +157,7 @@ export function companyHasAnyYearSummerPpoFromVisits(visits) {
  */
 export function companyHasDreamTierVisitFromVisits(visits) {
   if (!Array.isArray(visits)) return false;
-  return visits.some(
-    (v) =>
-      !visitIsPpo(v) &&
-      !visitIsMarkedOffCampus(v) &&
-      !isInternshipOnlyCompany({ roles: v.roles })
-  );
+  return visits.some((v) => visitQualifiesDreamTierRow(v));
 }
 
 /** @param {Record<string, unknown>|null|undefined} visit */
@@ -161,6 +166,45 @@ function visitDisplayType(visit) {
   if (typeof t !== "string") return undefined;
   const s = t.trim();
   return s || undefined;
+}
+
+/**
+ * @param {Record<string, unknown>[]} dreamTiers — non-empty
+ * @returns {Record<string, unknown>}
+ */
+function pickBestDreamTierVisitByCtc(dreamTiers) {
+  let bestIdx = 0;
+  let best = getCompanyPlacementMeta({ roles: dreamTiers[0].roles });
+  for (let i = 1; i < dreamTiers.length; i++) {
+    const m = getCompanyPlacementMeta({ roles: dreamTiers[i].roles });
+    if (m.totalCtcRupees > best.totalCtcRupees) {
+      best = m;
+      bestIdx = i;
+    }
+  }
+  return dreamTiers[bestIdx];
+}
+
+/**
+ * Card label for Dream / Open dream when the listing year's row is PPO-tagged but carries FTE roles
+ * (single combined visit — excluded from dreamTiers because {@link visitIsPpo} is true).
+ */
+function inferDreamListingTypeLabelFromPpoHybridVisit(visit) {
+  const norm = normalizeType(visit?.type);
+  if (norm.includes("internship") && norm.includes("fte")) return "Internship + FTE";
+  if (norm.includes("fte")) return "FTE";
+  return "FTE";
+}
+
+/**
+ * PPO row still carries an FTE/on-campus placement angle (package data or “+ FTE” in type).
+ */
+function rolesSuggestFtePackage(visit) {
+  const norm = normalizeType(visit?.type);
+  if (norm.includes("fte")) return true;
+  if (!Array.isArray(visit?.roles) || visit.roles.length === 0) return false;
+  if (!isInternshipOnlyCompany({ roles: visit.roles })) return true;
+  return getCompanyPlacementMeta({ roles: visit.roles }).totalCtcRupees > 0;
 }
 
 /**
@@ -183,40 +227,108 @@ export function getSummerPlacementPrefFromVisits(visits) {
 /**
  * Dream vs open-dream from the best qualifying (non-PPO, on-campus, not internship-only) visit.
  * Falls back to primary visit meta when no such visit exists.
+ *
+ * When `preferredListingYear` is set (2026/2027 company-cards year), dream/open-dream **card labels**
+ * prefer that year's qualifying visit so Open Dream matches per-year placement rows (not an older year's type).
+ * If that year's approved row is PPO-labelled but includes FTE roles, show an FTE-style label instead of PPO.
+ *
  * @returns {{ category: string, totalCtcRupees: number, dreamDisplayType?: string, dreamDetailYear?: number }}
  * @param {Record<string, unknown>[]|undefined} visits
  * @param {Record<string, unknown>|null|undefined} primaryVisit
+ * @param {unknown} [preferredListingYear] — optional `?year=` when rendering lists (2026 / 2027)
  */
-export function getListPlacementCategoryMetaFromVisits(visits, primaryVisit) {
+export function getListPlacementCategoryMetaFromVisits(
+  visits,
+  primaryVisit,
+  preferredListingYear
+) {
   const list = Array.isArray(visits) ? visits : [];
-  const dreamTiers = list.filter(
-    (v) =>
-      !visitIsPpo(v) &&
-      !visitIsMarkedOffCampus(v) &&
-      !isInternshipOnlyCompany({ roles: v.roles })
-  );
-  if (dreamTiers.length === 0) {
-    const meta = getCompanyPlacementMeta({ roles: primaryVisit?.roles });
-    return {
-      ...meta,
-      dreamDisplayType: visitDisplayType(primaryVisit),
-      dreamDetailYear: normalizePlacementDetailYear(primaryVisit?.year),
-    };
-  }
-  let bestIdx = 0;
-  let best = getCompanyPlacementMeta({ roles: dreamTiers[0].roles });
-  for (let i = 1; i < dreamTiers.length; i++) {
-    const m = getCompanyPlacementMeta({ roles: dreamTiers[i].roles });
-    if (m.totalCtcRupees > best.totalCtcRupees) {
-      best = m;
-      bestIdx = i;
+  const dreamTiers = list.filter((v) => visitQualifiesDreamTierRow(v));
+
+  const prefYear = normalizePlacementDetailYear(preferredListingYear);
+
+  const bestGlobalVisit =
+    dreamTiers.length > 0 ? pickBestDreamTierVisitByCtc(dreamTiers) : null;
+
+  /** Category / bucket CTC stay driven by the best dream-tier package across years (existing behaviour). */
+  const globalMeta = bestGlobalVisit
+    ? getCompanyPlacementMeta({ roles: bestGlobalVisit.roles })
+    : getCompanyPlacementMeta({ roles: primaryVisit?.roles });
+
+  /** Visit whose `type` string drives the Dream / Open dream card subtitle for this listing. */
+  let displayVisit = null;
+  if (prefYear !== undefined && dreamTiers.length > 0) {
+    const scoped = dreamTiers.filter((v) => Number(v.year) === prefYear);
+    if (scoped.length > 0) {
+      displayVisit = pickBestDreamTierVisitByCtc(scoped);
     }
   }
+
+  let dreamDisplayType;
+  let dreamDetailYear;
+
+  const primaryYearNum = Number(primaryVisit?.year);
+  const hybridPpoFteForListingYear =
+    prefYear !== undefined &&
+    Number.isFinite(primaryYearNum) &&
+    primaryYearNum === prefYear &&
+    primaryVisit &&
+    visitIsPpo(primaryVisit) &&
+    !visitIsMarkedOffCampus(primaryVisit) &&
+    rolesSuggestFtePackage(primaryVisit);
+
+  if (!displayVisit && hybridPpoFteForListingYear) {
+    dreamDisplayType = inferDreamListingTypeLabelFromPpoHybridVisit(primaryVisit);
+    dreamDetailYear = prefYear;
+  } else if (displayVisit) {
+    dreamDisplayType = visitDisplayType(displayVisit);
+    dreamDetailYear = normalizePlacementDetailYear(displayVisit.year);
+  } else if (bestGlobalVisit) {
+    dreamDisplayType = visitDisplayType(bestGlobalVisit);
+    dreamDetailYear = normalizePlacementDetailYear(bestGlobalVisit.year);
+  } else {
+    dreamDisplayType = visitDisplayType(primaryVisit);
+    dreamDetailYear = normalizePlacementDetailYear(primaryVisit?.year);
+  }
+
   return {
-    ...best,
-    dreamDisplayType: visitDisplayType(dreamTiers[bestIdx]),
-    dreamDetailYear: normalizePlacementDetailYear(dreamTiers[bestIdx]?.year),
+    ...globalMeta,
+    dreamDisplayType,
+    dreamDetailYear,
   };
+}
+
+/**
+ * Label under the company name on GET `/companies/:id?year=` when the stored visit `type` is PPO-heavy
+ * but that year’s row includes FTE roles — matches Dream/Open-dream card wording without mutating stored `type`.
+ *
+ * Only switches away from raw `type` when {@link getListPlacementCategoryMetaFromVisits} resolves the label to this year (`dreamDetailYear ===` requested year).
+ *
+ * @param {Record<string, unknown>[]|undefined} visits — approved visits for this company (2026/2027)
+ * @param {Record<string, unknown>|null|undefined} visitForYear — visit row for `placementYear`, plain `roles[].ctc`
+ * @param {unknown} placementYearRaw
+ * @returns {string|undefined}
+ */
+export function getCompanyDetailHeadlineTypeFromVisits(
+  visits,
+  visitForYear,
+  placementYearRaw
+) {
+  if (!visitForYear || typeof visitForYear !== "object") return undefined;
+  const raw =
+    typeof visitForYear.type === "string" ? visitForYear.type.trim() : "";
+  const pref = normalizePlacementDetailYear(placementYearRaw);
+  if (pref === undefined) return raw || undefined;
+
+  const meta = getListPlacementCategoryMetaFromVisits(
+    visits,
+    visitForYear,
+    pref
+  );
+  if (meta.dreamDisplayType && meta.dreamDetailYear === pref) {
+    return meta.dreamDisplayType;
+  }
+  return raw || undefined;
 }
 
 function summerTileEligibleCompany(c) {

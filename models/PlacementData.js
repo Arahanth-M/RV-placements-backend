@@ -23,6 +23,16 @@ const placementDataSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    base: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    ctc: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     createdBy: {
       type: String,
       trim: true,

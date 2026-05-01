@@ -153,7 +153,7 @@ companyRouter.post("/helpful/status/batch", authJWT, async (req, res) => {
 companyRouter.get("/:id", authJWT, async (req, res) => {
   const id = req.params.id;
   const placementVisitYear = normalizeCompanyDetailYear(req.query?.year);
-  const key = companyDetailRedisKey(id, placementVisitYear);
+  const key = companyDetailRedisKey(id, placementVisitYear, req.query?.placementContext);
 
   try {
     const AuthUserModel = getAuthUserModel(req);
@@ -206,7 +206,8 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
 
     const { merged: companyObj, visit: visitForViews } = await getCompanyDetailLegacyMergedById(
       id,
-      placementVisitYear
+      placementVisitYear,
+      req.query?.placementContext
     );
 
     if (!companyObj) {

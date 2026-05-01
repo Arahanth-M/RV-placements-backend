@@ -11,9 +11,13 @@ import {
   buildCategoryPreviewResponse,
   companyHasAnyYearSummerPpoFromVisits,
   companyHasDreamTierVisitFromVisits,
+  getCompanyDetailHeadlineTypeFromVisits,
   getListPlacementCategoryMetaFromVisits,
   getSummerPlacementPrefFromVisits,
   sortCompaniesForCategoryPreview,
+  visitIsMarkedOffCampus,
+  visitIsPpo,
+  visitQualifiesDreamTierRow,
 } from "../utils/companyCategoryPreviewBuckets.js";
 import { invalidateCompanyDetailCache } from "./companyDetailCache.js";
 
@@ -33,6 +37,22 @@ export function normalizeCompanyDetailYear(raw) {
     return COMPANY_VISIT_YEAR;
   }
   return n;
+}
+
+/**
+ * Which placement list opened GET `/companies/:id` — selects among multiple approved visits for the same year.
+ * @param {unknown} raw
+ * @returns {"summer_internship"|"dream"|"open_dream"|null}
+ */
+export function normalizePlacementContextParam(raw) {
+  const s = String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, "_");
+  if (s === "summer_internship") return "summer_internship";
+  if (s === "dream") return "dream";
+  if (s === "open_dream") return "open_dream";
+  return null;
 }
 
 /**
@@ -399,6 +419,43 @@ export async function findLatestVisitForCompany(companyId, year = COMPANY_VISIT_
 }
 
 /**
+ * Approved row for GET `/companies/:id` when several visits share `companyId` + year (distinct type/cluster slots).
+ */
+async function findApprovedVisitForCompanyDetail(
+  companyId,
+  yearRaw,
+  placementContextRaw = null
+) {
+  const ctx = normalizePlacementContextParam(placementContextRaw);
+  const year = normalizeCompanyDetailYear(yearRaw);
+  const match = buildCompanyVisitCompanyYearMatch(companyId, year);
+  if (!match) return null;
+
+  const candidatesRaw = await CompanyVisit.find({
+    status: "approved",
+    ...match,
+  })
+    .sort({ migratedAt: -1, _id: -1 })
+    .lean();
+
+  if (!candidatesRaw.length) return null;
+
+  const candidates = candidatesRaw.map((v) => visitWithPlainRoleCtc(v));
+
+  if (ctx === "summer_internship") {
+    const ppo = candidates.filter((v) => visitIsPpo(v) && !visitIsMarkedOffCampus(v));
+    return ppo.length > 0 ? ppo[0] : candidates[0];
+  }
+
+  if (ctx === "dream" || ctx === "open_dream") {
+    const fteRows = candidates.filter((v) => visitQualifiesDreamTierRow(v));
+    return fteRows.length > 0 ? fteRows[0] : candidates[0];
+  }
+
+  return candidates[0];
+}
+
+/**
  * Approved visit years for this company (subset of {@link COMPANY_DETAIL_VISIT_YEARS}).
  * @param {import("mongoose").Types.ObjectId|string} companyId
  * @returns {Promise<number[]>}
@@ -442,7 +499,8 @@ export async function incrementVisitViews(companyId, visitId, placementYear) {
  */
 export async function getCompanyDetailLegacyMergedById(
   id,
-  placementYear = COMPANY_VISIT_YEAR
+  placementYear = COMPANY_VISIT_YEAR,
+  placementContextRaw = null
 ) {
   const _id = toObjectId(id);
   if (!_id) {
@@ -455,12 +513,23 @@ export async function getCompanyDetailLegacyMergedById(
   const visitsByCompany = await fetchApprovedVisitsForDetailYearsByCompany([_id]);
   const allApprovedVisits = visitsByCompany.get(String(_id)) ?? [];
   const totalGotInByYear = buildTotalGotInByYearFromVisits(allApprovedVisits);
-  const visitApproved = await findLatestVisitForCompany(_id, placementYear);
+  const visitApproved = await findApprovedVisitForCompanyDetail(
+    _id,
+    placementYear,
+    placementContextRaw
+  );
   if (visitApproved) {
     const merged = {
       ...mergeToLegacyShape(staticRow, visitApproved),
       totalGotInByYear,
     };
+    const visitPlain = visitWithPlainRoleCtc(visitApproved);
+    const headline = getCompanyDetailHeadlineTypeFromVisits(
+      allApprovedVisits,
+      visitPlain,
+      placementYear
+    );
+    if (headline) merged.placementDetailHeadlineType = headline;
     return { merged, visit: visitApproved, staticRow };
   }
   // No approved visit for this year: if any visit exists for that year (e.g. pending), match old API — 404
@@ -522,7 +591,8 @@ export async function listApprovedCompaniesLegacyMerged(
     const placementHasDreamTierVisit = companyHasDreamTierVisitFromVisits(allVisits);
     const placementMeta = getListPlacementCategoryMetaFromVisits(
       allVisits,
-      visitWithPlainRoleCtc(visit)
+      visitWithPlainRoleCtc(visit),
+      placementYear
     );
     const {
       dreamDisplayType: placementDreamDisplayType,
@@ -603,7 +673,11 @@ async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
       offCampus: minimal.offCampus,
       roles: minimal.roles,
     };
-    const placementMeta = getListPlacementCategoryMetaFromVisits(allVisits, primaryVisit);
+    const placementMeta = getListPlacementCategoryMetaFromVisits(
+      allVisits,
+      primaryVisit,
+      placementYear
+    );
     const {
       dreamDisplayType: placementDreamDisplayType,
       dreamDetailYear: placementDreamDetailYear,
