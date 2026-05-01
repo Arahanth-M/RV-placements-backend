@@ -92,9 +92,4 @@ submissionRouter.post(
 
     res.status(201).json({ message: messages.SUCCESS.SUBMISSION_RECEIVED });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: messages.ERROR.SAVE_ERROR });
-  }
-});
-
-export default submissionRouter;
+    console
