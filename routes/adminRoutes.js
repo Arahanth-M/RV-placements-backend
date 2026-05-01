@@ -145,6 +145,8 @@ function sanitizeText(text) {
   return str.trim();
 }
 
+const PPO_BRANCH_CODES = new Set(["cd", "cy", "ise", "cse", "aiml", "bt"]);
+
 // Get total number of users
 adminRouter.get("/stats/users", async (req, res) => {
   try {
@@ -1091,7 +1093,16 @@ adminRouter.put(
     const y = adminVisitYearFromQuery(req);
     const staticRow = await CompanyStatic.findById(req.params.id).lean();
     if (!staticRow) return res.status(404).json({ error: "Company not found" });
-    const { totalStudentsApplied, totalClearedOA, totalGotIn } = req.body || {};
+    const {
+      totalStudentsApplied,
+      totalClearedOA,
+      totalGotIn,
+      ppoConversionGotIn,
+      ppoConversionConverted,
+      ppoConversionAcceptanceRate,
+      ppoConversionType,
+      ppoBranchStats,
+    } = req.body || {};
     const payload = {};
     if (totalStudentsApplied !== undefined) {
       const n = parseInt(totalStudentsApplied, 10);
@@ -1107,6 +1118,78 @@ adminRouter.put(
       const n = parseInt(totalGotIn, 10);
       if (isNaN(n) || n < 0) return res.status(400).json({ error: "totalGotIn must be a non-negative number" });
       payload.totalGotIn = n;
+    }
+    if (ppoConversionGotIn !== undefined) {
+      const n = parseInt(ppoConversionGotIn, 10);
+      if (isNaN(n) || n < 0) {
+        return res.status(400).json({ error: "ppoConversionGotIn must be a non-negative number" });
+      }
+      payload.ppoConversionGotIn = n;
+    }
+    if (ppoConversionConverted !== undefined) {
+      const n = parseInt(ppoConversionConverted, 10);
+      if (isNaN(n) || n < 0) {
+        return res.status(400).json({ error: "ppoConversionConverted must be a non-negative number" });
+      }
+      payload.ppoConversionConverted = n;
+    }
+    if (ppoConversionType !== undefined) {
+      payload.ppoConversionType = sanitizeText(ppoConversionType);
+    }
+    if (ppoBranchStats !== undefined) {
+      if (!Array.isArray(ppoBranchStats)) {
+        return res.status(400).json({ error: "ppoBranchStats must be an array" });
+      }
+      const normalized = [];
+      const seen = new Set();
+      for (const row of ppoBranchStats) {
+        const code = String(row?.branchCode || "").trim().toLowerCase();
+        if (!PPO_BRANCH_CODES.has(code)) {
+          return res.status(400).json({ error: `Invalid branch code: ${code}` });
+        }
+        if (seen.has(code)) {
+          return res.status(400).json({ error: `Duplicate branch code: ${code}` });
+        }
+        seen.add(code);
+        const gotIn = Number.parseInt(String(row?.gotIn ?? 0), 10);
+        const converted = Number.parseInt(String(row?.converted ?? 0), 10);
+        if (Number.isNaN(gotIn) || gotIn < 0 || Number.isNaN(converted) || converted < 0) {
+          return res.status(400).json({ error: `Invalid stats for branch: ${code}` });
+        }
+        normalized.push({ branchCode: code, gotIn, converted });
+      }
+      payload.ppoBranchStats = normalized;
+      const gotInTotal = normalized.reduce((sum, item) => sum + (item.gotIn || 0), 0);
+      const convertedTotal = normalized.reduce((sum, item) => sum + (item.converted || 0), 0);
+      payload.ppoConversionGotIn = gotInTotal;
+      payload.ppoConversionConverted = convertedTotal;
+      payload.ppoConversionAcceptanceRate =
+        gotInTotal > 0 ? Number(((convertedTotal / gotInTotal) * 100).toFixed(2)) : 0;
+    }
+
+    const hasGotIn = payload.ppoConversionGotIn !== undefined;
+    const hasConverted = payload.ppoConversionConverted !== undefined;
+    if (hasGotIn || hasConverted) {
+      let existingStats = null;
+      if (!hasGotIn || !hasConverted) {
+        existingStats = (await getCompanyMergedForAdminById(req.params.id, y))?.merged || null;
+      }
+      const gotIn =
+        payload.ppoConversionGotIn !== undefined
+          ? payload.ppoConversionGotIn
+          : Number(existingStats?.ppoConversionGotIn) || 0;
+      const converted =
+        payload.ppoConversionConverted !== undefined
+          ? payload.ppoConversionConverted
+          : Number(existingStats?.ppoConversionConverted) || 0;
+      payload.ppoConversionAcceptanceRate =
+        gotIn > 0 ? Number(((converted / gotIn) * 100).toFixed(2)) : 0;
+    } else if (ppoConversionAcceptanceRate !== undefined) {
+      const n = Number(ppoConversionAcceptanceRate);
+      if (Number.isNaN(n) || n < 0) {
+        return res.status(400).json({ error: "ppoConversionAcceptanceRate must be a non-negative number" });
+      }
+      payload.ppoConversionAcceptanceRate = Number(n.toFixed(2));
     }
     await ensureAdminVisitForYear(req.params.id, y);
     await updateCompanyVisit(req.params.id, payload, y);

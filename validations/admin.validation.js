@@ -25,6 +25,26 @@ export const adminCompanyStatsSchema = Joi.object({
   totalStudentsApplied: nonNegIntField.optional(),
   totalClearedOA: nonNegIntField.optional(),
   totalGotIn: nonNegIntField.optional(),
+  ppoConversionGotIn: nonNegIntField.optional(),
+  ppoConversionConverted: nonNegIntField.optional(),
+  ppoConversionAcceptanceRate: Joi.alternatives()
+    .try(Joi.number().min(0), Joi.string().trim().pattern(/^\d+(\.\d+)?$/))
+    .optional(),
+  ppoConversionType: Joi.string().max(200).allow("").optional(),
+  ppoBranchStats: Joi.array()
+    .items(
+      Joi.object({
+        branchCode: Joi.string()
+          .trim()
+          .lowercase()
+          .valid("cd", "cy", "ise", "cse", "aiml", "bt")
+          .required(),
+        gotIn: nonNegIntField.required(),
+        converted: nonNegIntField.required(),
+      }).unknown(false)
+    )
+    .max(6)
+    .optional(),
 }).unknown(true);
 
 export const adminCompanyTotalGotInAdjustmentSchema = Joi.object({

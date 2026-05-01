@@ -17,6 +17,11 @@ import {
 } from "../config/constants.js";
 import validateRequest from "../middleware/validateRequest.js";
 import { profileCacheInvalidateSchema } from "../validations/student.validation.js";
+import {
+  buildLoginEmailFindQuery,
+  buildUsnFindQuery,
+  resolveSemanticPrimaryCompany,
+} from "../utils/studentRecordLookup.js";
 
 const router = express.Router();
 const STUDENT_COLLECTION = STUDENT_PROFILE_COLLECTION;
@@ -98,14 +103,8 @@ router.get(
 
     const db = mongoose.connection.db;
     const studentDataCollection = db.collection(STUDENT_COLLECTION);
-    
-    // Escape special regex characters in USN
-    const escapedUSN = usn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    
-    // Find student by USN (case-insensitive)
-    const studentData = await studentDataCollection.findOne({
-      USN: { $regex: new RegExp(`^${escapedUSN}$`, "i") }
-    });
+
+    const studentData = await studentDataCollection.findOne(buildUsnFindQuery(usn));
 
     if (!studentData) {
       return res.status(404).json({ error: "Student not found with the provided USN" });
@@ -150,18 +149,9 @@ router.get("/profile", authJWT, checkBetaAccess, authorize(["student", "admin"])
 
     const db = mongoose.connection.db;
     const usersCollection = db.collection(STUDENT_COLLECTION);
-    const escapedEmail = email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    let studentRecord = await usersCollection.findOne({
-      [STUDENT_EMAIL_FIELD]: email,
-    });
-
-    if (!studentRecord) {
-      studentRecord = await usersCollection.findOne({
-        [STUDENT_EMAIL_FIELD]: {
-          $regex: new RegExp(`^\\s*${escapedEmail}\\s*$`, "i"),
-        },
-      });
-    }
+    const studentRecord = await usersCollection.findOne(
+      buildLoginEmailFindQuery(email, [STUDENT_EMAIL_FIELD])
+    );
 
     if (!studentRecord) {
       console.log(`❓ [Profile] No profile record found in ${STUDENT_COLLECTION} for: ${email}`);
@@ -181,18 +171,12 @@ router.get("/profile", authJWT, checkBetaAccess, authorize(["student", "admin"])
     const placementCompanies = placementCompanyNames.map((companyName) => ({
       companyName,
     }));
+    const semanticCompany = resolveSemanticPrimaryCompany(studentRecord);
     const primaryCompanyName =
-      normalizeText(studentRecord?.Company) ||
-      normalizeText(studentRecord?.company) ||
-      normalizeText(studentRecord?.Company_Name) ||
-      placementCompanyNames[0] ||
-      null;
-    const hasLegacyCompanyField =
-      Boolean(normalizeText(studentRecord?.Company)) ||
-      Boolean(normalizeText(studentRecord?.company));
+      semanticCompany.value || placementCompanyNames[0] || null;
     const responsePayload = {
       ...studentRecord,
-      ...(primaryCompanyName && !hasLegacyCompanyField
+      ...(primaryCompanyName && !semanticCompany.hasSemanticPrimaryColumn
         ? { Company: primaryCompanyName }
         : {}),
       placementCompanies,

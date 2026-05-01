@@ -25,7 +25,6 @@ export async function seedApprovedSplitCompany(opts = {}) {
     year: COMPANY_VISIT_YEAR,
     status: "approved",
     type: opts.type ?? "FTE",
-    business_model: opts.business_model,
     eligibility: opts.eligibility,
     date_of_visit: opts.date_of_visit,
     count: opts.count != null ? String(opts.count) : undefined,

@@ -11,6 +11,7 @@ import {
   STUDENT_EMAIL_FIELD,
 } from "../config/constants.js";
 import { buildJwtPayloadFromUser } from "../utils/jwtUserClaims.js";
+import { buildLoginEmailFindQuery } from "../utils/studentRecordLookup.js";
 
 const router = express.Router();
 
@@ -48,10 +49,6 @@ function normalizeText(raw) {
 
 function normalizeCompanyName(raw) {
   return normalizeText(raw).toLowerCase();
-}
-
-function escapeRegex(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function extractPlacementCompanyNames(studentRecord) {
@@ -144,18 +141,10 @@ router.post("/", authJWT, checkBetaAccess, async (req, res) => {
       });
     }
 
-    const escapedEmail = escapeRegex(String(dbUser.email).trim().toLowerCase());
-    let studentRecord = await usersCollection.findOne({
-      [STUDENT_EMAIL_FIELD]: dbUser.email,
-    });
-
-    if (!studentRecord) {
-      studentRecord = await usersCollection.findOne({
-        [STUDENT_EMAIL_FIELD]: {
-          $regex: new RegExp(`^\\s*${escapedEmail}\\s*$`, "i"),
-        },
-      });
-    }
+    const loginEmail = String(dbUser.email).trim().toLowerCase();
+    const studentRecord = await usersCollection.findOne(
+      buildLoginEmailFindQuery(loginEmail, [STUDENT_EMAIL_FIELD])
+    );
 
     const placementCompanies = extractPlacementCompanyNames(studentRecord);
     const allowedCompanySet = new Set(

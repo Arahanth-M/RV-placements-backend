@@ -45,6 +45,17 @@ export function projectCompanyListResponse(c) {
     focusTags: c.focusTags,
     helpfulCount: c.helpfulCount,
     totalGotIn: c.totalGotIn,
+    ppoConversionGotIn: Number(c.ppoConversionGotIn) || 0,
+    ppoConversionConverted: Number(c.ppoConversionConverted) || 0,
+    ppoConversionAcceptanceRate: Number(c.ppoConversionAcceptanceRate) || 0,
+    ppoConversionType: c.ppoConversionType || "",
+    ppoBranchStats: Array.isArray(c.ppoBranchStats)
+      ? c.ppoBranchStats.map((item) => ({
+          branchCode: String(item?.branchCode || "").toLowerCase(),
+          gotIn: Number(item?.gotIn) || 0,
+          converted: Number(item?.converted) || 0,
+        }))
+      : [],
     totalGotInByYear: c.totalGotInByYear,
     category: c.category,
     totalCtcRupees: c.totalCtcRupees,

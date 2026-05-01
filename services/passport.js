@@ -9,10 +9,7 @@ import {
   STUDENT_EMAIL_FIELD,
 } from "../config/constants.js";
 import { sendWelcomeEmailWebhook } from "./webhookService.js";
-
-function escapeRegex(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+import { buildLoginEmailFindQuery } from "../utils/studentRecordLookup.js";
 
 /** Google may expose the avatar on photos[], _json.picture, or legacy profile.picture */
 function pictureFromGoogleProfile(profile) {
@@ -56,28 +53,13 @@ passport.use(
         // 2. Strict Student/Admin Check
         const db = mongoose.connection.db;
         const studentCollection = db.collection(BETA_ACCESS_COLLECTION);
-        const escapedEmail = escapeRegex(normalizedEmail);
         const betaLookupPromise = (async () => {
           console.time("auth:beta_lookup");
           try {
-            // Exact-match on the roster email field lets MongoDB use its single-field index.
-            let betaRecord = await studentCollection.findOne(
-              { [STUDENT_EMAIL_FIELD]: normalizedEmail },
+            const betaRecord = await studentCollection.findOne(
+              buildLoginEmailFindQuery(normalizedEmail, [STUDENT_EMAIL_FIELD]),
               { projection: { _id: 1 } }
             );
-
-            // Keep regex as a temporary safety fallback for any legacy rows with casing/whitespace issues.
-            if (!betaRecord) {
-              betaRecord = await studentCollection.findOne(
-                {
-                  [STUDENT_EMAIL_FIELD]: {
-                    $regex: new RegExp(`^\\s*${escapedEmail}\\s*$`, "i"),
-                  },
-                },
-                { projection: { _id: 1 } }
-              );
-            }
-
             return betaRecord;
           } finally {
             console.timeEnd("auth:beta_lookup");
