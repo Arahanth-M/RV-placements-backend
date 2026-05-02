@@ -9,6 +9,10 @@ const requiredPresent = Joi.custom((value, helpers) => {
 
 export const interviewStartSchema = Joi.object({
   companyId: requiredPresent.required(),
+  placementVisitType: Joi.string().allow("").optional(),
+  placementCluster: Joi.string().allow("").optional(),
+  placementYear: Joi.number().integer().min(2000).max(2100).optional(),
+  mergePlacementByType: Joi.boolean().optional(),
 }).unknown(true);
 
 export const interviewSubmitAnswerSchema = Joi.object({

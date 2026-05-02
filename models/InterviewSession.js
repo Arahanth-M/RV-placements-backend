@@ -69,6 +69,19 @@ const evaluationTraceSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const roundAnswerAttemptSchema = new mongoose.Schema(
+  {
+    answer: { type: String, trim: true },
+    score: { type: Number },
+    feedback: { type: String, trim: true },
+    evaluationTrace: {
+      type: evaluationTraceSchema,
+      default: null,
+    },
+  },
+  { _id: false }
+);
+
 const roundQuestionSchema = new mongoose.Schema(
   {
     question: { type: String, trim: true },
@@ -78,6 +91,11 @@ const roundQuestionSchema = new mongoose.Schema(
     evaluationTrace: {
       type: evaluationTraceSchema,
       default: null,
+    },
+    /** Initial submission plus at most one reattempt per question (worker-enforced). */
+    attempts: {
+      type: [roundAnswerAttemptSchema],
+      default: [],
     },
     expectedPoints: {
       type: [expectedPointSchema],
@@ -124,6 +142,30 @@ const interviewSessionSchema = new mongoose.Schema(
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "CompanyStatic",
+    },
+    /** Normalized `company_visits.type` for this mock (empty string = default slot). */
+    placementVisitType: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    /** Normalized `company_visits.cluster` for this mock (empty string = default slot). */
+    placementCluster: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    /** Placement year for `company_visits` row (matches `year` field). */
+    placementYear: {
+      type: Number,
+      default: 2026,
+      min: 2000,
+      max: 2100,
+    },
+    /** When true, interview material merges all approved visits sharing {@link placementVisitType} (any year/cluster). */
+    mergePlacementByType: {
+      type: Boolean,
+      default: false,
     },
     role: {
       type: String,

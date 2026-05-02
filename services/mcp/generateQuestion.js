@@ -29,14 +29,60 @@ const normalizeCacheToken = (value, fallback = "general") => {
   return safe.replace(/\s+/g, "_").replace(/[^a-z0-9_-]/g, "") || fallback;
 };
 
-const buildQuestionPoolCacheKey = ({ companyContext, roundType, difficulty }) => {
+const normalizePlacementSliceToken = (
+  visitType,
+  cluster,
+  placementYear,
+  mergePlacementByType = false
+) => {
+  if (mergePlacementByType) {
+    const t =
+      visitType == null || String(visitType).trim() === ""
+        ? ""
+        : String(visitType).trim();
+    const typeTok =
+      t === "" ? "default_type" : normalizeCacheToken(t, "type");
+    return `${typeTok}:merged_by_visit_type`;
+  }
+  const t =
+    visitType == null || String(visitType).trim() === ""
+      ? ""
+      : String(visitType).trim();
+  const c =
+    cluster == null || String(cluster).trim() === ""
+      ? ""
+      : String(cluster).trim();
+  const y = Number(placementYear);
+  const yearTok = Number.isFinite(y) ? String(Math.trunc(y)) : "year";
+  const typeTok =
+    t === "" ? "default_type" : normalizeCacheToken(t, "type");
+  const clusterTok =
+    c === "" ? "default_cluster" : normalizeCacheToken(c, "cluster");
+  return `${typeTok}:${yearTok}:${clusterTok}`;
+};
+
+const buildQuestionPoolCacheKey = ({
+  companyContext,
+  roundType,
+  difficulty,
+  placementVisitType,
+  placementCluster,
+  placementYear,
+  mergePlacementByType,
+}) => {
   const company = normalizeCacheToken(
     companyContext?.name || companyContext?.companyName,
     "unknown_company"
   );
+  const slice = normalizePlacementSliceToken(
+    placementVisitType,
+    placementCluster,
+    placementYear,
+    mergePlacementByType === true
+  );
   const type = normalizeCacheToken(roundType, "general");
   const level = normalizeDifficulty(difficulty);
-  return `${company}:${type}:${level}`;
+  return `${company}:${slice}:${type}:${level}`;
 };
 
 const buildSeenQuestionsKey = (userId) => {
@@ -454,6 +500,10 @@ export const generateQuestion = async ({
   previousScore,
   previousEvaluation = null,
   roundHistory = [],
+  placementVisitType,
+  placementCluster,
+  placementYear,
+  mergePlacementByType,
 }) => {
   try {
     const hasPreviousAnswer = Boolean(toSafeString(previousAnswer));
@@ -483,6 +533,10 @@ export const generateQuestion = async ({
       companyContext,
       roundType,
       difficulty,
+      placementVisitType,
+      placementCluster,
+      placementYear,
+      mergePlacementByType,
     });
     const seenQuestionsKey = buildSeenQuestionsKey(userId);
 

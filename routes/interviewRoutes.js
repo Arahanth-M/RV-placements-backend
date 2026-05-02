@@ -1,5 +1,15 @@
 import express from "express";
-import { getCompanyMergedForAdminById } from "../services/companyService.js";
+import mongoose from "mongoose";
+import CompanyStatic from "../models/CompanyStatic.js";
+import {
+  getInterviewMergedCompanyPayload,
+  listInterviewVisitSlotsForCompany,
+  normalizePlacementVisitYear,
+  normalizeVisitKeyParts,
+} from "../services/companyService.js";
+
+const parseMergePlacementByType = (raw) =>
+  raw === true || raw === "true" || raw === "1" || raw === 1;
 import authJWT from "../middleware/authJWT.js";
 import checkBetaAccess from "../middleware/checkBetaAccess.js";
 import authorize from "../middleware/authorize.js";
@@ -26,7 +36,12 @@ import { generateInterviewPlan } from "../services/interviewEngine.js";
 import { interviewQueue } from "../services/queues/interviewQueue.js";
 import { EVALUATE_ANSWER } from "../services/queues/jobTypes.js";
 import { buildInterviewTips } from "../utils/interviewTips.js";
-import { INTERVIEW_STATES } from "../services/interviewStateMachine.js";
+import {
+  mirrorLegacyAttemptsIntoSlot,
+  normalizedQuestionAttempts,
+  isQuestionRetryPendingSlot,
+} from "../utils/interviewQuestionAttempts.js";
+import { INTERVIEW_STATES, assertValidTransition } from "../services/interviewStateMachine.js";
 import {
   getCachedInterviewSummaries,
   setCachedInterviewSummaries,
@@ -155,9 +170,33 @@ async function invalidateSessionAndSummaryCaches(userId, sessionId) {
   ]);
 }
 
+router.get("/visit-options/:companyId", async (req, res) => {
+  try {
+    const { companyId } = req.params;
+    if (!companyId || !mongoose.isValidObjectId(String(companyId))) {
+      return res.status(400).json({ error: "Valid companyId is required" });
+    }
+    const exists = await CompanyStatic.findById(companyId).select("_id").lean();
+    if (!exists) {
+      return res.status(404).json({ error: "Company not found" });
+    }
+    const { slots } = await listInterviewVisitSlotsForCompany(companyId);
+    return res.json({ slots });
+  } catch (error) {
+    console.error("❌ Error listing interview visit options:", error.message);
+    return res.status(500).json({ error: "Failed to list placement slots" });
+  }
+});
+
 router.post("/start-interview", validateRequest(interviewStartSchema), async (req, res) => {
   try {
-    const { companyId } = req.body;
+    const {
+      companyId,
+      placementVisitType,
+      placementCluster,
+      placementYear: placementYearRaw,
+      mergePlacementByType: mergePlacementByTypeRaw,
+    } = req.body;
     const userId = getAuthenticatedUserId(req);
 
     if (!userId) {
@@ -170,16 +209,42 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
       });
     }
 
-    const loaded = await getCompanyMergedForAdminById(String(companyId));
+    const mergePlacementByType = parseMergePlacementByType(mergePlacementByTypeRaw);
+    const norm = normalizeVisitKeyParts(
+      placementVisitType,
+      mergePlacementByType ? "" : placementCluster
+    );
+    const placementYear = mergePlacementByType
+      ? normalizePlacementVisitYear(undefined)
+      : normalizePlacementVisitYear(placementYearRaw);
+    const loaded = await getInterviewMergedCompanyPayload(
+      String(companyId),
+      norm.type,
+      norm.cluster,
+      placementYear,
+      mergePlacementByType
+    );
     if (!loaded?.staticRow || !loaded.merged) {
       return res.status(404).json({ error: "Company not found" });
     }
     const companyData = loaded.merged;
 
-    let session = await getInProgressSession(userId, companyId);
+    let session = await getInProgressSession(
+      userId,
+      companyId,
+      norm.type,
+      mergePlacementByType ? "" : norm.cluster,
+      placementYear,
+      mergePlacementByType
+    );
     const createdNewSession = !session;
     if (!session) {
-      session = await createSession(userId, companyId);
+      session = await createSession(userId, companyId, {
+        placementVisitType: norm.type,
+        placementCluster: mergePlacementByType ? "" : norm.cluster,
+        placementYear,
+        mergePlacementByType,
+      });
     }
 
     const isAlreadyInitialized = Boolean(session.currentQuestion);
@@ -199,6 +264,11 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
         totalRounds: session.totalRounds || 0,
         currentRoundIndex: roundIndexFromCurrentRound(session),
         difficultyLevel: session.difficultyLevel || null,
+        placementVisitType: session.placementVisitType ?? norm.type,
+        placementCluster: session.placementCluster ?? norm.cluster,
+        placementYear: session.placementYear ?? placementYear,
+        mergePlacementByType:
+          session.mergePlacementByType === true ? true : mergePlacementByType,
       };
     } else {
       const plan = await generateInterviewPlan(companyData);
@@ -230,6 +300,11 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
         currentRoundIndex: refreshedSession ? roundIndexFromCurrentRound(refreshedSession) : 0,
         difficultyLevel:
           refreshedSession?.rounds?.[0]?.difficulty || refreshedSession?.difficultyLevel || null,
+        placementVisitType: refreshedSession?.placementVisitType ?? norm.type,
+        placementCluster: refreshedSession?.placementCluster ?? norm.cluster,
+        placementYear: refreshedSession?.placementYear ?? placementYear,
+        mergePlacementByType:
+          refreshedSession?.mergePlacementByType === true ? true : mergePlacementByType,
       };
     }
 
@@ -251,7 +326,13 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
 
 router.get("/resume-interview", async (req, res) => {
   try {
-    const { companyId } = req.query;
+    const {
+      companyId,
+      placementVisitType,
+      placementCluster,
+      placementYear: placementYearRaw,
+      mergePlacementByType: mergePlacementByTypeRaw,
+    } = req.query;
     const userId = getAuthenticatedUserId(req);
 
     if (!userId) {
@@ -264,13 +345,32 @@ router.get("/resume-interview", async (req, res) => {
       });
     }
 
-    const session = await getInProgressSession(userId, companyId);
+    const mergePlacementByType = parseMergePlacementByType(mergePlacementByTypeRaw);
+    const norm = normalizeVisitKeyParts(
+      placementVisitType,
+      mergePlacementByType ? "" : placementCluster
+    );
+    const placementYear = mergePlacementByType
+      ? normalizePlacementVisitYear(undefined)
+      : normalizePlacementVisitYear(placementYearRaw);
+    const session = await getInProgressSession(
+      userId,
+      companyId,
+      norm.type,
+      mergePlacementByType ? "" : norm.cluster,
+      placementYear,
+      mergePlacementByType
+    );
     if (!session) {
       return res.json({
         resumable: false,
         sessionId: null,
         question: null,
         status: "idle",
+        placementVisitType: norm.type,
+        placementCluster: norm.cluster,
+        placementYear,
+        mergePlacementByType,
       });
     }
 
@@ -290,6 +390,11 @@ router.get("/resume-interview", async (req, res) => {
       currentRoundIndex: roundIndexFromCurrentRound(session),
       difficultyLevel: session.difficultyLevel || null,
       historyCount: Array.isArray(session.history) ? session.history.length : 0,
+      placementVisitType: session.placementVisitType ?? norm.type,
+      placementCluster: session.placementCluster ?? norm.cluster,
+      placementYear: session.placementYear ?? placementYear,
+      mergePlacementByType:
+        session.mergePlacementByType === true ? true : mergePlacementByType,
     });
   } catch (error) {
     console.error("❌ Error resuming interview:", error.message);
@@ -490,6 +595,15 @@ router.get("/interview-status/:sessionId", async (req, res) => {
         ? currentRoundDoc.questions[currentQuestionIndex - 1]
         : null;
 
+    const slotNow = currentRoundDoc?.questions?.[currentQuestionIndex];
+    const retryPending = isQuestionRetryPendingSlot(slotNow);
+
+    const exposePrevFeedback =
+      !retryPending &&
+      prevQuestion &&
+      typeof prevQuestion.answer === "string" &&
+      prevQuestion.answer.trim() !== "";
+
     const slotQuestion = currentRoundDoc?.questions?.[currentQuestionIndex]?.question;
     const rawCurrentQ = session.currentQuestion;
     const effectiveCurrentQuestion =
@@ -563,18 +677,59 @@ router.get("/interview-status/:sessionId", async (req, res) => {
       session.state === INTERVIEW_STATES.EVALUATING ||
       (await isInterviewProcessing(sessionId));
 
+    const roundsQuestionSummary = rounds.map((r, idx) => {
+      const roundNumber = typeof r.roundNumber === "number" ? r.roundNumber : idx + 1;
+      let questionCount =
+        typeof r.questionCount === "number" && Number.isFinite(r.questionCount)
+          ? Math.round(r.questionCount)
+          : null;
+      const slots = Array.isArray(r.questions) ? r.questions.length : 0;
+      if (questionCount == null || questionCount < 1) {
+        questionCount = Math.max(slots, 3);
+      }
+      questionCount = Math.min(5, Math.max(3, questionCount));
+      return { roundNumber, questionCount };
+    });
+
+    const questionsPlannedThisRound =
+      typeof currentRoundDoc?.questionCount === "number" &&
+      Number.isFinite(currentRoundDoc.questionCount)
+        ? Math.min(5, Math.max(3, Math.round(currentRoundDoc.questionCount)))
+        : roundsQuestionSummary[currentRoundIndex]?.questionCount ??
+          Math.max(Array.isArray(currentRoundDoc?.questions) ? currentRoundDoc.questions.length : 0, 3);
+
+    const currentQuestionNumberWithinRound = currentQuestionIndex + 1;
+
+    const lastQuestionCanReattempt =
+      exposePrevFeedback &&
+      normalizedQuestionAttempts(prevQuestion).length === 1 &&
+      session.state !== INTERVIEW_STATES.INTERVIEW_COMPLETE &&
+      !isProcessing;
+
     return res.json({
       status: toClientStatus(session.state),
       currentRound: session.currentRound,
       currentQuestion: effectiveCurrentQuestion,
       currentQuestionIndex: session.currentQuestionIndex,
-      lastScore: prevQuestion?.score ?? null,
-      lastFeedback: prevQuestion?.feedback ?? null,
-      lastCorrectness: prevQuestion?.evaluationTrace?.verdict ?? null,
-      lastRelevance: toRelevanceLabel(prevQuestion?.evaluationTrace?.relevance),
+      lastScore: exposePrevFeedback ? prevQuestion?.score ?? null : null,
+      lastFeedback: exposePrevFeedback ? prevQuestion?.feedback ?? null : null,
+      lastQuestion:
+        exposePrevFeedback &&
+        typeof prevQuestion?.question === "string" &&
+        prevQuestion.question.trim() !== ""
+          ? prevQuestion.question.trim()
+          : null,
+      lastCorrectness: exposePrevFeedback ? prevQuestion?.evaluationTrace?.verdict ?? null : null,
+      lastRelevance: exposePrevFeedback
+        ? toRelevanceLabel(prevQuestion?.evaluationTrace?.relevance)
+        : null,
+      lastQuestionCanReattempt,
       roundStatus: currentRoundDoc?.status ?? session.roundStatus ?? null,
       interviewStatus: toClientInterviewStatus(session.state),
       roundType: roundType ?? null,
+      roundsQuestionSummary,
+      questionsPlannedThisRound,
+      currentQuestionNumberWithinRound,
       isProcessing,
       tips: selectedTips,
       totalRounds: session.totalRounds || 0,
@@ -586,6 +741,103 @@ router.get("/interview-status/:sessionId", async (req, res) => {
   } catch (error) {
     console.error("❌ Error fetching interview status:", error?.message || error);
     return res.status(500).json({ error: "Failed to fetch interview status" });
+  }
+});
+
+router.post("/begin-question-reattempt", validateRequest(interviewMoveRoundSchema), async (req, res) => {
+  try {
+    const { sessionId } = req.body;
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    if (!sessionId) {
+      return res.status(400).json({ error: "sessionId is required" });
+    }
+
+    const session = await getSession(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+    if (!isSessionOwner(session, userId)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    if (session.state === INTERVIEW_STATES.INTERVIEW_COMPLETE) {
+      return res.status(400).json({ error: "Interview is complete; cannot reattempt questions." });
+    }
+    if (await isInterviewProcessing(sessionId)) {
+      return res.status(409).json({ error: "Wait until evaluation finishes before reattempting." });
+    }
+
+    const rounds = Array.isArray(session.rounds) ? session.rounds : [];
+    const ri = roundIndexFromCurrentRound(session);
+    const round = rounds[ri];
+    if (!round) {
+      return res.status(400).json({ error: "Round not found" });
+    }
+
+    const idx = Number(session.currentQuestionIndex) || 0;
+    if (idx < 1) {
+      return res.status(400).json({ error: "There is no previous question to reattempt yet." });
+    }
+    const prevIdx = idx - 1;
+    const qs = Array.isArray(round.questions) ? round.questions : [];
+    const prevSlot = qs[prevIdx];
+    if (!prevSlot || typeof prevSlot.question !== "string" || !prevSlot.question.trim()) {
+      return res.status(400).json({ error: "Could not resolve the question to reattempt." });
+    }
+
+    mirrorLegacyAttemptsIntoSlot(prevSlot);
+    const attemptsNorm = normalizedQuestionAttempts(prevSlot);
+    if (attemptsNorm.length !== 1) {
+      return res.status(400).json({
+        error:
+          attemptsNorm.length >= 2
+            ? "You already used your one reattempt for this question."
+            : "No graded attempt found for this question yet.",
+      });
+    }
+
+    prevSlot.answer = "";
+    prevSlot.feedback = "";
+    prevSlot.score = null;
+    prevSlot.evaluationTrace = null;
+
+    session.currentQuestionIndex = prevIdx;
+    session.currentQuestion = prevSlot.question.trim();
+
+    if (round.status === "COMPLETED") {
+      round.status = "IN_PROGRESS";
+      session.roundStatus = "IN_PROGRESS";
+      round.feedback = {
+        summary: "",
+        strengths: [],
+        weaknesses: [],
+        improvementTips: [],
+      };
+    }
+
+    if (session.state === INTERVIEW_STATES.ROUND_COMPLETE) {
+      assertValidTransition(session.state, INTERVIEW_STATES.ROUND_ACTIVE);
+      session.state = INTERVIEW_STATES.ROUND_ACTIVE;
+    }
+
+    session.currentRoundIndex = ri;
+    session.markModified("rounds");
+    session.markModified("currentQuestion");
+    session.markModified("currentQuestionIndex");
+    session.markModified("roundStatus");
+    session.markModified("state");
+    session.markModified("currentRoundIndex");
+
+    await session.save();
+    await invalidateInterviewDetail(sessionId);
+    await invalidateInterviewSummaries(userId);
+
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("❌ Error beginning question reattempt:", error?.stack || error?.message || error);
+    return res.status(500).json({ error: "Failed to begin question reattempt" });
   }
 });
 
@@ -696,11 +948,31 @@ router.delete("/discard/:sessionId", async (req, res) => {
 router.get("/preview-plan/:companyId", async (req, res) => {
   try {
     const { companyId } = req.params;
+    const {
+      placementVisitType,
+      placementCluster,
+      placementYear: placementYearRaw,
+      mergePlacementByType: mergePlacementByTypeRaw,
+    } = req.query;
     if (!companyId) {
       return res.status(400).json({ error: "companyId is required" });
     }
 
-    const loaded = await getCompanyMergedForAdminById(String(companyId));
+    const mergePlacementByType = parseMergePlacementByType(mergePlacementByTypeRaw);
+    const norm = normalizeVisitKeyParts(
+      placementVisitType,
+      mergePlacementByType ? "" : placementCluster
+    );
+    const placementYear = mergePlacementByType
+      ? normalizePlacementVisitYear(undefined)
+      : normalizePlacementVisitYear(placementYearRaw);
+    const loaded = await getInterviewMergedCompanyPayload(
+      String(companyId),
+      norm.type,
+      norm.cluster,
+      placementYear,
+      mergePlacementByType
+    );
     if (!loaded?.staticRow || !loaded.merged) {
       return res.status(404).json({ error: "Company not found" });
     }
@@ -711,8 +983,18 @@ router.get("/preview-plan/:companyId", async (req, res) => {
       companyId,
       totalRounds: plan?.totalRounds || 0,
       roundsPlanCount: Array.isArray(plan?.roundsPlan) ? plan.roundsPlan.length : 0,
+      placementVisitType: norm.type,
+      placementCluster: norm.cluster,
+      placementYear: loaded.placementYear,
+      mergePlacementByType,
     });
-    return res.json(plan);
+    return res.json({
+      ...plan,
+      placementVisitType: norm.type,
+      placementCluster: norm.cluster,
+      placementYear: loaded.placementYear,
+      mergePlacementByType,
+    });
   } catch (error) {
     console.error("❌ Error generating interview preview:", error.message);
     return res.status(500).json({ error: "Failed to generate interview preview" });

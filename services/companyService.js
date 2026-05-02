@@ -46,6 +46,20 @@ export function normalizeCompanyDetailYear(raw) {
 }
 
 /**
+ * Placement year for AI mock slice — uses the selected visit row year (not limited to detail-card years).
+ * @param {unknown} raw
+ * @returns {number}
+ */
+export function normalizePlacementVisitYear(raw) {
+  if (raw == null || raw === "") return COMPANY_VISIT_YEAR;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return COMPANY_VISIT_YEAR;
+  const y = Math.trunc(n);
+  if (y < 2000 || y > 2100) return COMPANY_VISIT_YEAR;
+  return y;
+}
+
+/**
  * Which placement list opened GET `/companies/:id` — selects among multiple approved visits for the same year.
  * @param {unknown} raw
  * @returns {"summer_internship"|"dream"|"open_dream"|null}
@@ -428,6 +442,258 @@ export function mergeToLegacyShape(staticDoc, visitDoc) {
 
   flattenRoleCtcForJson(out);
   return out;
+}
+
+/**
+ * Approved placement slots for AI interviews: one slot per distinct visit `type`;
+ * choosing it merges all approved rows for that company with the same normalized type (any year/cluster).
+ * @param {string|import("mongoose").Types.ObjectId} companyId
+ * @returns {Promise<{ slots: { visitType: string, mergePlacementByType: boolean }[] }>}
+ */
+export async function listInterviewVisitSlotsForCompany(companyId) {
+  const cid = toObjectId(companyId);
+  if (!cid) return { slots: [] };
+
+  const companyExpr = buildCompanyVisitCompanyExprMatch(cid);
+  if (!companyExpr) return { slots: [] };
+
+  const rows = await CompanyVisit.find({
+    status: "approved",
+    ...companyExpr,
+  })
+    .select("year type cluster migratedAt")
+    .sort({ year: -1, migratedAt: -1, _id: -1 })
+    .lean();
+
+  /** @type {Map<string, { visitType: string, mergePlacementByType: boolean }>} */
+  const groups = new Map();
+  for (const row of rows) {
+    const { type } = normalizeVisitKeyParts(row.type, row.cluster);
+    const key = type;
+    if (!groups.has(key)) {
+      groups.set(key, { visitType: type, mergePlacementByType: true });
+    }
+  }
+
+  let slots = [...groups.values()].sort((a, b) =>
+    (a.visitType || "").localeCompare(b.visitType || "")
+  );
+
+  if (slots.length === 0) {
+    slots = [{ visitType: "", mergePlacementByType: true }];
+  }
+
+  return { slots };
+}
+
+/**
+ * Static row + approved `company_visits`: either exact `(year, type, cluster)` or all rows matching `type` when `mergeVisitsByCompanyType`.
+ * @param {string|import("mongoose").Types.ObjectId} companyId
+ * @param {unknown} visitTypeRaw
+ * @param {unknown} clusterRaw
+ * @param {unknown} placementYearRaw
+ * @param {boolean} [mergeVisitsByCompanyType]
+ * @returns {Promise<{ merged: Record<string, unknown>|null, staticRow: Record<string, unknown>|null, placementYear: number, syntheticVisit: Record<string, unknown>|null, mergePlacementByType: boolean }>}
+ */
+export async function getInterviewMergedCompanyPayload(
+  companyId,
+  visitTypeRaw,
+  clusterRaw,
+  placementYearRaw,
+  mergeVisitsByCompanyType = false
+) {
+  const cid = toObjectId(companyId);
+  const norm = normalizeVisitKeyParts(visitTypeRaw, clusterRaw);
+  const year = normalizePlacementVisitYear(placementYearRaw);
+  const mergePlacementByType = Boolean(mergeVisitsByCompanyType);
+  if (!cid) {
+    return {
+      merged: null,
+      staticRow: null,
+      placementYear: year,
+      syntheticVisit: null,
+      mergePlacementByType,
+    };
+  }
+
+  const staticRow = await CompanyStatic.findById(cid).lean();
+  if (!staticRow) {
+    return {
+      merged: null,
+      staticRow: null,
+      placementYear: year,
+      syntheticVisit: null,
+      mergePlacementByType,
+    };
+  }
+
+  const companyExpr = buildCompanyVisitCompanyExprMatch(cid);
+  if (!companyExpr) {
+    return {
+      merged: mergeToLegacyShape(staticRow, null),
+      staticRow,
+      placementYear: year,
+      syntheticVisit: null,
+      mergePlacementByType,
+    };
+  }
+
+  let visits;
+  if (mergePlacementByType) {
+    visits = await CompanyVisit.find({
+      status: "approved",
+      ...companyExpr,
+      $expr: {
+        $eq: [{ $ifNull: ["$type", ""] }, norm.type],
+      },
+    })
+      .sort({ year: -1, migratedAt: -1, _id: -1 })
+      .lean();
+  } else {
+    visits = await CompanyVisit.find({
+      status: "approved",
+      ...companyExpr,
+      $expr: {
+        $and: [
+          { $eq: [{ $ifNull: ["$year", COMPANY_VISIT_YEAR] }, year] },
+          { $eq: [{ $ifNull: ["$type", ""] }, norm.type] },
+          { $eq: [{ $ifNull: ["$cluster", ""] }, norm.cluster] },
+        ],
+      },
+    })
+      .sort({ migratedAt: -1, _id: -1 })
+      .lean();
+  }
+
+  const syntheticVisit =
+    visits.length > 0 ? mergeApprovedVisitsIntoSyntheticVisit(visits) : null;
+  const merged = mergeToLegacyShape(staticRow, syntheticVisit);
+
+  const anchorYear =
+    mergePlacementByType && visits.length > 0
+      ? normalizePlacementVisitYear(
+          visits[0]?.year ?? COMPANY_VISIT_YEAR
+        )
+      : year;
+
+  return {
+    merged,
+    staticRow,
+    placementYear: anchorYear,
+    syntheticVisit,
+    mergePlacementByType,
+  };
+}
+
+/**
+ * @param {unknown[]} items
+ */
+function dedupeJsonPreserveOrder(items) {
+  if (!Array.isArray(items)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const item of items) {
+    let key;
+    try {
+      key = JSON.stringify(item);
+    } catch {
+      key = String(item);
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+/**
+ * @param {unknown[][]} arraysNewestFirst
+ */
+function concatDedupeStringArrays(arraysNewestFirst) {
+  const seen = new Set();
+  const out = [];
+  for (const arr of arraysNewestFirst) {
+    if (!Array.isArray(arr)) continue;
+    for (const raw of arr) {
+      const s =
+        typeof raw === "string"
+          ? raw.trim()
+          : String(raw ?? "")
+              .trim();
+      if (!s) continue;
+      const key = s.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(s);
+    }
+  }
+  return out;
+}
+
+/**
+ * Merge approved visit docs for the same company/year/type/cluster (e.g. duplicate rows — newest wins scalars, arrays merged).
+ * @param {Record<string, unknown>[]} visitsSortedDesc
+ */
+function mergeApprovedVisitsIntoSyntheticVisit(visitsSortedDesc) {
+  if (!Array.isArray(visitsSortedDesc) || visitsSortedDesc.length === 0) return null;
+  const plains = visitsSortedDesc.map((v) => visitWithPlainRoleCtc(v));
+  const newest = plains[0];
+  const skipScalars = new Set([
+    "onlineQuestions",
+    "onlineQuestions_solution",
+    "interviewQuestions",
+    "interviewQuestions_solution",
+    "interviewProcess",
+    "internshipExperience",
+    "mcqQuestions",
+    "roles",
+    "selectedCandidates",
+    "ppoBranchStats",
+    "type",
+    "cluster",
+  ]);
+
+  /** @type {Record<string, unknown>} */
+  const merged = {};
+  for (const [k, val] of Object.entries(newest)) {
+    if (skipScalars.has(k)) continue;
+    if (val !== undefined) merged[k] = val;
+  }
+
+  const parts = normalizeVisitKeyParts(newest.type, newest.cluster);
+  merged.type = parts.type;
+  merged.cluster = parts.cluster;
+
+  const collect = (field) => plains.map((p) => p[field]);
+
+  merged.onlineQuestions = concatDedupeStringArrays(collect("onlineQuestions"));
+  merged.onlineQuestions_solution = concatDedupeStringArrays(
+    collect("onlineQuestions_solution")
+  );
+  merged.interviewQuestions = concatDedupeStringArrays(collect("interviewQuestions"));
+  merged.interviewQuestions_solution = concatDedupeStringArrays(
+    collect("interviewQuestions_solution")
+  );
+  merged.interviewProcess = concatDedupeStringArrays(collect("interviewProcess"));
+  merged.internshipExperience = concatDedupeStringArrays(collect("internshipExperience"));
+  merged.mcqQuestions = dedupeJsonPreserveOrder(
+    plains.flatMap((p) => (Array.isArray(p.mcqQuestions) ? p.mcqQuestions : []))
+  );
+  merged.roles = dedupeJsonPreserveOrder(
+    plains.flatMap((p) => (Array.isArray(p.roles) ? p.roles : []))
+  );
+  merged.selectedCandidates = dedupeJsonPreserveOrder(
+    plains.flatMap((p) =>
+      Array.isArray(p.selectedCandidates) ? p.selectedCandidates : []
+    )
+  );
+  merged.ppoBranchStats = dedupeJsonPreserveOrder(
+    plains.flatMap((p) =>
+      Array.isArray(p.ppoBranchStats) ? p.ppoBranchStats : []
+    )
+  );
+
+  return merged;
 }
 
 /**
