@@ -1,6 +1,12 @@
 import mongoose from "mongoose";
 import InterviewSession from "../models/InterviewSession.js";
-import { getCompanyMergedForAdminById } from "./companyService.js";
+import {
+  COMPANY_VISIT_YEAR,
+  getCompanyMergedForAdminById,
+  getInterviewMergedCompanyPayload,
+  normalizePlacementVisitYear,
+  normalizeVisitKeyParts,
+} from "./companyService.js";
 import { getCompanyContext } from "./mcp/getCompanyContext.js";
 import { generateQuestion, normalizeExpectedPoints } from "./mcp/generateQuestion.js";
 import { generateRoundFeedback as generateRoundFeedbackMCP } from "./mcp/generateRoundFeedback.js";
@@ -55,6 +61,29 @@ const getLegacyCompanyNameById = async (companyId) => {
   return toSafeString(legacyCompany?.name);
 };
 
+export const resolveInterviewMergedCompanyForSession = async (session) => {
+  const cid = String(session?.companyId?._id ?? session?.companyId ?? "").trim();
+  if (!cid) return null;
+  const typeUnd = session?.placementVisitType;
+  const clusterUnd = session?.placementCluster;
+  const yearUnd = session?.placementYear;
+  const legacy =
+    typeUnd === undefined && clusterUnd === undefined && yearUnd === undefined;
+  if (legacy) {
+    const pack = await getCompanyMergedForAdminById(cid);
+    return pack?.merged ?? null;
+  }
+  const mergeByType = session?.mergePlacementByType === true;
+  const pack = await getInterviewMergedCompanyPayload(
+    cid,
+    typeUnd ?? "",
+    mergeByType ? "" : clusterUnd ?? "",
+    mergeByType ? undefined : yearUnd,
+    mergeByType
+  );
+  return pack?.merged ?? null;
+};
+
 export const resolveInterviewCompanyName = async (session, companyNameCache = new Map()) => {
   const directName =
     (toSafeString(session?.companyName) || getCompanyRefName(session?.companyId)) ?? "";
@@ -81,10 +110,22 @@ export const resolveInterviewCompanyName = async (session, companyNameCache = ne
   return resolvedName;
 };
 
-export const createSession = async (userId, companyId) => {
+export const createSession = async (userId, companyId, placementSlice = {}) => {
+  const mergeByType = Boolean(placementSlice.mergePlacementByType);
+  const norm = normalizeVisitKeyParts(
+    placementSlice.placementVisitType,
+    mergeByType ? "" : placementSlice.placementCluster
+  );
+  const placementYear = mergeByType
+    ? COMPANY_VISIT_YEAR
+    : normalizePlacementVisitYear(placementSlice.placementYear);
   return InterviewSession.create({
     userId,
     companyId,
+    placementVisitType: norm.type,
+    placementCluster: mergeByType ? "" : norm.cluster,
+    placementYear,
+    mergePlacementByType: mergeByType,
     state: INTERVIEW_STATES.PREVIEW,
   });
 };
@@ -98,11 +139,33 @@ export const getSessionLean = async (sessionId) => {
   return InterviewSession.findById(sessionId).lean();
 };
 
-export const getInProgressSession = async (userId, companyId) => {
+export const getInProgressSession = async (
+  userId,
+  companyId,
+  placementVisitType,
+  placementCluster,
+  placementYear,
+  mergePlacementByType = false
+) => {
+  const norm = normalizeVisitKeyParts(placementVisitType, placementCluster);
+  if (mergePlacementByType) {
+    return InterviewSession.findOne({
+      userId,
+      companyId,
+      state: { $ne: INTERVIEW_STATES.INTERVIEW_COMPLETE },
+      mergePlacementByType: true,
+      placementVisitType: norm.type,
+    }).sort({ updatedAt: -1 });
+  }
+  const year = normalizePlacementVisitYear(placementYear);
   return InterviewSession.findOne({
     userId,
     companyId,
     state: { $ne: INTERVIEW_STATES.INTERVIEW_COMPLETE },
+    placementVisitType: norm.type,
+    placementCluster: norm.cluster,
+    placementYear: year,
+    mergePlacementByType: { $ne: true },
   }).sort({ updatedAt: -1 });
 };
 
@@ -195,8 +258,7 @@ export const startRound = async (sessionId) => {
   }
 
   // 3) Call MCP generateQuestion with companyContext + round context
-  const companyData =
-    (await getCompanyMergedForAdminById(String(session.companyId)))?.merged ?? null;
+  const companyData = (await resolveInterviewMergedCompanyForSession(session)) ?? null;
   const companyContext = await getCompanyContext(companyData || {});
   const { question, expectedPoints, expectedAnswerMode } = await generateQuestion({
     userId: String(session.userId || ""),
@@ -209,6 +271,10 @@ export const startRound = async (sessionId) => {
     previousFeedback: "",
     previousScore: null,
     roundHistory: [],
+    placementVisitType: session.placementVisitType,
+    placementCluster: session.placementCluster,
+    placementYear: session.placementYear,
+    mergePlacementByType: session.mergePlacementByType === true,
   });
 
   // 4) Store first question in round.questions
@@ -300,8 +366,7 @@ export const generateRoundFeedback = async (sessionId, roundNumber) => {
   }
 
   // Fetch company context for MCP round feedback tool input.
-  const companyData =
-    (await getCompanyMergedForAdminById(String(session.companyId)))?.merged ?? null;
+  const companyData = (await resolveInterviewMergedCompanyForSession(session)) ?? null;
   const companyContext = await getCompanyContext(companyData || {});
 
   // 3) Call MCP generateRoundFeedback (new tool)

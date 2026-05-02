@@ -2,7 +2,6 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import { Worker } from "bullmq";
-import { getCompanyMergedForAdminById } from "../services/companyService.js";
 import { connectRedis, redisUrl } from "../src/utils/redisClient.js";
 import { connectDB } from "../config/db.js";
 import { config } from "../config/constants.js";
@@ -12,6 +11,7 @@ import { generateQuestion } from "../services/mcp/generateQuestion.js";
 import {
   getSession,
   generateRoundFeedback as generateRoundFeedbackForRound,
+  resolveInterviewMergedCompanyForSession,
 } from "../services/interviewSessionService.js";
 import { generateFinalReport } from "../services/interviewEngine.js";
 import { callLLM } from "../services/llmClient.js";
@@ -28,6 +28,11 @@ import {
   invalidateInterviewSummaries,
   markInterviewProcessing,
 } from "../services/interviewCache.js";
+import {
+  mirrorLegacyAttemptsIntoSlot,
+  normalizedQuestionAttempts,
+  resolvedQuestionScore,
+} from "../utils/interviewQuestionAttempts.js";
 
 await connectDB(config.MONGO_URI);
 await connectRedis().catch(() => {});
@@ -89,11 +94,19 @@ async function processEvaluateAnswerJob(sessionId, answer) {
   }
 
   const existingSlot = currentRound.questions?.[currentQuestionIndex];
+  let mirroredLegacy = false;
+  if (existingSlot) {
+    mirroredLegacy = mirrorLegacyAttemptsIntoSlot(existingSlot);
+  }
   if (
     existingSlot &&
     typeof existingSlot.answer === "string" &&
     existingSlot.answer.trim() !== ""
   ) {
+    if (mirroredLegacy) {
+      session.markModified("rounds");
+      await session.save();
+    }
     console.log(
       "[interviewWorker] idempotent skip — answer already exists for current question slot",
       {
@@ -117,8 +130,7 @@ async function processEvaluateAnswerJob(sessionId, answer) {
   }
 
   // Company context for MCP tools
-  const companyData =
-    (await getCompanyMergedForAdminById(String(session.companyId)))?.merged ?? null;
+  const companyData = (await resolveInterviewMergedCompanyForSession(session)) ?? null;
   const companyContext = await getCompanyContext(companyData || {});
 
   const questionSlot = currentRound.questions[currentQuestionIndex];
@@ -165,13 +177,27 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
     llmReasoning = "";
   }
 
+  const stateBeforeEval = session.state;
+
   assertValidTransition(session.state, INTERVIEW_STATES.EVALUATING);
   session.state = INTERVIEW_STATES.EVALUATING;
   console.log("State → EVALUATING");
   await session.save();
 
-  // 4) MCP evaluateAnswer
   const questionObj = currentRound.questions[currentQuestionIndex];
+  mirrorLegacyAttemptsIntoSlot(questionObj);
+  if (normalizedQuestionAttempts(questionObj).length >= 2) {
+    session.state = stateBeforeEval;
+    await session.save();
+    return {
+      httpStatus: 400,
+      body: {
+        error: "Maximum submission attempts reached for this question (initial answer plus one reattempt).",
+      },
+    };
+  }
+
+  // 4) MCP evaluateAnswer
   let evaluation;
   try {
     evaluation = await evaluateAnswer({
@@ -234,6 +260,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       score: null,
       feedback: "",
       evaluationTrace: null,
+      attempts: [],
       expectedPoints: Array.isArray(currentQuestionEntry?.expectedPoints)
         ? currentQuestionEntry.expectedPoints
         : [],
@@ -243,6 +270,16 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
   currentRound.questions[currentQuestionIndex].score = evaluation.score;
   currentRound.questions[currentQuestionIndex].feedback = evaluation.feedback;
   currentRound.questions[currentQuestionIndex].evaluationTrace = evaluation.evaluationTrace || null;
+
+  if (!Array.isArray(currentRound.questions[currentQuestionIndex].attempts)) {
+    currentRound.questions[currentQuestionIndex].attempts = [];
+  }
+  currentRound.questions[currentQuestionIndex].attempts.push({
+    answer: trimmedAnswer,
+    score: evaluation.score,
+    feedback: evaluation.feedback,
+    evaluationTrace: evaluation.evaluationTrace || null,
+  });
 
   // 6) Increment currentQuestionIndex
   const nextQuestionIndex = currentQuestionIndex + 1;
@@ -283,6 +320,10 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
         recentScores,
       },
       roundHistory,
+      placementVisitType: session.placementVisitType,
+      placementCluster: session.placementCluster,
+      placementYear: session.placementYear,
+      mergePlacementByType: session.mergePlacementByType === true,
     });
     if (!question || !String(question).trim()) {
       question = `Let's go deeper — how would you refine or extend your approach for this ${currentRound.type || "technical"} question?`;
@@ -346,6 +387,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
         roundStatus: session.roundStatus,
         currentRound: session.currentRound,
         currentQuestionIndex: session.currentQuestionIndex,
+        roundType: currentRound.type ?? null,
       },
     };
   }
@@ -378,8 +420,8 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
   );
   const refreshedRound = refreshedSession.rounds[refreshedRoundIndex];
   const answeredScores = (refreshedRound?.questions || [])
-    .map((item) => Number(item?.score))
-    .filter((value) => Number.isFinite(value));
+    .map((item) => resolvedQuestionScore(item))
+    .filter((value) => value != null && Number.isFinite(value));
   const roundAverageScore =
     answeredScores.length > 0
       ? Math.round(
@@ -424,11 +466,21 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       console.log(`✅ [interviewWorker] Final report generated for session ${sessionId}`);
     } catch (reportError) {
       console.error(`❌ [interviewWorker] Final report generation failed for session ${sessionId}:`, reportError?.message || reportError);
+      const sessionScores = (refreshedSession.rounds || [])
+        .flatMap((r) => (Array.isArray(r?.questions) ? r.questions : []))
+        .map((q) => resolvedQuestionScore(q))
+        .filter((v) => v != null && Number.isFinite(v));
+      const sessionAvgOverall =
+        sessionScores.length > 0
+          ? Math.round(
+              (sessionScores.reduce((sum, v) => sum + v, 0) / sessionScores.length) * 10
+            ) / 10
+          : roundAverageScore;
       // Fallback with minimal info so we don't save a completely null report if possible
       refreshedSession.finalReport = {
-        overallScore: roundAverageScore,
+        overallScore: sessionAvgOverall,
         summaryFeedback: "Your interview is complete. Feedback is being generated and will be available in your history shortly.",
-        summary: "Interview complete."
+        summary: "Interview complete.",
       };
     }
   }
@@ -455,6 +507,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       roundStatus: refreshedSession.roundStatus,
       currentRound: refreshedSession.currentRound,
       currentQuestionIndex: refreshedSession.currentQuestionIndex,
+      roundType: refreshedRound?.type ?? null,
       roundCompleted: true,
       roundFeedback: refreshedRound.feedback || {},
       nextRoundAvailable: decision.action === "NEXT_ROUND",
