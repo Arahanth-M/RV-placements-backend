@@ -4,13 +4,14 @@
  */
 
 import { getCompanyPlacementMeta } from "./ctcCategory.js";
+import { COMPANY_DETAIL_VISIT_YEARS } from "./placementYears.js";
 
 const PLACEMENT_CATEGORY_OPEN_DREAM = "open dream";
 
 /** @param {unknown} raw */
 function normalizePlacementDetailYear(raw) {
   const y = Number(raw);
-  return Number.isFinite(y) && (y === 2026 || y === 2027) ? y : undefined;
+  return Number.isFinite(y) && COMPANY_DETAIL_VISIT_YEARS.includes(y) ? y : undefined;
 }
 
 /**
@@ -132,6 +133,24 @@ export function visitIsMarkedOffCampus(visit) {
   return visit?.offCampus === true;
 }
 
+/**
+ * Summer-internship hub row: on-campus PPO only — not combined FTE offers (`Internship+FTE`, etc.).
+ * Matches {@link visitIsPpo} but rejects `type` strings that imply an FTE package track.
+ */
+export function visitQualifiesSummerInternshipListingRow(visit) {
+  if (!visit || typeof visit !== "object") return false;
+  if (!visitIsPpo(visit) || visitIsMarkedOffCampus(visit)) return false;
+  const norm = normalizeType(visit?.type);
+  if (norm.includes("fte")) return false;
+  return true;
+}
+
+/** True if any approved visit qualifies for the Summer internship tile (strict PPO-only row). */
+export function companyHasAnyYearSummerInternshipListingFromVisits(visits) {
+  if (!Array.isArray(visits)) return false;
+  return visits.some((v) => visitQualifiesSummerInternshipListingRow(v));
+}
+
 /** Single approved row qualifies for Dream / Open dream merge slot (non-PPO FTE-style). */
 export function visitQualifiesDreamTierRow(visit) {
   if (!visit || typeof visit !== "object") return false;
@@ -140,6 +159,26 @@ export function visitQualifiesDreamTierRow(visit) {
     !visitIsMarkedOffCampus(visit) &&
     !isInternshipOnlyCompany({ roles: visit.roles })
   );
+}
+
+/**
+ * Dream / Open dream **hub list** eligibility for one visit row.
+ * Includes strict dream-tier rows plus on-campus PPO-labelled rows that still carry an FTE/combined package
+ * (same hybrids {@link getListPlacementCategoryMetaFromVisits} can label as FTE).
+ * Excludes strict summer-internship-only rows so those stay summer-hub-only.
+ */
+export function visitQualifiesDreamHubListingVisit(visit) {
+  if (!visit || typeof visit !== "object") return false;
+  if (visitIsMarkedOffCampus(visit)) return false;
+  if (visitQualifiesDreamTierRow(visit)) return true;
+  if (
+    visitIsPpo(visit) &&
+    rolesSuggestFtePackage(visit) &&
+    !visitQualifiesSummerInternshipListingRow(visit)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -152,12 +191,14 @@ export function companyHasAnyYearSummerPpoFromVisits(visits) {
 }
 
 /**
- * True if any approved visit belongs in Dream / Open dream (non-PPO FTE-style visit).
+ * True if any approved visit should appear on Dream / Open dream hub lists
+ * ({@link visitQualifiesDreamHubListingVisit} — strict dream tier or FTE-heavy hybrid rows).
+ * Per-year “did they visit this cycle?” remains {@link hasDreamTierVisitForYear} / placementDreamTierForListingYear.
  * @param {Record<string, unknown>[]|undefined} visits
  */
 export function companyHasDreamTierVisitFromVisits(visits) {
   if (!Array.isArray(visits)) return false;
-  return visits.some((v) => visitQualifiesDreamTierRow(v));
+  return visits.some((v) => visitQualifiesDreamHubListingVisit(v));
 }
 
 /** @param {Record<string, unknown>|null|undefined} visit */
@@ -186,14 +227,32 @@ function pickBestDreamTierVisitByCtc(dreamTiers) {
 }
 
 /**
- * Card label for Dream / Open dream when the listing year's row is PPO-tagged but carries FTE roles
- * (single combined visit — excluded from dreamTiers because {@link visitIsPpo} is true).
+ * Dream/Open dream card subtitle source — matches hub-eligible rows but never strict Summer internship (`Internship(PPO)`).
  */
-function inferDreamListingTypeLabelFromPpoHybridVisit(visit) {
-  const norm = normalizeType(visit?.type);
-  if (norm.includes("internship") && norm.includes("fte")) return "Internship + FTE";
-  if (norm.includes("fte")) return "FTE";
-  return "FTE";
+function pickDreamHubSubtitleVisitAcrossYears(list) {
+  if (!Array.isArray(list) || list.length === 0) return null;
+  for (const y of COMPANY_DETAIL_VISIT_YEARS) {
+    const scoped = list.filter(
+      (v) => Number(v.year) === y && visitQualifiesDreamTierRow(v)
+    );
+    if (scoped.length > 0) return pickBestDreamTierVisitByCtc(scoped);
+    const hybrid = list.find(
+      (v) =>
+        Number(v.year) === y &&
+        visitIsPpo(v) &&
+        !visitIsMarkedOffCampus(v) &&
+        rolesSuggestFtePackage(v) &&
+        !visitQualifiesSummerInternshipListingRow(v)
+    );
+    if (hybrid) return hybrid;
+  }
+  return (
+    list.find(
+      (v) =>
+        visitQualifiesDreamHubListingVisit(v) &&
+        !visitQualifiesSummerInternshipListingRow(v)
+    ) ?? null
+  );
 }
 
 /**
@@ -208,16 +267,26 @@ function rolesSuggestFtePackage(visit) {
 }
 
 /**
- * Summer tile: latest on-campus PPO visit wins (display type + detail year for deep links).
+ * Summer tile: strict internship(PPO)-only visits; optional listing year narrows the pool first.
  * @returns {{ displayType?: string, detailYear?: number }}
  * @param {Record<string, unknown>[]|undefined} visits
+ * @param {unknown} [preferredListingYear] — optional `?year=` on hub lists (2026 / 2027)
  */
-export function getSummerPlacementPrefFromVisits(visits) {
+export function getSummerPlacementPrefFromVisits(visits, preferredListingYear) {
   if (!Array.isArray(visits)) return { displayType: undefined, detailYear: undefined };
-  const ppo = visits.filter((v) => visitIsPpo(v) && !visitIsMarkedOffCampus(v));
-  if (ppo.length === 0) return { displayType: undefined, detailYear: undefined };
-  ppo.sort((a, b) => (Number(b.year) || 0) - (Number(a.year) || 0));
-  const v = ppo[0];
+  let pool = visits.filter((v) => visitQualifiesSummerInternshipListingRow(v));
+  if (pool.length === 0) return { displayType: undefined, detailYear: undefined };
+
+  const prefYear = normalizePlacementDetailYear(preferredListingYear);
+  if (prefYear !== undefined) {
+    const scoped = pool.filter(
+      (v) => normalizePlacementDetailYear(v?.year) === prefYear
+    );
+    if (scoped.length > 0) pool = scoped;
+  }
+
+  pool.sort((a, b) => (Number(b.year) || 0) - (Number(a.year) || 0));
+  const v = pool[0];
   return {
     displayType: visitDisplayType(v),
     detailYear: normalizePlacementDetailYear(v?.year),
@@ -228,9 +297,12 @@ export function getSummerPlacementPrefFromVisits(visits) {
  * Dream vs open-dream from the best qualifying (non-PPO, on-campus, not internship-only) visit.
  * Falls back to primary visit meta when no such visit exists.
  *
- * When `preferredListingYear` is set (2026/2027 company-cards year), dream/open-dream **card labels**
+ * When `preferredListingYear` is set (2026/2027/2028 hub year), dream/open-dream **card labels**
  * prefer that year's qualifying visit so Open Dream matches per-year placement rows (not an older year's type).
- * If that year's approved row is PPO-labelled but includes FTE roles, show an FTE-style label instead of PPO.
+ * If that cycle has no strict dream-tier row nor hybrid FTE row, **later cycles** in
+ * {@link COMPANY_DETAIL_VISIT_YEARS} are tried in order (e.g. 2026 → 2027 → 2028).
+ * Card subtitles use each chosen visit row’s stored **`type`** string (trimmed), including hybrid PPO rows (e.g. `Internship+FTE`).
+ * Strict summer internship rows (`Internship(PPO)`, etc.) never headline Dream/Open dream — those belong on the Summer internship hub.
  *
  * @returns {{ category: string, totalCtcRupees: number, dreamDisplayType?: string, dreamDetailYear?: number }}
  * @param {Record<string, unknown>[]|undefined} visits
@@ -257,38 +329,75 @@ export function getListPlacementCategoryMetaFromVisits(
 
   /** Visit whose `type` string drives the Dream / Open dream card subtitle for this listing. */
   let displayVisit = null;
-  if (prefYear !== undefined && dreamTiers.length > 0) {
-    const scoped = dreamTiers.filter((v) => Number(v.year) === prefYear);
-    if (scoped.length > 0) {
-      displayVisit = pickBestDreamTierVisitByCtc(scoped);
+  /** Hybrid FTE-style row resolved when scanning listing year → later cycles (same order as strict tiers). */
+  let hybridFallbackVisit = null;
+  let hybridFallbackYear;
+
+  if (prefYear !== undefined && list.length > 0) {
+    const startIdx = COMPANY_DETAIL_VISIT_YEARS.indexOf(prefYear);
+    const yearsToTry =
+      startIdx >= 0 ? COMPANY_DETAIL_VISIT_YEARS.slice(startIdx) : [prefYear];
+    for (const y of yearsToTry) {
+      const scoped = dreamTiers.filter((v) => Number(v.year) === y);
+      if (scoped.length > 0) {
+        displayVisit = pickBestDreamTierVisitByCtc(scoped);
+        break;
+      }
+      const hybridVisit = list.find(
+        (v) =>
+          Number(v.year) === y &&
+          visitIsPpo(v) &&
+          !visitIsMarkedOffCampus(v) &&
+          rolesSuggestFtePackage(v) &&
+          !visitQualifiesSummerInternshipListingRow(v)
+      );
+      if (hybridVisit) {
+        hybridFallbackVisit = hybridVisit;
+        hybridFallbackYear = y;
+        break;
+      }
     }
   }
 
   let dreamDisplayType;
   let dreamDetailYear;
 
-  const primaryYearNum = Number(primaryVisit?.year);
-  const hybridPpoFteForListingYear =
-    prefYear !== undefined &&
-    Number.isFinite(primaryYearNum) &&
-    primaryYearNum === prefYear &&
-    primaryVisit &&
-    visitIsPpo(primaryVisit) &&
-    !visitIsMarkedOffCampus(primaryVisit) &&
-    rolesSuggestFtePackage(primaryVisit);
-
-  if (!displayVisit && hybridPpoFteForListingYear) {
-    dreamDisplayType = inferDreamListingTypeLabelFromPpoHybridVisit(primaryVisit);
-    dreamDetailYear = prefYear;
-  } else if (displayVisit) {
+  if (displayVisit) {
     dreamDisplayType = visitDisplayType(displayVisit);
     dreamDetailYear = normalizePlacementDetailYear(displayVisit.year);
+  } else if (
+    hybridFallbackVisit != null &&
+    hybridFallbackYear !== undefined
+  ) {
+    dreamDisplayType = visitDisplayType(hybridFallbackVisit);
+    dreamDetailYear = hybridFallbackYear;
+  } else if (prefYear !== undefined) {
+    const subtitleVisit =
+      primaryVisit &&
+      !visitQualifiesSummerInternshipListingRow(primaryVisit)
+        ? primaryVisit
+        : pickDreamHubSubtitleVisitAcrossYears(list);
+    dreamDisplayType = subtitleVisit
+      ? visitDisplayType(subtitleVisit)
+      : undefined;
+    dreamDetailYear = subtitleVisit
+      ? normalizePlacementDetailYear(subtitleVisit.year)
+      : prefYear;
   } else if (bestGlobalVisit) {
     dreamDisplayType = visitDisplayType(bestGlobalVisit);
     dreamDetailYear = normalizePlacementDetailYear(bestGlobalVisit.year);
   } else {
-    dreamDisplayType = visitDisplayType(primaryVisit);
-    dreamDetailYear = normalizePlacementDetailYear(primaryVisit?.year);
+    const subtitleVisit =
+      primaryVisit &&
+      !visitQualifiesSummerInternshipListingRow(primaryVisit)
+        ? primaryVisit
+        : pickDreamHubSubtitleVisitAcrossYears(list);
+    dreamDisplayType = subtitleVisit
+      ? visitDisplayType(subtitleVisit)
+      : undefined;
+    dreamDetailYear = subtitleVisit
+      ? normalizePlacementDetailYear(subtitleVisit.year)
+      : normalizePlacementDetailYear(primaryVisit?.year);
   }
 
   return {
@@ -332,6 +441,8 @@ export function getCompanyDetailHeadlineTypeFromVisits(
 }
 
 function summerTileEligibleCompany(c) {
+  if (c.placementSummerInternshipForListingYear === true) return true;
+  if (c.placementSummerInternshipForListingYear === false) return false;
   if (c.placementAnyYearPpoOnCampus === true) return true;
   if (c.placementAnyYearPpoOnCampus === false) return false;
   return isPpoCompany(c) && !isOffCampusCompany(c);

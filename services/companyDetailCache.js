@@ -1,7 +1,11 @@
 import redis from "../utils/redis.js";
+import {
+  COMPANY_DETAIL_VISIT_YEARS,
+  COMPANY_VISIT_DEFAULT_YEAR,
+} from "../utils/placementYears.js";
 
-/** Must match `COMPANY_DETAIL_VISIT_YEARS` in companyService (detail cache keys per year). */
-const DETAIL_CACHE_YEAR_SUFFIXES = ["2026", "2027"];
+/** Detail Redis keys include every year in {@link COMPANY_DETAIL_VISIT_YEARS}. */
+const DETAIL_CACHE_YEAR_SUFFIXES = COMPANY_DETAIL_VISIT_YEARS.map(String);
 
 /** Slug segment for Redis key; matches `placementContext` query values. */
 const DETAIL_CONTEXT_SLUGS = ["_", "summer_internship", "dream", "open_dream"];
@@ -10,7 +14,7 @@ const DETAIL_CONTEXT_SLUGS = ["_", "summer_internship", "dream", "open_dream"];
  * Bump when cached GET /companies/:id payload shape changes so stale Redis rows are not reused.
  * @see placementDetailHeadlineType, placementContext merge selection
  */
-export const COMPANY_DETAIL_CACHE_SCHEMA = "v6";
+export const COMPANY_DETAIL_CACHE_SCHEMA = "v11";
 
 /**
  * @param {unknown} raw — req.query.placementContext or equivalent
@@ -45,7 +49,7 @@ export function companyDetailRedisKey(
   if (!id || id === "undefined") return null;
   const y =
     placementYear == null || placementYear === ""
-      ? "2026"
+      ? String(COMPANY_VISIT_DEFAULT_YEAR)
       : String(placementYear);
   const slug = placementDetailCacheContextSlug(placementContextRaw);
   return `company:${id}:y${y}:${COMPANY_DETAIL_CACHE_SCHEMA}:${slug}`;
@@ -67,8 +71,10 @@ export async function invalidateCompanyDetailCache(companyId) {
     `company:${id}`,
     ...DETAIL_CACHE_YEAR_SUFFIXES.flatMap((y) => {
       const parts = [`company:${id}:y${y}`, `company:${id}:y${y}:v5`];
-      for (const slug of DETAIL_CONTEXT_SLUGS) {
-        parts.push(`company:${id}:y${y}:${COMPANY_DETAIL_CACHE_SCHEMA}:${slug}`);
+      for (const schema of ["v6", "v7", COMPANY_DETAIL_CACHE_SCHEMA]) {
+        for (const slug of DETAIL_CONTEXT_SLUGS) {
+          parts.push(`company:${id}:y${y}:${schema}:${slug}`);
+        }
       }
       return parts;
     }),

@@ -9,6 +9,7 @@ import CompanyVisit from "../models/CompanyVisit.js";
 import { attachPlacementCategoryToCompany } from "../utils/ctcCategory.js";
 import {
   buildCategoryPreviewResponse,
+  companyHasAnyYearSummerInternshipListingFromVisits,
   companyHasAnyYearSummerPpoFromVisits,
   companyHasDreamTierVisitFromVisits,
   getCompanyDetailHeadlineTypeFromVisits,
@@ -18,13 +19,18 @@ import {
   visitIsMarkedOffCampus,
   visitIsPpo,
   visitQualifiesDreamTierRow,
+  visitQualifiesSummerInternshipListingRow,
 } from "../utils/companyCategoryPreviewBuckets.js";
+import {
+  COMPANY_DETAIL_VISIT_YEARS,
+  COMPANY_VISIT_DEFAULT_YEAR,
+} from "../utils/placementYears.js";
 import { invalidateCompanyDetailCache } from "./companyDetailCache.js";
 
-export const COMPANY_VISIT_YEAR = 2026;
+export { COMPANY_DETAIL_VISIT_YEARS } from "../utils/placementYears.js";
 
-/** Placement years exposed on company detail (?year=) and year-scoped merge. */
-export const COMPANY_DETAIL_VISIT_YEARS = Object.freeze([2026, 2027]);
+/** @deprecated Use {@link COMPANY_VISIT_DEFAULT_YEAR} from `placementYears.js`; kept for imports. */
+export const COMPANY_VISIT_YEAR = COMPANY_VISIT_DEFAULT_YEAR;
 
 /**
  * @param {unknown} raw
@@ -205,6 +211,45 @@ function buildCompanyVisitCompanyYearMatch(
   };
 }
 
+function visitEffectiveMatchYear(v) {
+  return normalizeCompanyDetailYear(v?.year ?? COMPANY_VISIT_YEAR);
+}
+
+/** True iff an approved visit for this calendar `placementYear` qualifies for Dream / Open dream (on-campus non-PPO FTE-style). */
+function hasDreamTierVisitForYear(allVisits, placementYear) {
+  const y = normalizeCompanyDetailYear(placementYear);
+  if (!Array.isArray(allVisits)) return false;
+  return allVisits.some(
+    (v) => visitEffectiveMatchYear(v) === y && visitQualifiesDreamTierRow(v)
+  );
+}
+
+/** Approved row for `placementYear` is strict summer internship (on-campus PPO, no `fte` in `type`). */
+function hasSummerInternshipListingVisitForYear(allVisits, placementYear) {
+  const y = normalizeCompanyDetailYear(placementYear);
+  if (!Array.isArray(allVisits)) return false;
+  return allVisits.some(
+    (v) =>
+      visitEffectiveMatchYear(v) === y &&
+      visitQualifiesSummerInternshipListingRow(v)
+  );
+}
+
+function buildPlacementDreamTierVisitByYearMap(allVisits) {
+  return Object.fromEntries(
+    COMPANY_DETAIL_VISIT_YEARS.map((y) => [y, hasDreamTierVisitForYear(allVisits, y)])
+  );
+}
+
+function buildPlacementSummerInternshipVisitByYearMap(allVisits) {
+  return Object.fromEntries(
+    COMPANY_DETAIL_VISIT_YEARS.map((y) => [
+      y,
+      hasSummerInternshipListingVisitForYear(allVisits, y),
+    ])
+  );
+}
+
 /**
  * Single visit row to mutate for (companyId, year): explicit hint, else latest by migratedAt/_id.
  * @param {import("mongoose").Types.ObjectId} cid
@@ -316,10 +361,12 @@ function pickPrimaryVisitForListing(visits, placementYearRaw = null) {
 
 /**
  * @param {Record<string, unknown>[]|undefined} visits
- * @returns {{ 2026: number, 2027: number }}
+ * @returns {Record<number, number>} one totalGotIn slot per {@link COMPANY_DETAIL_VISIT_YEARS}
  */
 function buildTotalGotInByYearFromVisits(visits) {
-  const out = { 2026: 0, 2027: 0 };
+  const out = Object.fromEntries(
+    COMPANY_DETAIL_VISIT_YEARS.map((y) => [y, 0])
+  );
   if (!Array.isArray(visits) || visits.length === 0) return out;
 
   for (const year of COMPANY_DETAIL_VISIT_YEARS) {
@@ -400,6 +447,68 @@ export async function findAnyLatestVisitForCompanyYear(
   return one[0] ?? null;
 }
 
+/** @param {Record<string, unknown>} visit */
+function visitTypeCompactLower(visit) {
+  return String(visit?.type || "")
+    .trim()
+    .replace(/\s+/g, "")
+    .toLowerCase();
+}
+
+/**
+ * Pick one row among candidates (already sorted newest-first) for placement hub context.
+ * Shared by public detail merge + admin submission approval when multiple visits share a year.
+ */
+function pickVisitCandidateForPlacementContext(candidates, ctx) {
+  if (!Array.isArray(candidates) || candidates.length === 0) return null;
+
+  if (ctx === "summer_internship") {
+    const strict = candidates.filter((v) => visitQualifiesSummerInternshipListingRow(v));
+    if (strict.length > 0) return strict[0];
+    const ppo = candidates.filter((v) => visitIsPpo(v) && !visitIsMarkedOffCampus(v));
+    return ppo.length > 0 ? ppo[0] : candidates[0];
+  }
+
+  if (ctx === "dream" || ctx === "open_dream") {
+    const fteRows = candidates.filter((v) => visitQualifiesDreamTierRow(v));
+    if (fteRows.length > 0) return fteRows[0];
+    const fteish = candidates.filter((v) => {
+      if (visitIsMarkedOffCampus(v)) return false;
+      return visitTypeCompactLower(v).includes("fte");
+    });
+    if (fteish.length > 0) return fteish[0];
+    const nonPpo = candidates.filter((v) => !visitIsPpo(v) && !visitIsMarkedOffCampus(v));
+    if (nonPpo.length > 0) return nonPpo[0];
+    return candidates[0];
+  }
+
+  return candidates[0];
+}
+
+/**
+ * Among all visit rows for (companyId, year), any status — pick the slot that matches Dream / Summer tier,
+ * mirroring {@link findApprovedVisitForCompanyDetail}. Used when approving submissions tied to a hub tier.
+ */
+async function findAnyLatestVisitForCompanyYearMatchingContext(
+  companyId,
+  yearRaw,
+  placementContextRaw
+) {
+  const ctx = normalizePlacementContextParam(placementContextRaw);
+  const year = normalizeCompanyDetailYear(yearRaw);
+  const match = buildCompanyVisitCompanyYearMatch(companyId, year);
+  if (!match) return null;
+
+  const candidatesRaw = await CompanyVisit.find(match)
+    .sort({ migratedAt: -1, _id: -1 })
+    .lean();
+
+  if (!candidatesRaw.length) return null;
+
+  const candidates = candidatesRaw.map((v) => visitWithPlainRoleCtc(v));
+  return pickVisitCandidateForPlacementContext(candidates, ctx);
+}
+
 /**
  * Latest approved visit for the year (used for public detail + list merge).
  * @param {import("mongoose").Types.ObjectId} companyId
@@ -441,18 +550,7 @@ async function findApprovedVisitForCompanyDetail(
   if (!candidatesRaw.length) return null;
 
   const candidates = candidatesRaw.map((v) => visitWithPlainRoleCtc(v));
-
-  if (ctx === "summer_internship") {
-    const ppo = candidates.filter((v) => visitIsPpo(v) && !visitIsMarkedOffCampus(v));
-    return ppo.length > 0 ? ppo[0] : candidates[0];
-  }
-
-  if (ctx === "dream" || ctx === "open_dream") {
-    const fteRows = candidates.filter((v) => visitQualifiesDreamTierRow(v));
-    return fteRows.length > 0 ? fteRows[0] : candidates[0];
-  }
-
-  return candidates[0];
+  return pickVisitCandidateForPlacementContext(candidates, ctx);
 }
 
 /**
@@ -502,6 +600,7 @@ export async function getCompanyDetailLegacyMergedById(
   placementYear = COMPANY_VISIT_YEAR,
   placementContextRaw = null
 ) {
+  const ctx = normalizePlacementContextParam(placementContextRaw);
   const _id = toObjectId(id);
   if (!_id) {
     return { merged: null, visit: null, staticRow: null };
@@ -530,6 +629,18 @@ export async function getCompanyDetailLegacyMergedById(
       placementYear
     );
     if (headline) merged.placementDetailHeadlineType = headline;
+    merged.placementDreamTierVisitMissingForYear =
+      ctx === "dream" || ctx === "open_dream"
+        ? !hasDreamTierVisitForYear(allApprovedVisits, placementYear)
+        : false;
+    merged.placementDreamTierVisitByYear =
+      buildPlacementDreamTierVisitByYearMap(allApprovedVisits);
+    merged.placementSummerInternshipVisitMissingForYear =
+      ctx === "summer_internship"
+        ? !hasSummerInternshipListingVisitForYear(allApprovedVisits, placementYear)
+        : false;
+    merged.placementSummerInternshipVisitByYear =
+      buildPlacementSummerInternshipVisitByYearMap(allApprovedVisits);
     return { merged, visit: visitApproved, staticRow };
   }
   // No approved visit for this year: if any visit exists for that year (e.g. pending), match old API — 404
@@ -542,6 +653,18 @@ export async function getCompanyDetailLegacyMergedById(
     ...mergeToLegacyShape(staticRow, null),
     totalGotInByYear,
   };
+  merged.placementDreamTierVisitMissingForYear =
+    ctx === "dream" || ctx === "open_dream"
+      ? !hasDreamTierVisitForYear(allApprovedVisits, placementYear)
+      : false;
+  merged.placementDreamTierVisitByYear =
+    buildPlacementDreamTierVisitByYearMap(allApprovedVisits);
+  merged.placementSummerInternshipVisitMissingForYear =
+    ctx === "summer_internship"
+      ? !hasSummerInternshipListingVisitForYear(allApprovedVisits, placementYear)
+      : false;
+  merged.placementSummerInternshipVisitByYear =
+    buildPlacementSummerInternshipVisitByYearMap(allApprovedVisits);
   return { merged, visit: null, staticRow };
 }
 
@@ -589,6 +712,22 @@ export async function listApprovedCompaniesLegacyMerged(
     const merged = mergeToLegacyShape(staticRow, visit);
     const placementAnyYearPpoOnCampus = companyHasAnyYearSummerPpoFromVisits(allVisits);
     const placementHasDreamTierVisit = companyHasDreamTierVisitFromVisits(allVisits);
+    const listingYearNorm =
+      placementYear != null && placementYear !== ""
+        ? normalizeCompanyDetailYear(placementYear)
+        : null;
+    const placementDreamTierForListingYear =
+      listingYearNorm == null
+        ? placementHasDreamTierVisit
+        : hasDreamTierVisitForYear(allVisits, listingYearNorm);
+    /** Strict internship(PPO) row in 2026 or 2027 — hub membership must not drop sibling-year-only visits when `?year=` is set. */
+    const placementSummerInternshipForListingYear =
+      companyHasAnyYearSummerInternshipListingFromVisits(allVisits);
+    /** Per listing year: whether that year has a strict summer row (card label; mirrors dream-tier listing flag). */
+    const placementSummerStrictVisitForListingYear =
+      listingYearNorm == null
+        ? placementSummerInternshipForListingYear
+        : hasSummerInternshipListingVisitForYear(allVisits, listingYearNorm);
     const placementMeta = getListPlacementCategoryMetaFromVisits(
       allVisits,
       visitWithPlainRoleCtc(visit),
@@ -599,7 +738,7 @@ export async function listApprovedCompaniesLegacyMerged(
       dreamDetailYear: placementDreamDetailYear,
       ...catMeta
     } = placementMeta;
-    const summerPref = getSummerPlacementPrefFromVisits(allVisits);
+    const summerPref = getSummerPlacementPrefFromVisits(allVisits, placementYear);
     list.push({
       ...merged,
       totalGotInByYear,
@@ -607,6 +746,9 @@ export async function listApprovedCompaniesLegacyMerged(
       totalCtcRupees: catMeta.totalCtcRupees,
       placementAnyYearPpoOnCampus,
       placementHasDreamTierVisit,
+      placementDreamTierForListingYear,
+      placementSummerInternshipForListingYear,
+      placementSummerStrictVisitForListingYear,
       placementDreamDisplayType,
       placementDreamDetailYear,
       placementSummerDisplayType: summerPref.displayType,
@@ -673,6 +815,26 @@ async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
       offCampus: minimal.offCampus,
       roles: minimal.roles,
     };
+    const placementAnyYearPpoOnCampus =
+      companyHasAnyYearSummerPpoFromVisits(allVisits);
+    const placementHasDreamTierVisit =
+      companyHasDreamTierVisitFromVisits(allVisits);
+    const listingYearNorm =
+      placementYear != null && placementYear !== ""
+        ? normalizeCompanyDetailYear(placementYear)
+        : null;
+    const placementDreamTierForListingYear =
+      listingYearNorm == null
+        ? placementHasDreamTierVisit
+        : hasDreamTierVisitForYear(allVisits, listingYearNorm);
+    /** Strict internship(PPO) row in 2026 or 2027 — hub membership must not drop sibling-year-only visits when `?year=` is set. */
+    const placementSummerInternshipForListingYear =
+      companyHasAnyYearSummerInternshipListingFromVisits(allVisits);
+    const placementSummerStrictVisitForListingYear =
+      listingYearNorm == null
+        ? placementSummerInternshipForListingYear
+        : hasSummerInternshipListingVisitForYear(allVisits, listingYearNorm);
+
     const placementMeta = getListPlacementCategoryMetaFromVisits(
       allVisits,
       primaryVisit,
@@ -683,15 +845,20 @@ async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
       dreamDetailYear: placementDreamDetailYear,
       ...catMeta
     } = placementMeta;
-    const summerPref = getSummerPlacementPrefFromVisits(allVisits);
+    const summerPref = getSummerPlacementPrefFromVisits(allVisits, placementYear);
     minimal.category = catMeta.category;
     minimal.totalCtcRupees = catMeta.totalCtcRupees;
     minimal.placementDreamDisplayType = placementDreamDisplayType;
     minimal.placementDreamDetailYear = placementDreamDetailYear;
     minimal.placementSummerDisplayType = summerPref.displayType;
     minimal.placementSummerDetailYear = summerPref.detailYear;
-    minimal.placementAnyYearPpoOnCampus = companyHasAnyYearSummerPpoFromVisits(allVisits);
-    minimal.placementHasDreamTierVisit = companyHasDreamTierVisitFromVisits(allVisits);
+    minimal.placementAnyYearPpoOnCampus = placementAnyYearPpoOnCampus;
+    minimal.placementHasDreamTierVisit = placementHasDreamTierVisit;
+    minimal.placementDreamTierForListingYear = placementDreamTierForListingYear;
+    minimal.placementSummerInternshipForListingYear =
+      placementSummerInternshipForListingYear;
+    minimal.placementSummerStrictVisitForListingYear =
+      placementSummerStrictVisitForListingYear;
     out.push(minimal);
   }
   return out;
@@ -725,11 +892,15 @@ export async function getCompanyCategoryPreviewLogos(placementYear = null) {
  * Merge for admin edit flows: latest visit for `placementYear` (any status) + `companies` row.
  * @param {string} id
  * @param {number} [placementYear]
+ * @param {string|null|undefined} [placementListContext] — when set (dream / open_dream / summer_internship), selects among multiple visit rows for that year.
+ * @param {string|import("mongoose").Types.ObjectId|null|undefined} [companyVisitIdHint] — optional exact `company_visits` row (must match company + placement year).
  * @returns {Promise<{ merged: Record<string, unknown> | null, staticRow: Record<string, unknown> | null, visit: Record<string, unknown> | null } | null>}
  */
 export async function getCompanyMergedForAdminById(
   id,
-  placementYear = COMPANY_VISIT_YEAR
+  placementYear = COMPANY_VISIT_YEAR,
+  placementListContext = null,
+  companyVisitIdHint = null
 ) {
   const _id = toObjectId(id);
   if (!_id) {
@@ -740,7 +911,27 @@ export async function getCompanyMergedForAdminById(
     return { merged: null, staticRow: null, visit: null };
   }
   const year = normalizeCompanyDetailYear(placementYear);
-  const visit = await findAnyLatestVisitForCompanyYear(_id, year);
+  const visitHintOid = toObjectId(companyVisitIdHint);
+  let visit = null;
+  if (visitHintOid) {
+    const hit = await CompanyVisit.findOne({
+      _id: visitHintOid,
+      companyId: _id,
+    }).lean();
+    if (hit && visitEffectiveMatchYear(hit) === year) {
+      visit = visitWithPlainRoleCtc(hit);
+    }
+  }
+  if (!visit) {
+    const ctxTrim =
+      placementListContext != null && String(placementListContext).trim() !== ""
+        ? String(placementListContext).trim()
+        : null;
+    visit =
+      ctxTrim != null
+        ? await findAnyLatestVisitForCompanyYearMatchingContext(_id, year, ctxTrim)
+        : await findAnyLatestVisitForCompanyYear(_id, year);
+  }
   const merged = mergeToLegacyShape(staticRow, visit);
   return { merged, staticRow, visit: visit ?? null };
 }
@@ -791,6 +982,7 @@ export async function listAdminPaginatedCompaniesFromSplit({
     String(placementYear).toLowerCase() === "all";
   const year = useAllYears ? null : normalizeCompanyDetailYear(placementYear);
   if (status) {
+    /** One admin row per `company_visits` document (same company + year can have FTE + PPO slots). */
     const pipeline = [
       {
         $addFields: {
@@ -810,13 +1002,6 @@ export async function listAdminPaginatedCompaniesFromSplit({
       },
       { $sort: { migratedAt: -1, _id: -1 } },
       {
-        $group: {
-          _id: { companyId: "$companyIdForJoin", year: "$effectiveYear" },
-          visit: { $first: "$$ROOT" },
-        },
-      },
-      { $addFields: { companyIdForJoin: "$_id.companyId", visitYear: "$_id.year" } },
-      {
         $lookup: {
           from: "companies",
           localField: "companyIdForJoin",
@@ -825,8 +1010,6 @@ export async function listAdminPaginatedCompaniesFromSplit({
         },
       },
       { $unwind: { path: "$s", preserveNullAndEmptyArrays: false } },
-      { $addFields: { _sort: "$s.createdAt" } },
-      { $sort: { visitYear: -1, _sort: -1, companyIdForJoin: -1 } },
       {
         $facet: {
           totalCount: [{ $count: "n" }],
@@ -838,10 +1021,25 @@ export async function listAdminPaginatedCompaniesFromSplit({
     const facet = agg[0] || {};
     const total = facet.totalCount?.[0]?.n ?? 0;
     const page = facet.page || [];
-    const items = page.map((row) => ({
-      ...mergeToLegacyShape(row.s, row.visit),
-      placementYear: Number(row.visitYear) || null,
-    }));
+    const STRIP_ROW_KEYS = new Set([
+      "s",
+      "companyIdForJoin",
+      "effectiveYear",
+    ]);
+    const items = page.map((row) => {
+      const staticRow = row.s;
+      const placementYearNum = Number(row.effectiveYear) || null;
+      const visitForMerge = {};
+      for (const [k, v] of Object.entries(row)) {
+        if (!STRIP_ROW_KEYS.has(k)) visitForMerge[k] = v;
+      }
+      const companyVisitId = visitForMerge._id;
+      return {
+        ...mergeToLegacyShape(staticRow, visitForMerge),
+        placementYear: placementYearNum,
+        companyVisitId: companyVisitId != null ? String(companyVisitId) : null,
+      };
+    });
     return { total, items };
   }
   const total = await CompanyStatic.countDocuments({});
@@ -881,27 +1079,85 @@ export async function deleteSplitCompany(companyId) {
 }
 
 /**
- * Delete one `company_visits` row for `placementYear`. If no visits remain for the company,
- * also delete the `companies` row so orphan static rows are not left behind.
+ * Delete one `company_visits` row. If no visits remain for the company, also delete the static row.
  * @param {string|import("mongoose").Types.ObjectId} companyId
  * @param {number} [placementYear]
- * @returns {Promise<{ ok: boolean, deletedVisit: boolean, deletedCompany: boolean }>}
+ * @param {string|import("mongoose").Types.ObjectId|null|undefined} [companyVisitIdHint] — delete this row when set (must belong to company + year).
+ * @param {{ requireStatus?: string }} [options] — when set, only delete if visit.status matches (e.g. pending vs approved).
+ * @returns {Promise<{ ok: boolean, deletedVisit: boolean, deletedCompany: boolean, wrongStatus?: boolean }>}
  */
 export async function deleteCompanyVisitForYear(
   companyId,
-  placementYear = COMPANY_VISIT_YEAR
+  placementYear = COMPANY_VISIT_YEAR,
+  companyVisitIdHint = null,
+  options = {}
 ) {
+  const { requireStatus } = options;
   const cid = toObjectId(companyId);
   if (!cid) return { ok: false, deletedVisit: false, deletedCompany: false };
   const match = buildCompanyVisitCompanyYearMatch(cid, placementYear);
   if (!match) return { ok: false, deletedVisit: false, deletedCompany: false };
 
-  const visitToDelete = await CompanyVisit.findOne(match)
-    .sort({ migratedAt: -1, _id: -1 })
-    .select("_id")
-    .lean();
-  if (!visitToDelete?._id) {
-    return { ok: false, deletedVisit: false, deletedCompany: false };
+  const yearNorm = normalizeCompanyDetailYear(placementYear);
+  const vid = toObjectId(companyVisitIdHint);
+
+  let visitToDelete = null;
+
+  if (vid) {
+    const doc = await CompanyVisit.findById(vid).select("_id companyId year status").lean();
+    if (
+      !doc?._id ||
+      String(doc.companyId) !== String(cid) ||
+      normalizeCompanyDetailYear(doc.year) !== yearNorm
+    ) {
+      return { ok: false, deletedVisit: false, deletedCompany: false };
+    }
+    if (requireStatus === "pending") {
+      if (doc.status === "approved") {
+        return {
+          ok: false,
+          deletedVisit: false,
+          deletedCompany: false,
+          wrongStatus: true,
+        };
+      }
+    } else if (requireStatus === "approved" && doc.status !== "approved") {
+      return {
+        ok: false,
+        deletedVisit: false,
+        deletedCompany: false,
+        wrongStatus: true,
+      };
+    } else if (
+      requireStatus != null &&
+      requireStatus !== "pending" &&
+      requireStatus !== "approved" &&
+      doc.status !== requireStatus
+    ) {
+      return {
+        ok: false,
+        deletedVisit: false,
+        deletedCompany: false,
+        wrongStatus: true,
+      };
+    }
+    visitToDelete = doc;
+  } else {
+    let filter = match;
+    if (requireStatus === "pending") {
+      filter = { $and: [match, { $nor: [{ status: "approved" }] }] };
+    } else if (requireStatus === "approved") {
+      filter = { $and: [match, { status: "approved" }] };
+    } else if (requireStatus != null) {
+      filter = { $and: [match, { status: requireStatus }] };
+    }
+    visitToDelete = await CompanyVisit.findOne(filter)
+      .sort({ migratedAt: -1, _id: -1 })
+      .select("_id")
+      .lean();
+    if (!visitToDelete?._id) {
+      return { ok: false, deletedVisit: false, deletedCompany: false };
+    }
   }
 
   const visitDelete = await CompanyVisit.deleteOne({ _id: visitToDelete._id });
@@ -922,6 +1178,25 @@ export async function deleteCompanyVisitForYear(
 
   await invalidateCompanyDetailCache(cid);
   return { ok: true, deletedVisit: true, deletedCompany };
+}
+
+/**
+ * Latest pending visit row for (companyId, placementYear), if any.
+ */
+export async function findOnePendingVisitForCompanyYear(
+  companyId,
+  placementYear = COMPANY_VISIT_YEAR
+) {
+  const cid = toObjectId(companyId);
+  if (!cid) return null;
+  const match = buildCompanyVisitCompanyYearMatch(cid, placementYear);
+  if (!match) return null;
+  /** Rows without `status` are treated like pending (legacy / external inserts). */
+  return CompanyVisit.findOne({
+    $and: [match, { $nor: [{ status: "approved" }] }],
+  })
+    .sort({ migratedAt: -1, _id: -1 })
+    .lean();
 }
 
 /**
@@ -1168,53 +1443,67 @@ export async function updateCompanyVisit(
  * @param {Date} [approvedAt]
  * @returns {Promise<import("mongodb").UpdateResult>}
  */
-export async function approveAndNormalizeCompanyVisit(
-  companyId,
-  placementYear = COMPANY_VISIT_YEAR,
+export async function approveAndNormalizeSingleCompanyVisitById(
+  visitObjectId,
   approvedAt = new Date()
 ) {
-  const cid = toObjectId(companyId);
+  const oid = toObjectId(visitObjectId);
+  if (!oid) {
+    return { acknowledged: true, modifiedCount: 0, upsertedCount: 0, matchedCount: 0 };
+  }
+
+  const existing = await CompanyVisit.findById(oid).lean();
+  if (!existing) {
+    return { acknowledged: true, modifiedCount: 0, upsertedCount: 0, matchedCount: 0 };
+  }
+
+  const cid = toObjectId(existing.companyId);
   if (!cid) {
     return { acknowledged: true, modifiedCount: 0, upsertedCount: 0, matchedCount: 0 };
   }
-  const year = normalizeCompanyDetailYear(placementYear);
-  const match = buildCompanyVisitCompanyYearMatch(cid, year);
-  if (!match) {
-    return { acknowledged: true, modifiedCount: 0, upsertedCount: 0, matchedCount: 0 };
-  }
 
-  const result = await CompanyVisit.updateMany(match, [
-    {
-      $set: {
-        companyId: cid,
-        year,
-        type: { $ifNull: ["$type", ""] },
-        roles: { $ifNull: ["$roles", []] },
-        onlineQuestions: { $ifNull: ["$onlineQuestions", []] },
-        onlineQuestions_solution: { $ifNull: ["$onlineQuestions_solution", []] },
-        interviewQuestions: { $ifNull: ["$interviewQuestions", []] },
-        interviewQuestions_solution: { $ifNull: ["$interviewQuestions_solution", []] },
-        interviewProcess: { $ifNull: ["$interviewProcess", []] },
-        eligibility: { $ifNull: ["$eligibility", ""] },
-        date_of_visit: { $ifNull: ["$date_of_visit", ""] },
-        messageDate: { $ifNull: ["$messageDate", null] },
-        cluster: { $ifNull: ["$cluster", ""] },
-        count: { $ifNull: ["$count", ""] },
-        selectedCandidates: { $ifNull: ["$selectedCandidates", []] },
-        status: "approved",
-        totalClearedOA: { $ifNull: ["$totalClearedOA", 0] },
-        totalGotIn: { $ifNull: ["$totalGotIn", 0] },
-        totalStudentsApplied: { $ifNull: ["$totalStudentsApplied", 0] },
-        views: { $ifNull: ["$views", 0] },
-        internshipExperience: { $ifNull: ["$internshipExperience", []] },
-        mcqQuestions: { $ifNull: ["$mcqQuestions", []] },
-        approvedAt,
-        migratedAt: new Date(),
-      },
-    },
-  ]);
+  const year = normalizeCompanyDetailYear(existing.year);
 
-  if (result.matchedCount > 0) {
+  const $set = {
+    companyId: cid,
+    year,
+    type: existing.type != null ? String(existing.type) : "",
+    roles: Array.isArray(existing.roles) ? existing.roles : [],
+    onlineQuestions: Array.isArray(existing.onlineQuestions) ? existing.onlineQuestions : [],
+    onlineQuestions_solution: Array.isArray(existing.onlineQuestions_solution)
+      ? existing.onlineQuestions_solution
+      : [],
+    interviewQuestions: Array.isArray(existing.interviewQuestions)
+      ? existing.interviewQuestions
+      : [],
+    interviewQuestions_solution: Array.isArray(existing.interviewQuestions_solution)
+      ? existing.interviewQuestions_solution
+      : [],
+    interviewProcess: Array.isArray(existing.interviewProcess) ? existing.interviewProcess : [],
+    eligibility: existing.eligibility != null ? String(existing.eligibility) : "",
+    date_of_visit: existing.date_of_visit != null ? String(existing.date_of_visit) : "",
+    messageDate: existing.messageDate ?? null,
+    cluster: existing.cluster != null ? String(existing.cluster) : "",
+    count: existing.count != null ? String(existing.count) : "",
+    selectedCandidates: Array.isArray(existing.selectedCandidates)
+      ? existing.selectedCandidates
+      : [],
+    status: "approved",
+    totalClearedOA: Number(existing.totalClearedOA) || 0,
+    totalGotIn: Number(existing.totalGotIn) || 0,
+    totalStudentsApplied: Number(existing.totalStudentsApplied) || 0,
+    views: Number(existing.views) || 0,
+    internshipExperience: Array.isArray(existing.internshipExperience)
+      ? existing.internshipExperience
+      : [],
+    mcqQuestions: Array.isArray(existing.mcqQuestions) ? existing.mcqQuestions : [],
+    approvedAt,
+    migratedAt: new Date(),
+  };
+
+  const result = await CompanyVisit.updateOne({ _id: oid }, { $set });
+
+  if (result.modifiedCount > 0) {
     await invalidateCompanyDetailCache(cid);
   }
   return result;
@@ -1252,11 +1541,18 @@ export async function updateCompanyStatic(companyId, data) {
 export async function persistMergedCompany(
   companyId,
   mergedPayload,
-  placementYear = COMPANY_VISIT_YEAR
+  placementYear = COMPANY_VISIT_YEAR,
+  placementListContext = null,
+  companyVisitIdHint = null
 ) {
   await updateCompanyStatic(companyId, mergedPayload);
   await ensureAdminVisitForYear(companyId, placementYear);
-  const { visit } = await getCompanyMergedForAdminById(companyId, placementYear);
+  const { visit } = await getCompanyMergedForAdminById(
+    companyId,
+    placementYear,
+    placementListContext,
+    companyVisitIdHint
+  );
   await updateCompanyVisit(companyId, mergedPayload, placementYear, visit);
 }
 

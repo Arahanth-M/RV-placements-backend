@@ -39,7 +39,21 @@ const submissionSchema = new mongoose.Schema({
   placementYear: {
     type: Number,
     min: 2026,
-    max: 2027,
+    max: 2028,
+  },
+  /**
+   * Hub/list tier when submitting from company detail (`dream` / `open_dream` / `summer_internship`).
+   * Lets admin approval attach content to the matching FTE vs PPO visit row when both exist for the same year.
+   */
+  placementListContext: {
+    type: String,
+    enum: ["dream", "open_dream", "summer_internship"],
+    required: false,
+  },
+  /** Exact `company_visits` row the student saw on detail (preferred over tier heuristics on approve). */
+  companyVisitId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: false,
   },
 });
 

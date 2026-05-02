@@ -1,4 +1,5 @@
 import express from "express";
+import mongoose from "mongoose";
 import Submission from "../models/Submission.js";
 import authJWT from "../middleware/authJWT.js";
 import checkBetaAccess from "../middleware/checkBetaAccess.js";
@@ -42,6 +43,10 @@ submissionRouter.get(
         status: submission.status,
         submittedAt: submission.submittedAt,
         placementYear: submission.placementYear ?? null,
+        placementListContext: submission.placementListContext ?? null,
+        companyVisitId: submission.companyVisitId
+          ? String(submission.companyVisitId)
+          : null,
         companyId: submission.companyId?._id || null,
         companyName: submission.companyId?.name || "Unknown company",
       }));
@@ -62,19 +67,36 @@ submissionRouter.post(
   validateRequest(submissionInputSchema),
   async (req, res) => {
   try {
-    const { companyId, type, content, isAnonymous, placementYear: rawPlacementYear } = req.body;
+    const {
+      companyId,
+      type,
+      content,
+      isAnonymous,
+      placementYear: rawPlacementYear,
+      placementListContext,
+      companyVisitId: rawCompanyVisitId,
+    } = req.body;
 
     if (!companyId || !type || !content) {
       return res.status(400).json({ error: messages.ERROR.MISSING_FIELDS });
     }
 
     const placementYear = normalizeCompanyDetailYear(rawPlacementYear);
+    let companyVisitId;
+    if (
+      rawCompanyVisitId &&
+      mongoose.Types.ObjectId.isValid(String(rawCompanyVisitId).trim())
+    ) {
+      companyVisitId = new mongoose.Types.ObjectId(String(rawCompanyVisitId).trim());
+    }
 
     const newSubmission = new Submission({
       companyId,
       type,
       content,
       placementYear,
+      ...(placementListContext ? { placementListContext } : {}),
+      ...(companyVisitId ? { companyVisitId } : {}),
       isAnonymous: isAnonymous === true || isAnonymous === 'true',
       submittedBy: {
         name: req.user.username, 

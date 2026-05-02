@@ -26,8 +26,8 @@ import mongoose from "mongoose";
 import { getAuthUserModel } from "../utils/authUserModel.js";
 dotenv.config();
 
-/** Redis TTL for GET /api/companies/:id payload cache */
-const COMPANY_DETAIL_REDIS_TTL_SECONDS = 3*60*60;
+/** Redis TTL for GET /api/companies/:id payload cache (keep short — placement rows change often) */
+const COMPANY_DETAIL_REDIS_TTL_SECONDS = 3 * 60;
 
 const companyRouter = express.Router();
 
@@ -74,6 +74,11 @@ companyRouter.get("/", async (req, res) => {
         totalCtcRupees: c.totalCtcRupees,
         placementAnyYearPpoOnCampus: c.placementAnyYearPpoOnCampus,
         placementHasDreamTierVisit: c.placementHasDreamTierVisit,
+        placementDreamTierForListingYear: c.placementDreamTierForListingYear,
+        placementSummerInternshipForListingYear:
+          c.placementSummerInternshipForListingYear,
+        placementSummerStrictVisitForListingYear:
+          c.placementSummerStrictVisitForListingYear,
         placementDreamDisplayType: c.placementDreamDisplayType,
         placementDreamDetailYear: c.placementDreamDetailYear,
         placementSummerDisplayType: c.placementSummerDisplayType,
@@ -266,6 +271,9 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
       ...companyObj,
       placementVisitYear,
       placementYearsAvailable,
+      ...(visitForViews?._id
+        ? { placementCompanyVisitId: String(visitForViews._id) }
+        : {}),
     });
 
     if (key) {

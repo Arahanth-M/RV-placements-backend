@@ -1,4 +1,5 @@
 import express from "express";
+import mongoose from "mongoose";
 import authJWT from "../middleware/authJWT.js";
 import authorize from "../middleware/authorize.js";
 import requireAdmin from "../middleware/requireAdmin.js";
@@ -18,15 +19,18 @@ import User1 from "../models/User1.js";
 import Student from "../models/Student.js";
 import Submission from "../models/Submission.js";
 import CompanyStatic from "../models/CompanyStatic.js";
+import CompanyVisit from "../models/CompanyVisit.js";
 import MissingCompany from "../models/MissingCompany.js";
 import Notification from "../models/Notification.js";
 import { getAdminStats } from "../controllers/adminStatsController.js";
 import { invalidateAdminDashboardStatsCache } from "../services/adminDashboardStatsCache.js";
 import { invalidateCompanyDetailCache } from "../services/companyDetailCache.js";
 import {
-  approveAndNormalizeCompanyVisit,
+  approveAndNormalizeSingleCompanyVisitById,
   adjustVisitTotalGotIn,
   deleteCompanyVisitForYear,
+  findOnePendingVisitForCompanyYear,
+  mergeToLegacyShape,
   deleteSplitCompany,
   ensureAdminVisitForYear,
   getCompanyMergedForAdminById,
@@ -73,6 +77,7 @@ function projectAdminCompanyListRow(merged, status) {
       approvedAt: merged.approvedAt,
       submittedBy: merged.submittedBy,
       placementYear: merged.placementYear ?? null,
+      companyVisitId: merged.companyVisitId ?? null,
     };
   }
   if (status === "pending") {
@@ -91,6 +96,7 @@ function projectAdminCompanyListRow(merged, status) {
       onlineQuestions: merged.onlineQuestions,
       Must_Do_Topics: merged.Must_Do_Topics,
       placementYear: merged.placementYear ?? null,
+      companyVisitId: merged.companyVisitId ?? null,
     };
   }
   return {
@@ -102,6 +108,7 @@ function projectAdminCompanyListRow(merged, status) {
     createdAt: merged.createdAt,
     updatedAt: merged.updatedAt,
     placementYear: merged.placementYear ?? null,
+    companyVisitId: merged.companyVisitId ?? null,
   };
 }
 
@@ -300,7 +307,9 @@ adminRouter.get("/submissions", async (req, res) => {
       Submission.countDocuments(query),
       Submission.find(query)
         .populate({ path: "companyId", select: "name", model: "CompanyStatic" })
-        .select("companyId type submittedBy isAnonymous status submittedAt approvedAt content")
+        .select(
+          "companyId type submittedBy isAnonymous status submittedAt approvedAt content placementYear placementListContext companyVisitId"
+        )
         .sort({ submittedAt: -1 })
         .skip(skip)
         .limit(limit)
@@ -411,10 +420,20 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
     }
 
     const placementYear = normalizeCompanyDetailYear(submission.placementYear);
+    const placementListContextRaw = submission.placementListContext;
+    const placementListContext =
+      placementListContextRaw != null && String(placementListContextRaw).trim() !== ""
+        ? String(placementListContextRaw).trim()
+        : null;
+
+    const companyVisitIdHint = submission.companyVisitId ?? null;
+
     await ensureAdminVisitForYear(submission.companyId, placementYear);
     const loadedForSub = await getCompanyMergedForAdminById(
       String(submission.companyId),
-      placementYear
+      placementYear,
+      placementListContext,
+      companyVisitIdHint
     );
     if (!loadedForSub?.staticRow || !loadedForSub.merged) {
       return res.status(404).json({ error: "Company not found" });
@@ -792,7 +811,13 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
           }
         });
       }
-      await persistMergedCompany(String(submission.companyId), merged, placementYear);
+      await persistMergedCompany(
+        String(submission.companyId),
+        merged,
+        placementYear,
+        placementListContext,
+        companyVisitIdHint
+      );
       console.log("✅ Company updated successfully:", submission.companyId);
     } catch (saveError) {
       console.error("❌ Error persisting company:", saveError);
@@ -850,7 +875,9 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
 
     const reloadedSub = await getCompanyMergedForAdminById(
       String(submission.companyId),
-      placementYear
+      placementYear,
+      placementListContext,
+      companyVisitIdHint
     );
     const companyOut = reloadedSub?.merged
       ? companyToJsonSafePlainObject(reloadedSub.merged)
@@ -909,24 +936,55 @@ adminRouter.get("/companies", async (req, res) => {
   }
 });
 
-// Approve a company
+// Approve a company (one `company_visits` row — use companyVisitId when several rows share the same year)
 adminRouter.post("/companies/:id/approve", async (req, res) => {
   try {
     const y = adminVisitYearFromQuery(req);
-    const loaded = await getCompanyMergedForAdminById(req.params.id, y);
-    if (!loaded || !loaded.staticRow) {
+    const companyIdParam = req.params.id;
+    const staticRow = await CompanyStatic.findById(companyIdParam).lean();
+    if (!staticRow) {
       return res.status(404).json({ error: "Company not found" });
     }
-    if (loaded.merged?.status === "approved") {
+
+    const visitIdRaw = req.query?.companyVisitId;
+    let targetVisit = null;
+
+    if (visitIdRaw && mongoose.Types.ObjectId.isValid(String(visitIdRaw).trim())) {
+      const visitOid = new mongoose.Types.ObjectId(String(visitIdRaw).trim());
+      targetVisit = await CompanyVisit.findById(visitOid).lean();
+      if (
+        !targetVisit ||
+        String(targetVisit.companyId) !== String(staticRow._id) ||
+        normalizeCompanyDetailYear(targetVisit.year) !== y
+      ) {
+        return res.status(404).json({ error: "Company visit not found for selected year" });
+      }
+    } else {
+      targetVisit = await findOnePendingVisitForCompanyYear(staticRow._id, y);
+      if (!targetVisit) {
+        const loaded = await getCompanyMergedForAdminById(companyIdParam, y);
+        if (loaded?.merged?.status === "approved") {
+          return res.json({
+            message: "Company already approved",
+            company: loaded.merged ? companyToJsonSafePlainObject(loaded.merged) : null,
+            alreadyApproved: true,
+          });
+        }
+        return res.status(404).json({ error: "No pending company visit found for this year" });
+      }
+    }
+
+    if (targetVisit.status === "approved") {
+      const merged = mergeToLegacyShape(staticRow, targetVisit);
       return res.json({
         message: "Company already approved",
-        company: companyToJsonSafePlainObject(loaded.merged),
+        company: companyToJsonSafePlainObject(merged),
         alreadyApproved: true,
       });
     }
 
     const approvedAt = new Date();
-    await approveAndNormalizeCompanyVisit(req.params.id, y, approvedAt);
+    await approveAndNormalizeSingleCompanyVisitById(targetVisit._id, approvedAt);
 
     try {
       await invalidateAdminDashboardStatsCache();
@@ -934,10 +992,11 @@ adminRouter.post("/companies/:id/approve", async (req, res) => {
       console.warn("⚠️ Failed to invalidate admin dashboard cache after company approval:", cacheErr?.message || cacheErr);
     }
 
-    const out = (await getCompanyMergedForAdminById(req.params.id, y))?.merged ?? null;
+    const refreshedVisit = await CompanyVisit.findById(targetVisit._id).lean();
+    const mergedOut = mergeToLegacyShape(staticRow, refreshedVisit);
     res.json({
       message: "Company approved successfully",
-      company: out ? companyToJsonSafePlainObject(out) : null,
+      company: mergedOut ? companyToJsonSafePlainObject(mergedOut) : null,
       alreadyApproved: false,
     });
   } catch (error) {
@@ -948,24 +1007,24 @@ adminRouter.post("/companies/:id/approve", async (req, res) => {
   }
 });
 
-// Reject a pending company visit for the selected year
+// Reject a pending company visit for the selected year (`companyVisitId` when multiple pending rows share the year)
 adminRouter.delete("/companies/:id/reject", async (req, res) => {
   try {
     const y = adminVisitYearFromQuery(req);
-    const loaded = await getCompanyMergedForAdminById(req.params.id, y);
-    if (!loaded || !loaded.staticRow) {
-      return res.status(404).json({ error: "Company not found" });
-    }
-    if (!loaded.visit) {
-      return res.status(404).json({ error: "Company visit not found for selected year" });
-    }
-    if (loaded.merged?.status === "approved") {
+    const hint = req.query?.companyVisitId ?? null;
+
+    const del = await deleteCompanyVisitForYear(req.params.id, y, hint, {
+      requireStatus: "pending",
+    });
+
+    if (!del.deletedVisit) {
       return res.status(400).json({
-        error: "Approved companies must be removed using the delete endpoint",
+        error:
+          del.wrongStatus === true
+            ? "Selected visit is not pending — approved rows must use delete"
+            : "Pending company visit not found for selected year",
       });
     }
-
-    await deleteCompanyVisitForYear(req.params.id, y);
 
     await invalidateAdminDashboardStatsCache();
 
@@ -976,22 +1035,24 @@ adminRouter.delete("/companies/:id/reject", async (req, res) => {
   }
 });
 
-// Delete an approved company visit for the selected year
+// Delete an approved company visit for the selected year (`companyVisitId` when multiple approved rows share the year)
 adminRouter.delete("/companies/:id/delete", async (req, res) => {
   try {
     const y = adminVisitYearFromQuery(req);
-    const loaded = await getCompanyMergedForAdminById(req.params.id, y);
-    if (!loaded || !loaded.staticRow) {
-      return res.status(404).json({ error: "Company not found" });
-    }
-    if (!loaded.visit) {
-      return res.status(404).json({ error: "Company visit not found for selected year" });
-    }
-    if (loaded.merged?.status !== "approved") {
-      return res.status(400).json({ error: "Only approved companies can be deleted using this endpoint" });
-    }
+    const hint = req.query?.companyVisitId ?? null;
 
-    await deleteCompanyVisitForYear(req.params.id, y);
+    const del = await deleteCompanyVisitForYear(req.params.id, y, hint, {
+      requireStatus: "approved",
+    });
+
+    if (!del.deletedVisit) {
+      return res.status(400).json({
+        error:
+          del.wrongStatus === true
+            ? "Selected visit is not approved"
+            : "Approved company visit not found for selected year",
+      });
+    }
 
     await invalidateAdminDashboardStatsCache();
 

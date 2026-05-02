@@ -13,7 +13,14 @@ export const submissionInputSchema = Joi.object({
   type: Joi.string().trim().min(1).max(80).required(),
   // No trim: parity with prior `if (!content)` (whitespace-only still accepted)
   content: Joi.string().min(1).max(70000).required(),
-  placementYear: Joi.number().integer().valid(2026, 2027).optional(),
+  placementYear: Joi.number().integer().valid(2026, 2027, 2028).optional(),
+  placementListContext: Joi.string()
+    .valid("dream", "open_dream", "summer_internship")
+    .optional(),
+  companyVisitId: Joi.string()
+    .trim()
+    .pattern(/^[a-fA-F0-9]{24}$/)
+    .optional(),
   isAnonymous: Joi.alternatives()
     .try(Joi.boolean(), Joi.string().valid("true", "false"))
     .optional(),
