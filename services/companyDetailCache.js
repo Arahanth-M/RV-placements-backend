@@ -12,9 +12,9 @@ const DETAIL_CONTEXT_SLUGS = ["_", "summer_internship", "dream", "open_dream"];
 
 /**
  * Bump when cached GET /companies/:id payload shape changes so stale Redis rows are not reused.
- * @see placementDetailHeadlineType, placementContext merge selection
+ * @see placementDetailHeadlineType, placementContext merge selection, date_of_visit coalesce
  */
-export const COMPANY_DETAIL_CACHE_SCHEMA = "v11";
+export const COMPANY_DETAIL_CACHE_SCHEMA = "v12";
 
 /**
  * @param {unknown} raw — req.query.placementContext or equivalent

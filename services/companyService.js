@@ -229,6 +229,53 @@ function visitEffectiveMatchYear(v) {
   return normalizeCompanyDetailYear(v?.year ?? COMPANY_VISIT_YEAR);
 }
 
+/**
+ * Same calendar year may have several approved `company_visits` rows. `placementContext` picks one
+ * row for tab merge, but another row may hold `date_of_visit`. Pick a single string for API JSON so
+ * default `?year=` clients see the same visit date as hub-linked clients when another slot has it.
+ * @param {Record<string, unknown>|null|undefined} visitApproved
+ * @param {Record<string, unknown>[]|undefined} allApprovedVisits
+ * @param {number} placementYear
+ * @returns {string}
+ */
+function mergedDateOfVisitForApi(visitApproved, allApprovedVisits, placementYear) {
+  const y = normalizeCompanyDetailYear(placementYear);
+  const sameYear = (Array.isArray(allApprovedVisits)
+    ? allApprovedVisits.filter((v) => visitEffectiveMatchYear(v) === y)
+    : []
+  ).sort((a, b) => {
+    const ma = a.migratedAt ? new Date(a.migratedAt).getTime() : 0;
+    const mb = b.migratedAt ? new Date(b.migratedAt).getTime() : 0;
+    if (ma !== mb) return mb - ma;
+    const ida = a._id ? String(a._id) : "";
+    const idb = b._id ? String(b._id) : "";
+    return ida.localeCompare(idb);
+  });
+
+  /** @type {Record<string, unknown>[]} */
+  const ordered = [];
+  if (visitApproved && typeof visitApproved === "object" && visitApproved._id) {
+    ordered.push(visitApproved);
+    for (const v of sameYear) {
+      if (v?._id && String(v._id) !== String(visitApproved._id)) ordered.push(v);
+    }
+  } else {
+    for (const v of sameYear) ordered.push(v);
+  }
+
+  for (const v of ordered) {
+    const raw = v?.date_of_visit;
+    const s = raw == null ? "" : String(raw).trim();
+    if (s && !/^(tba|tbd)$/i.test(s)) return s;
+  }
+  for (const v of ordered) {
+    const raw = v?.date_of_visit;
+    const s = raw == null ? "" : String(raw).trim();
+    if (s) return s;
+  }
+  return "";
+}
+
 /** True iff an approved visit for this calendar `placementYear` qualifies for Dream / Open dream (on-campus non-PPO FTE-style). */
 function hasDreamTierVisitForYear(allVisits, placementYear) {
   const y = normalizeCompanyDetailYear(placementYear);
@@ -907,6 +954,11 @@ export async function getCompanyDetailLegacyMergedById(
         : false;
     merged.placementSummerInternshipVisitByYear =
       buildPlacementSummerInternshipVisitByYearMap(allApprovedVisits);
+    merged.date_of_visit = mergedDateOfVisitForApi(
+      visitApproved,
+      allApprovedVisits,
+      placementYear
+    );
     return { merged, visit: visitApproved, staticRow };
   }
   // No approved visit for this year: if any visit exists for that year (e.g. pending), match old API — 404

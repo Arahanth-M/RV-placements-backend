@@ -1501,20 +1501,24 @@ adminRouter.put(
   }
 });
 
-// Update general company info (eligibility, business model, type, offCampus)
+// Update general company info (eligibility, business model, type, offCampus, date_of_visit on visit row)
 adminRouter.put(
   "/companies/:id/general",
   validateRequest(adminCompanyGeneralSchema),
   async (req, res) => {
   try {
     const y = adminVisitYearFromQuery(req);
-    const { eligibility, business_model, type, offCampus } = req.body || {};
+    const { eligibility, business_model, type, offCampus, date_of_visit } =
+      req.body || {};
 
     const updateData = {};
     if (eligibility !== undefined) updateData.eligibility = sanitizeText(eligibility);
     if (business_model !== undefined) updateData.business_model = sanitizeText(business_model);
     if (type !== undefined) updateData.type = sanitizeText(type);
     if (offCampus !== undefined) updateData.offCampus = Boolean(offCampus);
+    if (date_of_visit !== undefined) {
+      updateData.date_of_visit = sanitizeText(date_of_visit);
+    }
 
     const staticRow = await CompanyStatic.findById(req.params.id).lean();
     if (!staticRow) {

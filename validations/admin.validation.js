@@ -62,6 +62,8 @@ export const adminCompanyGeneralSchema = Joi.object({
   business_model: Joi.string().max(500).allow("").optional(),
   type: Joi.string().max(200).allow("").optional(),
   offCampus: Joi.boolean().optional(),
+  /** Placement-year visit row (`company_visits`), not static `companies`. */
+  date_of_visit: Joi.string().max(120).allow("").optional(),
 }).unknown(true);
 
 export const adminMissingCompanyStatusSchema = Joi.object({
