@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { mongoCollectionStudents } from "../config/mongoCollections.js";
 
 const studentSchema = new mongoose.Schema(
   {
@@ -33,4 +34,8 @@ const studentSchema = new mongoose.Schema(
 studentSchema.index({ email: 1 });
 studentSchema.index({ usn: 1 });
 
-export default mongoose.model("Student", studentSchema);
+export default mongoose.model(
+  "Student",
+  studentSchema,
+  mongoCollectionStudents
+);

@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { mongoCollectionPlacementData } from "../config/mongoCollections.js";
 
 const placementDataSchema = new mongoose.Schema(
   {
@@ -45,4 +46,8 @@ const placementDataSchema = new mongoose.Schema(
 
 placementDataSchema.index({ studentId: 1, companyPlaced: 1, typeOfOffer: 1 });
 
-export default mongoose.model("PlacementData", placementDataSchema);
+export default mongoose.model(
+  "PlacementData",
+  placementDataSchema,
+  mongoCollectionPlacementData
+);

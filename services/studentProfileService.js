@@ -6,7 +6,43 @@ function normalizeText(raw) {
 }
 
 /**
- * Build the JSON body for GET /api/students/profile from a `students` document.
+ * USN lookup response shape (legacy-friendly fields for the client).
+ */
+export function buildUsnLookupStudentPayload(studentRecord, placements) {
+  const sorted = Array.isArray(placements)
+    ? [...placements].sort(
+        (a, b) =>
+          new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+      )
+    : [];
+  const primary = sorted[0] || null;
+  const company = normalizeText(primary?.companyPlaced);
+  const placementCompanies = [];
+  const seen = new Set();
+  for (const p of sorted) {
+    const n = normalizeText(p?.companyPlaced);
+    if (!n) continue;
+    const k = n.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    placementCompanies.push({ companyName: n });
+  }
+  return {
+    ...studentRecord,
+    Name: normalizeText(studentRecord?.name) || null,
+    USN: normalizeText(studentRecord?.usn) || null,
+    placedCompany: company || undefined,
+    CTC: normalizeText(primary?.ctc) || normalizeText(primary?.base) || "",
+    "Type of Offer": normalizeText(primary?.typeOfOffer) || "",
+    placements: sorted,
+    placementCompanies,
+    primaryCompanyName: company || null,
+    student: studentRecord,
+  };
+}
+
+/**
+ * Build the JSON body for GET /api/students/profile from a student document.
  * Used on cache miss after DB read; keeps one source of truth for the payload shape.
  */
 export async function buildProfilePayloadFromStudentRecord(studentRecord) {
@@ -30,7 +66,7 @@ export async function buildProfilePayloadFromStudentRecord(studentRecord) {
   const primaryCompanyName = placementCompanyNames[0] || null;
 
   return {
-    profileSource: "students_split",
+    profileSource: "split_profile",
     student: studentRecord,
     placements,
     placementCompanies,
