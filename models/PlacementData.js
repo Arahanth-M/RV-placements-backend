@@ -34,6 +34,26 @@ const placementDataSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    companyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "CompanyStatic",
+      default: null,
+    },
+    placementYear: {
+      type: Number,
+      default: null,
+    },
+    branchCode: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      default: "",
+    },
+    role: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     createdBy: {
       type: String,
       trim: true,
@@ -45,6 +65,10 @@ const placementDataSchema = new mongoose.Schema(
 );
 
 placementDataSchema.index({ studentId: 1, companyPlaced: 1, typeOfOffer: 1 });
+placementDataSchema.index(
+  { studentId: 1, companyId: 1, placementYear: 1 },
+  { unique: true, sparse: true }
+);
 
 export default mongoose.model(
   "PlacementData",

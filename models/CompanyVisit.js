@@ -40,6 +40,13 @@ const companyVisitSchema = new mongoose.Schema(
         converted: { type: Number, default: 0, min: 0 },
       },
     ],
+    /** Dream / open-dream / off-campus / internship-only got-in by branch (SPC add placement / FTE conversion); not PPO conversion stats. */
+    placementGotInBranchStats: [
+      {
+        branchCode: { type: String, trim: true, lowercase: true },
+        gotIn: { type: Number, default: 0, min: 0 },
+      },
+    ],
     views: { type: Number, default: 0, min: 0 },
     internshipExperience: [{ type: String, trim: true }],
     mcqQuestions: [{ type: mongoose.Schema.Types.Mixed }],

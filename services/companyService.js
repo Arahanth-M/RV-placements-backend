@@ -18,13 +18,18 @@ import {
   sortCompaniesForCategoryPreview,
   visitIsMarkedOffCampus,
   visitIsPpo,
+  normalizeType,
+  visitQualifiesDreamHubListingVisit,
   visitQualifiesDreamTierRow,
+  visitQualifiesInternshipOnlyHubRow,
   visitQualifiesSummerInternshipListingRow,
 } from "../utils/companyCategoryPreviewBuckets.js";
 import {
   COMPANY_DETAIL_VISIT_YEARS,
   COMPANY_VISIT_DEFAULT_YEAR,
 } from "../utils/placementYears.js";
+import { PPO_BRANCH_CODES, PPO_BRANCH_CODES_ARRAY } from "../utils/ppoBranchCodes.js";
+import escapeRegexLiteral from "../utils/regexEscape.js";
 import { invalidateCompanyDetailCache } from "./companyDetailCache.js";
 
 export { COMPANY_DETAIL_VISIT_YEARS } from "../utils/placementYears.js";
@@ -62,7 +67,7 @@ export function normalizePlacementVisitYear(raw) {
 /**
  * Which placement list opened GET `/companies/:id` — selects among multiple approved visits for the same year.
  * @param {unknown} raw
- * @returns {"summer_internship"|"dream"|"open_dream"|null}
+ * @returns {"summer_internship"|"dream"|"open_dream"|"off_campus"|"internship_only"|null}
  */
 export function normalizePlacementContextParam(raw) {
   const s = String(raw ?? "")
@@ -72,6 +77,8 @@ export function normalizePlacementContextParam(raw) {
   if (s === "summer_internship") return "summer_internship";
   if (s === "dream") return "dream";
   if (s === "open_dream") return "open_dream";
+  if (s === "off_campus") return "off_campus";
+  if (s === "internship_only") return "internship_only";
   return null;
 }
 
@@ -136,6 +143,7 @@ const DYNAMIC_KEY_SET = new Set([
   "ppoConversionType",
   "ppoConversionNotApplicable",
   "ppoBranchStats",
+  "placementGotInBranchStats",
   "interview_difficulty_level",
   "difficulty_ratings",
   "difficulty_rating_count",
@@ -350,8 +358,74 @@ function flattenRoleCtcForJson(legacy) {
     if (r.ctc instanceof Map) {
       r.ctc = Object.fromEntries(r.ctc);
     }
-    return r;
+    return normalizeRoleStipendFields(r);
   });
+}
+
+function stipendNormalizedMapKey(key) {
+  return String(key ?? "").trim().toLowerCase().replace(/\s+/g, "");
+}
+
+/** Parse internship stipend from SPC / free-text stipend fields → rupees number (undefined if invalid). */
+function stipendSubmissionStringToNumber(stipStr) {
+  const s = String(stipStr ?? "").trim().replace(/,/g, "");
+  const n = Number(s);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
+/**
+ * Hoist stipend-like keys out of `role.ctc` into top-level numeric `internshipStipend` (canonical for APIs/UI).
+ * Removes `Stipend` / `internshipStipend` keys from `ctc` so list/detail views show one stipend field.
+ */
+export function normalizeRoleStipendFields(role) {
+  if (!role || typeof role !== "object") return role;
+  const r = { ...role };
+  const ctc =
+    r.ctc instanceof Map
+      ? Object.fromEntries(r.ctc)
+      : r.ctc && typeof r.ctc === "object"
+        ? { ...r.ctc }
+        : {};
+
+  let hoistedInternship = NaN;
+  let hoistedStipend = NaN;
+  /** @type {Record<string, unknown>} */
+  const nextCtc = {};
+
+  for (const [k, v] of Object.entries(ctc)) {
+    const nk = stipendNormalizedMapKey(k);
+    if (nk === "internshipstipend") {
+      const n = Number(v);
+      if (Number.isFinite(n) && n >= 0) hoistedInternship = n;
+      continue;
+    }
+    if (nk === "stipend") {
+      const n = Number(String(v).trim().replace(/,/g, ""));
+      if (Number.isFinite(n) && n >= 0) hoistedStipend = n;
+      continue;
+    }
+    nextCtc[k] = v;
+  }
+
+  const topNum = Number(r.internshipStipend);
+  let stip = NaN;
+  if (Number.isFinite(topNum) && topNum >= 0) stip = topNum;
+  else if (Number.isFinite(hoistedInternship)) stip = hoistedInternship;
+  else if (Number.isFinite(hoistedStipend)) stip = hoistedStipend;
+
+  r.ctc = nextCtc;
+  if (Number.isFinite(stip)) r.internshipStipend = stip;
+  else delete r.internshipStipend;
+
+  return r;
+}
+
+/** Canonical shape before any `company_visits.roles` write (hoists stipend off `ctc`). */
+function sanitizeRolesArrayForPersist(roles) {
+  if (!Array.isArray(roles)) return roles;
+  return roles.map((role) =>
+    role && typeof role === "object" ? normalizeRoleStipendFields({ ...role }) : role
+  );
 }
 
 /**
@@ -365,7 +439,7 @@ function visitWithPlainRoleCtc(visit) {
         if (!role || typeof role !== "object") return role;
         const r = { ...role };
         if (r.ctc instanceof Map) r.ctc = Object.fromEntries(r.ctc);
-        return r;
+        return normalizeRoleStipendFields(r);
       })
     : visit.roles;
   return { ...visit, roles };
@@ -445,6 +519,68 @@ function buildTotalGotInByYearFromVisits(visits) {
     out[year] = Number(latest?.totalGotIn) || 0;
   }
 
+  return out;
+}
+
+/**
+ * Per placement year: branch rows from `placementGotInBranchStats` on the same visit
+ * {@link pickVisitCandidateForPlacementContext} would choose for that year (mirrors GET `/companies/:id` merge).
+ * @param {Record<string, unknown>[]|undefined} visits
+ * @param {unknown} [placementContextRaw] — `placementContext` query (dream / open_dream / summer_internship)
+ * @returns {Record<number, { branchCode: string, gotIn: number, converted: number, convertedNotApplicable: boolean }[]>}
+ */
+function buildPlacementBranchStatsByYearFromVisits(visits, placementContextRaw = null) {
+  const ctx = normalizePlacementContextParam(placementContextRaw);
+  const emptyRows = () =>
+    PPO_BRANCH_CODES_ARRAY.map((branchCode) => ({
+      branchCode,
+      gotIn: 0,
+      converted: 0,
+      convertedNotApplicable: false,
+    }));
+  const out = Object.fromEntries(
+    COMPANY_DETAIL_VISIT_YEARS.map((y) => [y, emptyRows()])
+  );
+  if (!Array.isArray(visits) || visits.length === 0) return out;
+
+  for (const year of COMPANY_DETAIL_VISIT_YEARS) {
+    const perYear = visits
+      .filter((v) => Number(v?.year) === year)
+      .sort((a, b) => {
+        const ma = a?.migratedAt ? new Date(a.migratedAt).getTime() : 0;
+        const mb = b?.migratedAt ? new Date(b.migratedAt).getTime() : 0;
+        if (ma !== mb) return mb - ma;
+        const ida = a?._id ? String(a._id) : "";
+        const idb = b?._id ? String(b._id) : "";
+        return idb.localeCompare(ida);
+      });
+    const picked = pickVisitCandidateForPlacementContext(perYear, ctx);
+    const rawRows = Array.isArray(picked?.placementGotInBranchStats)
+      ? picked.placementGotInBranchStats
+      : [];
+    /** @type {Map<string, { gotIn: number, converted: number, convertedNotApplicable: boolean }>} */
+    const byCode = new Map();
+    for (const row of rawRows) {
+      const bc = String(row?.branchCode || "")
+        .trim()
+        .toLowerCase();
+      if (!PPO_BRANCH_CODES.has(bc)) continue;
+      byCode.set(bc, {
+        gotIn: Math.max(0, Number(row?.gotIn) || 0),
+        converted: Math.max(0, Number(row?.converted) || 0),
+        convertedNotApplicable: Boolean(row?.convertedNotApplicable),
+      });
+    }
+    out[year] = PPO_BRANCH_CODES_ARRAY.map((branchCode) => {
+      const hit = byCode.get(branchCode);
+      return {
+        branchCode,
+        gotIn: hit?.gotIn ?? 0,
+        converted: hit?.converted ?? 0,
+        convertedNotApplicable: Boolean(hit?.convertedNotApplicable),
+      };
+    });
+  }
   return out;
 }
 
@@ -739,6 +875,11 @@ function mergeApprovedVisitsIntoSyntheticVisit(visitsSortedDesc) {
       Array.isArray(p.ppoBranchStats) ? p.ppoBranchStats : []
     )
   );
+  merged.placementGotInBranchStats = dedupeJsonPreserveOrder(
+    plains.flatMap((p) =>
+      Array.isArray(p.placementGotInBranchStats) ? p.placementGotInBranchStats : []
+    )
+  );
 
   return merged;
 }
@@ -775,6 +916,16 @@ function visitTypeCompactLower(visit) {
 function pickVisitCandidateForPlacementContext(candidates, ctx) {
   if (!Array.isArray(candidates) || candidates.length === 0) return null;
 
+  if (ctx === "off_campus") {
+    const off = candidates.filter((v) => visitIsMarkedOffCampus(v));
+    return off.length > 0 ? off[0] : candidates[0];
+  }
+
+  if (ctx === "internship_only") {
+    const only = candidates.filter((v) => visitQualifiesInternshipOnlyHubRow(v));
+    return only.length > 0 ? only[0] : candidates[0];
+  }
+
   if (ctx === "summer_internship") {
     const strict = candidates.filter((v) => visitQualifiesSummerInternshipListingRow(v));
     if (strict.length > 0) return strict[0];
@@ -796,6 +947,229 @@ function pickVisitCandidateForPlacementContext(candidates, ctx) {
   }
 
   return candidates[0];
+}
+
+/**
+ * SPC writes must not attach FTE / placement-got-in stats to the strict summer PPO slot when a dream/FTE
+ * row exists for the same year (otherwise `migratedAt` order made `candidates[0]` the Internship(PPO) row).
+ * @param {"placement_got_in"|"ppo_branch"} statsTarget
+ */
+function pickVisitCandidateForSpcAnchor(candidates, ctx, statsTarget) {
+  if (!Array.isArray(candidates) || candidates.length === 0) return null;
+
+  if (statsTarget === "ppo_branch") {
+    if (ctx === "summer_internship") {
+      return pickVisitCandidateForPlacementContext(candidates, ctx);
+    }
+    const ppoRows = candidates.filter((v) => visitIsPpo(v) && !visitIsMarkedOffCampus(v));
+    if (ppoRows.length > 0) return ppoRows[0];
+    return candidates[0];
+  }
+
+  if (
+    ctx === "summer_internship" ||
+    ctx === "dream" ||
+    ctx === "open_dream" ||
+    ctx === "off_campus" ||
+    ctx === "internship_only"
+  ) {
+    return pickVisitCandidateForPlacementContext(candidates, ctx);
+  }
+
+  const tier = candidates.filter((v) => visitQualifiesDreamTierRow(v));
+  if (tier.length > 0) return tier[0];
+
+  const dreamHub = candidates.filter((v) => visitQualifiesDreamHubListingVisit(v));
+  if (dreamHub.length > 0) return dreamHub[0];
+
+  const fteish = candidates.filter((v) => {
+    if (visitIsMarkedOffCampus(v)) return false;
+    return visitTypeCompactLower(v).includes("fte");
+  });
+  if (fteish.length > 0) return fteish[0];
+
+  const nonPpo = candidates.filter((v) => !visitIsPpo(v) && !visitIsMarkedOffCampus(v));
+  if (nonPpo.length > 0) return nonPpo[0];
+
+  const notStrictSummerPpo = candidates.filter((v) => !visitQualifiesSummerInternshipListingRow(v));
+  if (notStrictSummerPpo.length > 0) return notStrictSummerPpo[0];
+
+  return candidates[0];
+}
+
+/**
+ * @param {import("mongoose").Types.ObjectId|string} companyId
+ * @param {number} yearRaw
+ * @returns {Promise<Record<string, unknown>[]>}
+ */
+async function fetchApprovedVisitsForCompanyDetailYear(companyId, yearRaw) {
+  const year = normalizeCompanyDetailYear(yearRaw);
+  const match = buildCompanyVisitCompanyYearMatch(companyId, year);
+  if (!match) return [];
+  const candidatesRaw = await CompanyVisit.find({
+    status: "approved",
+    ...match,
+  })
+    .sort({ migratedAt: -1, _id: -1 })
+    .lean();
+  return candidatesRaw.map((v) => visitWithPlainRoleCtc(v));
+}
+
+/** SPC "Internship(PPO)" (and close spellings) — used for hub + resolver fallbacks. */
+function spcOfferIsInternshipPpo(typeOfferRaw) {
+  const want = normalizeType(typeOfferRaw);
+  return (
+    want === "internship(ppo)" ||
+    want === "internshipppo" ||
+    (want.includes("internship") && want.includes("ppo") && !want.includes("fte"))
+  );
+}
+
+/**
+ * Narrow approved visits by placement hub before matching SPC offer type.
+ * @param {Record<string, unknown>[]} candidates
+ * @param {ReturnType<typeof normalizePlacementContextParam>} ctx
+ * @param {string} typeOfOffer
+ */
+function filterCandidatesByPlacementHub(candidates, ctx, typeOfOffer) {
+  if (!Array.isArray(candidates) || candidates.length === 0) return [];
+  if (!ctx) return [...candidates];
+
+  const ppoOffer = spcOfferIsInternshipPpo(typeOfOffer);
+
+  if (ctx === "off_campus") {
+    // Internship(PPO) is anchored on on-campus PPO visits; `visitMatchesSpcTypeOfOffer` rejects off-campus rows.
+    if (ppoOffer) {
+      return candidates.filter((v) => visitIsPpo(v) && !visitIsMarkedOffCampus(v));
+    }
+    return candidates.filter((v) => visitIsMarkedOffCampus(v));
+  }
+  if (ctx === "internship_only") {
+    // "Internship only" hub lists exclude PPO, but SPC Internship(PPO) must still resolve to the PPO visit row.
+    if (ppoOffer) {
+      return candidates.filter((v) => visitIsPpo(v) && !visitIsMarkedOffCampus(v));
+    }
+    return candidates.filter((v) => visitQualifiesInternshipOnlyHubRow(v));
+  }
+  if (ctx === "summer_internship") {
+    return candidates.filter((v) => visitIsPpo(v) && !visitIsMarkedOffCampus(v));
+  }
+  if (ctx === "dream" || ctx === "open_dream") {
+    if (ppoOffer) {
+      // Same pool as summer_internship hub: SPC Internship(PPO) must anchor any on-campus PPO visit.
+      // Listing uses {@link visitQualifiesSummerInternshipListingRow} to keep strict summer rows off Dream
+      // tiles, but excluding those visits here caused false "no matching visit" when opening from Dream
+      // with Internship(PPO) even though the company has an approved PPO row for that year.
+      return candidates.filter((v) => visitIsPpo(v) && !visitIsMarkedOffCampus(v));
+    }
+    return candidates.filter((v) => !visitQualifiesSummerInternshipListingRow(v));
+  }
+  return [...candidates];
+}
+
+/**
+ * Whether `visit.type` (and flags) matches the SPC "type of offer" string.
+ * @param {Record<string, unknown>} visit
+ * @param {string} typeOfOffer
+ */
+function visitMatchesSpcTypeOfOffer(visit, typeOfOffer) {
+  const want = normalizeType(typeOfOffer);
+  const got = normalizeType(visit?.type);
+
+  if (want && got && want === got) return true;
+
+  if (want.includes("internship") && want.includes("fte")) {
+    return got.includes("internship") && got.includes("fte");
+  }
+
+  if (
+    want === "internship(ppo)" ||
+    want === "internshipppo" ||
+    (want.includes("internship") && want.includes("ppo") && !want.includes("fte"))
+  ) {
+    return visitIsPpo(visit) && !visitIsMarkedOffCampus(visit) && !got.includes("fte");
+  }
+
+  if (want === "fte") {
+    if (got === "fte") return true;
+    if (visitIsPpo(visit) || visitIsMarkedOffCampus(visit)) return false;
+    return got.includes("fte") && !got.includes("internship");
+  }
+
+  if (want.includes("onlyinternship") || (want.includes("only") && want.includes("internship"))) {
+    return visitQualifiesInternshipOnlyHubRow(visit);
+  }
+
+  return false;
+}
+
+/**
+ * Pick the approved `company_visits` row that matches SPC offer type and optional placement hub.
+ * @returns {Promise<{ ok: true, visit: Record<string, unknown> } | { ok: false, reason: string, message?: string }>}
+ */
+export async function resolveApprovedVisitForSpcPlacementOffer(
+  companyId,
+  yearRaw,
+  typeOfOfferRaw,
+  placementContextRaw
+) {
+  const cid = toObjectId(companyId);
+  if (!cid) {
+    return { ok: false, reason: "invalid_company", message: "Invalid company id." };
+  }
+  const year = normalizeCompanyDetailYear(yearRaw);
+  const typeOfOffer = String(typeOfOfferRaw ?? "").trim();
+  if (!typeOfOffer) {
+    return {
+      ok: false,
+      reason: "missing_offer",
+      message: "Type of offer is required to locate the visit row.",
+    };
+  }
+
+  const candidates = await fetchApprovedVisitsForCompanyDetailYear(cid, year);
+  if (!candidates.length) {
+    return {
+      ok: false,
+      reason: "no_approved_visit",
+      message: "No approved visit for this company and placement year.",
+    };
+  }
+
+  const ctx = normalizePlacementContextParam(placementContextRaw);
+  const pool = filterCandidatesByPlacementHub(candidates, ctx, typeOfOffer);
+  let matched = pool.filter((v) => visitMatchesSpcTypeOfOffer(v, typeOfOffer));
+
+  // Hub/session mismatch (e.g. internship_only or off_campus context while submitting PPO) used to yield
+  // an empty pool or rows that can never pass `visitMatchesSpcTypeOfOffer` for Internship(PPO).
+  if (matched.length === 0 && spcOfferIsInternshipPpo(typeOfOffer)) {
+    const rescuePool = candidates.filter((v) => visitIsPpo(v) && !visitIsMarkedOffCampus(v));
+    const retry = rescuePool.filter((v) => visitMatchesSpcTypeOfOffer(v, typeOfOffer));
+    if (retry.length > 0) {
+      matched = retry;
+    }
+  }
+
+  if (matched.length === 0) {
+    return {
+      ok: false,
+      reason: "no_matching_visit",
+      message:
+        "No approved visit matches the selected offer type for this placement hub and year. Check that the visit type matches the offer (e.g. FTE vs Internship(PPO)).",
+    };
+  }
+
+  return { ok: true, visit: matched[0] };
+}
+
+/**
+ * @param {"placement_got_in"|"ppo_branch"} statsTarget
+ */
+async function findApprovedVisitForSpcWrite(companyId, yearRaw, placementContextRaw, statsTarget) {
+  const candidates = await fetchApprovedVisitsForCompanyDetailYear(companyId, yearRaw);
+  if (!candidates.length) return null;
+  const ctx = normalizePlacementContextParam(placementContextRaw);
+  return pickVisitCandidateForSpcAnchor(candidates, ctx, statsTarget);
 }
 
 /**
@@ -842,27 +1216,16 @@ export async function findLatestVisitForCompany(companyId, year = COMPANY_VISIT_
 
 /**
  * Approved row for GET `/companies/:id` when several visits share `companyId` + year (distinct type/cluster slots).
+ * Also used for SPC placement/conversion writes so visit stats update the same slot the student hub merges.
  */
-async function findApprovedVisitForCompanyDetail(
+export async function findApprovedVisitForCompanyDetail(
   companyId,
   yearRaw,
   placementContextRaw = null
 ) {
+  const candidates = await fetchApprovedVisitsForCompanyDetailYear(companyId, yearRaw);
+  if (!candidates.length) return null;
   const ctx = normalizePlacementContextParam(placementContextRaw);
-  const year = normalizeCompanyDetailYear(yearRaw);
-  const match = buildCompanyVisitCompanyYearMatch(companyId, year);
-  if (!match) return null;
-
-  const candidatesRaw = await CompanyVisit.find({
-    status: "approved",
-    ...match,
-  })
-    .sort({ migratedAt: -1, _id: -1 })
-    .lean();
-
-  if (!candidatesRaw.length) return null;
-
-  const candidates = candidatesRaw.map((v) => visitWithPlainRoleCtc(v));
   return pickVisitCandidateForPlacementContext(candidates, ctx);
 }
 
@@ -925,6 +1288,10 @@ export async function getCompanyDetailLegacyMergedById(
   const visitsByCompany = await fetchApprovedVisitsForDetailYearsByCompany([_id]);
   const allApprovedVisits = visitsByCompany.get(String(_id)) ?? [];
   const totalGotInByYear = buildTotalGotInByYearFromVisits(allApprovedVisits);
+  const placementBranchStatsByYear = buildPlacementBranchStatsByYearFromVisits(
+    allApprovedVisits,
+    placementContextRaw
+  );
   const visitApproved = await findApprovedVisitForCompanyDetail(
     _id,
     placementYear,
@@ -934,6 +1301,7 @@ export async function getCompanyDetailLegacyMergedById(
     const merged = {
       ...mergeToLegacyShape(staticRow, visitApproved),
       totalGotInByYear,
+      placementBranchStatsByYear,
     };
     const visitPlain = visitWithPlainRoleCtc(visitApproved);
     const headline = getCompanyDetailHeadlineTypeFromVisits(
@@ -970,6 +1338,7 @@ export async function getCompanyDetailLegacyMergedById(
   const merged = {
     ...mergeToLegacyShape(staticRow, null),
     totalGotInByYear,
+    placementBranchStatsByYear,
   };
   merged.placementDreamTierVisitMissingForYear =
     ctx === "dream" || ctx === "open_dream"
@@ -1555,6 +1924,556 @@ export async function adjustVisitTotalGotIn(
   return doc;
 }
 
+/**
+ * Case-insensitive substring match on company name for SPC autocomplete.
+ * @param {unknown} query
+ * @param {unknown} limitRaw — capped at 20
+ * @returns {Promise<{ id: string, name: string }[]>}
+ */
+export async function suggestCompaniesForSpc(query, limitRaw = 15) {
+  const q = String(query ?? "").trim();
+  if (q.length < 2) return [];
+  const limit = Math.min(Math.max(Number(limitRaw) || 15, 1), 20);
+  const rx = new RegExp(escapeRegexLiteral(q), "i");
+  const rows = await CompanyStatic.find({ name: rx })
+    .select("_id name")
+    .sort({ name: 1 })
+    .limit(limit)
+    .lean();
+  return rows.map((r) => ({ id: String(r._id), name: String(r?.name || "") }));
+}
+
+/**
+ * Recompute derived PPO conversion scalars from normalized branch rows (same rules as admin PUT stats).
+ * @param {{ branchCode: string, gotIn: number, converted: number, convertedNotApplicable: boolean }[]} normalized
+ */
+function recomputePpoConversionAggregatesFromNormalized(normalized) {
+  const gotInTotal = normalized.reduce((sum, item) => sum + (item.gotIn || 0), 0);
+  const gotInTotalWithKnownConversion = normalized.reduce(
+    (sum, item) => sum + (item.convertedNotApplicable ? 0 : (item.gotIn || 0)),
+    0
+  );
+  const convertedTotal = normalized.reduce(
+    (sum, item) => sum + (item.convertedNotApplicable ? 0 : (item.converted || 0)),
+    0
+  );
+  return {
+    ppoConversionGotIn: gotInTotal,
+    ppoConversionConverted: convertedTotal,
+    ppoConversionNotApplicable: normalized.some((item) => item.convertedNotApplicable),
+    ppoConversionAcceptanceRate:
+      gotInTotalWithKnownConversion > 0
+        ? Number(((convertedTotal / gotInTotalWithKnownConversion) * 100).toFixed(2))
+        : 0,
+  };
+}
+
+/**
+ * Maps SPC conversion-details body (`fte` | `fte_internship`) to visit `ppoConversionType` / PlacementData.typeOfOffer labels.
+ * @param {unknown} conversionType
+ */
+export function mapSpcConversionDetailTypeToVisitLabel(conversionType) {
+  const s = String(conversionType || "").trim().toLowerCase();
+  if (s === "fte_internship") return "Internship+FTE";
+  if (s === "fte") return "FTE";
+  return "";
+}
+
+/**
+ * Maps SPC placement "type of offer" to the same `conversionType` strings used by conversion-details
+ * so {@link buildSpcConversionVisitPatch} can set `ppoConversionType` on the visit consistently.
+ * @param {unknown} typeOfOfferRaw
+ * @returns {"fte"|"fte_internship"|""}
+ */
+export function mapPlacementTypeOfOfferToSpcConversionType(typeOfOfferRaw) {
+  const norm = String(typeOfOfferRaw || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  if (norm === "fte") return "fte";
+  if (norm.includes("internship") && norm.includes("fte")) return "fte_internship";
+  return "";
+}
+
+/** @param {unknown} ctc */
+function plainCtcFromRole(ctc) {
+  if (!ctc || typeof ctc !== "object") return {};
+  if (ctc instanceof Map) return Object.fromEntries(ctc);
+  return { ...ctc };
+}
+
+function roleNamesMatch(a, b) {
+  return String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+}
+
+/** Fallback role row created when SPC omits role name — removed once a concrete role is submitted. */
+const SPC_SYNTHETIC_ROLE_FALLBACK = "Placement details";
+
+/** Role titles treated as placeholders; may be rewritten when SPC sends a concrete role + compensation. */
+function isSpcPlaceholderRoleName(name) {
+  const n = String(name || "").trim().toLowerCase();
+  if (!n) return false;
+  if (roleNamesMatch(name, SPC_SYNTHETIC_ROLE_FALLBACK)) return true;
+  return n === "tbd" || n === "tba";
+}
+
+/**
+ * Upsert compensation strings into visit `roles[]` (aligned with admin roles shape: roleName + ctc map).
+ * When the user supplies a concrete `roleName`, upserts that row (or rewrites the first TBD/TBA/Placement-details
+ * placeholder row to that name) and drops leftover placeholder rows so compensation does not duplicate.
+ * When `roleName` is omitted but compensation is present: updates **every** non–"Placement details" role with
+ * the same figures; if none exist, upserts "Placement details" only.
+ * For an existing role, **replaces** `ctc` with this submission's keys only (no merge with legacy visit CTC).
+ * Stipend strings become top-level numeric `internshipStipend` only — never `ctc.Stipend`. Preserves prior
+ * `internshipStipend` when this submit omits stipend or the stipend text does not parse as a number.
+ * @param {unknown[]} existingRoles
+ * @param {{ roleName?: string, ctcStr?: string, baseStr?: string, stipendStr?: string }} patch
+ */
+export function mergeSpcOfferIntoVisitRoles(existingRoles, patch) {
+  /** @type {{ roleName: string, ctc: Record<string, unknown>, internshipStipend?: number }[]} */
+  const roles = [];
+  if (Array.isArray(existingRoles)) {
+    for (const r of existingRoles) {
+      if (!r || typeof r !== "object") continue;
+      const roleName = String(r.roleName ?? r.name ?? "").trim() || "Role";
+      const normalized = normalizeRoleStipendFields({
+        ...r,
+        roleName,
+      });
+      /** @type {{ roleName: string, ctc: Record<string, unknown>, internshipStipend?: number }} */
+      const entry = {
+        roleName: String(normalized.roleName || roleName).trim() || "Role",
+        ctc:
+          normalized.ctc && typeof normalized.ctc === "object"
+            ? /** @type {Record<string, unknown>} */ ({ ...normalized.ctc })
+            : {},
+      };
+      const st = Number(normalized.internshipStipend);
+      if (Number.isFinite(st)) entry.internshipStipend = st;
+      roles.push(entry);
+    }
+  }
+
+  const ctcStr = String(patch.ctcStr ?? "").trim();
+  const baseStr = String(patch.baseStr ?? "").trim();
+  const stipStr = String(patch.stipendStr ?? "").trim();
+  const roleTrim = String(patch.roleName ?? "").trim().slice(0, 200);
+  const hasComp = Boolean(ctcStr || baseStr || stipStr);
+  if (!hasComp) return roles;
+
+  const concreteRoles = roles.filter(
+    (r) => !roleNamesMatch(r.roleName, SPC_SYNTHETIC_ROLE_FALLBACK)
+  );
+
+  /** @type {Record<string, string>} */
+  const nextCtcPatch = {};
+  if (ctcStr) nextCtcPatch.CTC = ctcStr;
+  if (baseStr) nextCtcPatch.Base = baseStr;
+
+  const stipNum = stipStr ? stipendSubmissionStringToNumber(stipStr) : undefined;
+
+  /** @param {{ roleName: string, ctc: Record<string, unknown>, internshipStipend?: number }} prev */
+  function applyPatchToRole(prev) {
+    /** @type {{ roleName: string, ctc: Record<string, string>, internshipStipend?: number }} */
+    const nextEntry = {
+      roleName: prev.roleName,
+      ctc: { ...nextCtcPatch },
+    };
+    if (stipNum !== undefined) {
+      nextEntry.internshipStipend = stipNum;
+    } else {
+      const prevStipNum = Number(prev.internshipStipend);
+      if (Number.isFinite(prevStipNum)) nextEntry.internshipStipend = prevStipNum;
+    }
+    return nextEntry;
+  }
+
+  if (roleTrim) {
+    let idx = roles.findIndex((r) => roleNamesMatch(r.roleName, roleTrim));
+    if (idx >= 0) {
+      roles[idx] = applyPatchToRole(roles[idx]);
+    } else {
+      const phIdx = roles.findIndex((r) => isSpcPlaceholderRoleName(r.roleName));
+      if (phIdx >= 0) {
+        const patched = applyPatchToRole(roles[phIdx]);
+        patched.roleName = roleTrim;
+        roles[phIdx] = patched;
+      } else {
+        roles.push({
+          roleName: roleTrim,
+          ctc: nextCtcPatch,
+          ...(stipNum !== undefined ? { internshipStipend: stipNum } : {}),
+        });
+      }
+    }
+    if (!roleNamesMatch(roleTrim, SPC_SYNTHETIC_ROLE_FALLBACK)) {
+      return roles.filter(
+        (row) =>
+          roleNamesMatch(row.roleName, roleTrim) || !isSpcPlaceholderRoleName(row.roleName)
+      );
+    }
+    return roles;
+  }
+
+  if (concreteRoles.length > 0) {
+    return roles
+      .filter((r) => !roleNamesMatch(r.roleName, SPC_SYNTHETIC_ROLE_FALLBACK))
+      .map((prev) => applyPatchToRole(prev));
+  }
+
+  const idxPd = roles.findIndex((r) => roleNamesMatch(r.roleName, SPC_SYNTHETIC_ROLE_FALLBACK));
+  if (idxPd >= 0) {
+    roles[idxPd] = applyPatchToRole(roles[idxPd]);
+    return roles;
+  }
+  roles.push({
+    roleName: SPC_SYNTHETIC_ROLE_FALLBACK,
+    ctc: nextCtcPatch,
+    ...(stipNum !== undefined ? { internshipStipend: stipNum } : {}),
+  });
+  return roles;
+}
+
+/**
+ * Build dynamic visit patch from SPC conversion-details body (conversion type + optional role/compensation).
+ * @param {unknown[]} existingMergedRoles — merged.roles from anchored visit
+ * @param {{ conversionType?: unknown, role?: unknown, ctc?: unknown, base?: unknown, stipend?: unknown }} fields
+ */
+export function buildSpcConversionVisitPatch(existingMergedRoles, fields) {
+  /** @type {Record<string, unknown>} */
+  const patch = {};
+  const label = mapSpcConversionDetailTypeToVisitLabel(fields?.conversionType);
+  if (label) patch.ppoConversionType = label.slice(0, 200);
+
+  const ctcStr = String(fields?.ctc ?? "").trim();
+  const baseStr = String(fields?.base ?? "").trim();
+  const stipStr = String(fields?.stipend ?? "").trim();
+  const roleTrim = String(fields?.role ?? "").trim();
+  const hasComp = Boolean(ctcStr || baseStr || stipStr);
+
+  if (hasComp) {
+    patch.roles = mergeSpcOfferIntoVisitRoles(existingMergedRoles || [], {
+      roleName: roleTrim,
+      ctcStr,
+      baseStr,
+      stipendStr: stipStr,
+    });
+  }
+  return patch;
+}
+
+/**
+ * Apply SPC conversion-details extras (`ppoConversionType`, optional `roles` merge) on anchored visit.
+ */
+export async function syncAnchoredVisitSpcConversionFields(
+  companyId,
+  placementYear,
+  fields,
+  placementListContextRaw = null,
+  options = {}
+) {
+  const cid = toObjectId(companyId);
+  if (!cid) return { ok: false, reason: "invalid_company" };
+  const year = normalizeCompanyDetailYear(placementYear);
+  const visitHint =
+    options?.resolvedVisit && options.resolvedVisit._id
+      ? /** @type {Record<string, unknown>} */ (options.resolvedVisit)
+      : await findApprovedVisitForSpcWrite(cid, year, placementListContextRaw, "placement_got_in");
+  const staticRow = await CompanyStatic.findById(cid).lean();
+  if (!visitHint?._id || !staticRow) return { ok: false, reason: "visit_not_found" };
+  const merged = mergeToLegacyShape(staticRow, visitHint);
+
+  const patch = buildSpcConversionVisitPatch(merged.roles || [], fields || {});
+  if (Object.keys(patch).length === 0) return { ok: true };
+
+  await updateCompanyVisit(cid, patch, year, visitHint);
+  return { ok: true };
+}
+
+/**
+ * Adjust `ppoBranchStats[]` on the anchored visit: optional `gotInDelta`, optional `convertedDelta` (either may be 0).
+ * Does not modify `totalGotIn`.
+ * When `convertedDelta > 0`, clears `convertedNotApplicable` for that branch so aggregates count conversions (admin formulas skip converted when NA is true).
+ * Optional `options.spcConversion` merges `ppoConversionType` and optional `roles` (CTC/Base/Stipend) on the same write.
+ * Optional `options.placementListContext` / `options.placementContext` — same hub hint as GET `/companies/:id?placementContext=`.
+ * @param {number} [gotInDelta]
+ * @param {number} [convertedDelta]
+ * @param {{ spcConversion?: { conversionType?: unknown, role?: unknown, ctc?: unknown, base?: unknown, stipend?: unknown }, placementListContext?: unknown, placementContext?: unknown, resolvedVisit?: Record<string, unknown>|null }} [options]
+ * @returns {Promise<{ ok: true } | { ok: false, reason: string }>}
+ */
+export async function incrementPpoBranchGotInForAnchoredVisit(
+  companyId,
+  placementYear,
+  branchCode,
+  gotInDelta = 1,
+  convertedDelta = 0,
+  options = {}
+) {
+  const code = String(branchCode || "").trim().toLowerCase();
+  if (!PPO_BRANCH_CODES.has(code)) {
+    return { ok: false, reason: "invalid_branch" };
+  }
+  const cid = toObjectId(companyId);
+  if (!cid) {
+    return { ok: false, reason: "invalid_company" };
+  }
+  const year = normalizeCompanyDetailYear(placementYear);
+  const d = Number(gotInDelta);
+  const cd = Number(convertedDelta);
+  const dOk = Number.isFinite(d) && d > 0;
+  const cdOk = Number.isFinite(cd) && cd > 0;
+  if (!dOk && !cdOk) {
+    return { ok: false, reason: "invalid_delta" };
+  }
+
+  const listCtx =
+    options?.placementListContext != null && String(options.placementListContext).trim() !== ""
+      ? options.placementListContext
+      : options?.placementContext != null && String(options.placementContext).trim() !== ""
+        ? options.placementContext
+        : null;
+  const visitHint =
+    options?.resolvedVisit && options.resolvedVisit._id
+      ? /** @type {Record<string, unknown>} */ (options.resolvedVisit)
+      : await findApprovedVisitForSpcWrite(cid, year, listCtx, "ppo_branch");
+  const staticRow = await CompanyStatic.findById(cid).lean();
+  if (!visitHint?._id || !staticRow) {
+    return { ok: false, reason: "visit_not_found" };
+  }
+  const merged = mergeToLegacyShape(staticRow, visitHint);
+
+  const rawRows = Array.isArray(merged.ppoBranchStats) ? merged.ppoBranchStats : [];
+  /** @type {Map<string, { branchCode: string, gotIn: number, converted: number, convertedNotApplicable: boolean }>} */
+  const byCode = new Map();
+  for (const row of rawRows) {
+    const bc = String(row?.branchCode || "").trim().toLowerCase();
+    if (!PPO_BRANCH_CODES.has(bc)) continue;
+    const gotIn = Math.max(0, Number.parseInt(String(row?.gotIn ?? 0), 10)) || 0;
+    const converted = Math.max(0, Number.parseInt(String(row?.converted ?? 0), 10)) || 0;
+    const convertedNotApplicable = Boolean(row?.convertedNotApplicable);
+    byCode.set(bc, { branchCode: bc, gotIn, converted, convertedNotApplicable });
+  }
+
+  const cur = byCode.get(code) || {
+    branchCode: code,
+    gotIn: 0,
+    converted: 0,
+    convertedNotApplicable: false,
+  };
+  if (dOk) {
+    cur.gotIn = Math.max(0, cur.gotIn) + d;
+  }
+  if (cdOk) {
+    cur.converted = Math.max(0, cur.converted) + cd;
+    cur.convertedNotApplicable = false;
+  }
+  byCode.set(code, cur);
+
+  const normalized = PPO_BRANCH_CODES_ARRAY.filter((bc) => byCode.has(bc)).map((bc) => byCode.get(bc));
+  const aggregates = recomputePpoConversionAggregatesFromNormalized(normalized);
+
+  /** @type {Record<string, unknown>} */
+  const payload = {
+    ppoBranchStats: normalized,
+    ...aggregates,
+  };
+  const spc = options?.spcConversion;
+  if (spc && typeof spc === "object") {
+    const visitPatch = buildSpcConversionVisitPatch(merged.roles || [], spc);
+    if (visitPatch.ppoConversionType) payload.ppoConversionType = visitPatch.ppoConversionType;
+    if (visitPatch.roles) payload.roles = visitPatch.roles;
+  }
+
+  await updateCompanyVisit(cid, payload, year, visitHint);
+
+  return { ok: true };
+}
+
+/**
+ * Single visit write for SPC "conversion-details" first-time save: bumps
+ * {@link placementGotInBranchStats} + `totalGotIn`, increments `ppoBranchStats[].converted` for the branch
+ * (and PPO aggregates), and sets `ppoConversionType` / `roles` from the form (`visitSyncFields`).
+ * Avoids two separate writes getting out of sync if one fails.
+ */
+export async function incrementPlacementAndPpoConvertedForSpcConversionDetails(
+  companyId,
+  placementYear,
+  branchCode,
+  placementGotInDelta = 1,
+  ppoConvertedDelta = 1,
+  visitSyncFields,
+  placementListContextRaw = null,
+  options = {}
+) {
+  const code = String(branchCode || "").trim().toLowerCase();
+  if (!PPO_BRANCH_CODES.has(code)) {
+    return { ok: false, reason: "invalid_branch" };
+  }
+  const cid = toObjectId(companyId);
+  if (!cid) {
+    return { ok: false, reason: "invalid_company" };
+  }
+  const year = normalizeCompanyDetailYear(placementYear);
+  const dPl = Number(placementGotInDelta);
+  const dConv = Number(ppoConvertedDelta);
+  if (!Number.isFinite(dPl) || dPl <= 0) {
+    return { ok: false, reason: "invalid_placement_delta" };
+  }
+  if (!Number.isFinite(dConv) || dConv <= 0) {
+    return { ok: false, reason: "invalid_ppo_converted_delta" };
+  }
+
+  const listCtx =
+    options?.placementListContext != null && String(options.placementListContext).trim() !== ""
+      ? options.placementListContext
+      : options?.placementContext != null && String(options.placementContext).trim() !== ""
+        ? options.placementContext
+        : null;
+  const visitHint =
+    options?.resolvedVisit && options.resolvedVisit._id
+      ? /** @type {Record<string, unknown>} */ (options.resolvedVisit)
+      : await findApprovedVisitForSpcWrite(cid, year, placementListContextRaw, "placement_got_in");
+  const staticRow = await CompanyStatic.findById(cid).lean();
+  if (!visitHint?._id || !staticRow) {
+    return { ok: false, reason: "visit_not_found" };
+  }
+  const merged = mergeToLegacyShape(staticRow, visitHint);
+
+  const rawPlacement = Array.isArray(merged.placementGotInBranchStats)
+    ? merged.placementGotInBranchStats
+    : [];
+  /** @type {Map<string, { branchCode: string, gotIn: number }>} */
+  const placeByCode = new Map();
+  for (const row of rawPlacement) {
+    const bc = String(row?.branchCode || "").trim().toLowerCase();
+    if (!PPO_BRANCH_CODES.has(bc)) continue;
+    const gotIn = Math.max(0, Number.parseInt(String(row?.gotIn ?? 0), 10)) || 0;
+    placeByCode.set(bc, { branchCode: bc, gotIn });
+  }
+  const curPl = placeByCode.get(code) || { branchCode: code, gotIn: 0 };
+  curPl.gotIn = Math.max(0, curPl.gotIn) + dPl;
+  placeByCode.set(code, curPl);
+  const normalizedPlacement = PPO_BRANCH_CODES_ARRAY.map((bc) =>
+    placeByCode.has(bc) ? placeByCode.get(bc) : { branchCode: bc, gotIn: 0 }
+  );
+  const currentTotal = Math.max(0, Number.parseInt(String(merged.totalGotIn ?? 0), 10)) || 0;
+
+  const rawPpo = Array.isArray(merged.ppoBranchStats) ? merged.ppoBranchStats : [];
+  /** @type {Map<string, { branchCode: string, gotIn: number, converted: number, convertedNotApplicable: boolean }>} */
+  const ppoByCode = new Map();
+  for (const row of rawPpo) {
+    const bc = String(row?.branchCode || "").trim().toLowerCase();
+    if (!PPO_BRANCH_CODES.has(bc)) continue;
+    const gotIn = Math.max(0, Number.parseInt(String(row?.gotIn ?? 0), 10)) || 0;
+    const converted = Math.max(0, Number.parseInt(String(row?.converted ?? 0), 10)) || 0;
+    const convertedNotApplicable = Boolean(row?.convertedNotApplicable);
+    ppoByCode.set(bc, { branchCode: bc, gotIn, converted, convertedNotApplicable });
+  }
+  const curPpo = ppoByCode.get(code) || {
+    branchCode: code,
+    gotIn: 0,
+    converted: 0,
+    convertedNotApplicable: false,
+  };
+  curPpo.converted = Math.max(0, curPpo.converted) + dConv;
+  curPpo.convertedNotApplicable = false;
+  ppoByCode.set(code, curPpo);
+  const normalizedPpo = PPO_BRANCH_CODES_ARRAY.filter((bc) => ppoByCode.has(bc)).map((bc) =>
+    ppoByCode.get(bc)
+  );
+  const aggregates = recomputePpoConversionAggregatesFromNormalized(normalizedPpo);
+
+  const visitPatch = buildSpcConversionVisitPatch(merged.roles || [], visitSyncFields || {});
+
+  /** @type {Record<string, unknown>} */
+  const payload = {
+    placementGotInBranchStats: normalizedPlacement,
+    totalGotIn: currentTotal + dPl,
+    ppoBranchStats: normalizedPpo,
+    ...aggregates,
+  };
+  if (visitPatch.ppoConversionType) payload.ppoConversionType = visitPatch.ppoConversionType;
+  if (visitPatch.roles) payload.roles = visitPatch.roles;
+
+  await updateCompanyVisit(cid, payload, year, visitHint);
+  return { ok: true };
+}
+
+/**
+ * Increment `placementGotInBranchStats[].gotIn` and `totalGotIn` on the anchored visit
+ * (Dream / open-dream / off-campus / internship-only placement counts — not ppoBranchStats.)
+ * @param {number} [gotInDelta]
+ * @param {unknown} [placementListContextRaw] — same as GET `/companies/:id?placementContext=` when multiple approved visits share a year.
+ * @param {{ resolvedVisit?: Record<string, unknown>|null }} [options] — when set, stats are written to this visit (from {@link resolveApprovedVisitForSpcPlacementOffer}).
+ * @returns {Promise<{ ok: true } | { ok: false, reason: string }>}
+ */
+export async function incrementPlacementGotInBranchForAnchoredVisit(
+  companyId,
+  placementYear,
+  branchCode,
+  gotInDelta = 1,
+  placementListContextRaw = null,
+  options = {}
+) {
+  const code = String(branchCode || "").trim().toLowerCase();
+  if (!PPO_BRANCH_CODES.has(code)) {
+    return { ok: false, reason: "invalid_branch" };
+  }
+  const cid = toObjectId(companyId);
+  if (!cid) {
+    return { ok: false, reason: "invalid_company" };
+  }
+  const year = normalizeCompanyDetailYear(placementYear);
+  const d = Number(gotInDelta);
+  if (!Number.isFinite(d) || d <= 0) {
+    return { ok: false, reason: "invalid_delta" };
+  }
+
+  const visitHint =
+    options?.resolvedVisit && options.resolvedVisit._id
+      ? /** @type {Record<string, unknown>} */ (options.resolvedVisit)
+      : await findApprovedVisitForSpcWrite(cid, year, placementListContextRaw, "placement_got_in");
+  const staticRow = await CompanyStatic.findById(cid).lean();
+  if (!visitHint?._id || !staticRow) {
+    return { ok: false, reason: "visit_not_found" };
+  }
+  const merged = mergeToLegacyShape(staticRow, visitHint);
+
+  const rawRows = Array.isArray(merged.placementGotInBranchStats)
+    ? merged.placementGotInBranchStats
+    : [];
+  /** @type {Map<string, { branchCode: string, gotIn: number }>} */
+  const byCode = new Map();
+  for (const row of rawRows) {
+    const bc = String(row?.branchCode || "").trim().toLowerCase();
+    if (!PPO_BRANCH_CODES.has(bc)) continue;
+    const gotIn = Math.max(0, Number.parseInt(String(row?.gotIn ?? 0), 10)) || 0;
+    byCode.set(bc, { branchCode: bc, gotIn });
+  }
+
+  const cur = byCode.get(code) || { branchCode: code, gotIn: 0 };
+  cur.gotIn = Math.max(0, cur.gotIn) + d;
+  byCode.set(code, cur);
+
+  const normalized = PPO_BRANCH_CODES_ARRAY.map((bc) =>
+    byCode.has(bc) ? byCode.get(bc) : { branchCode: bc, gotIn: 0 }
+  );
+
+  const currentTotal = Math.max(0, Number.parseInt(String(merged.totalGotIn ?? 0), 10)) || 0;
+
+  await updateCompanyVisit(
+    cid,
+    {
+      placementGotInBranchStats: normalized,
+      totalGotIn: currentTotal + d,
+    },
+    year,
+    visitHint
+  );
+
+  return { ok: true };
+}
+
 // ---------------------------------------------------------------------------
 // WRITE operations (companies + company_visits only — never companies1)
 // ---------------------------------------------------------------------------
@@ -1696,6 +2615,9 @@ export async function createCompanyWithVisit(data) {
     cluster: keyParts.cluster,
     migratedAt: now,
   });
+  if (visitDoc.roles !== undefined) {
+    visitDoc.roles = sanitizeRolesArrayForPersist(visitDoc.roles);
+  }
 
   try {
     const vins = await CompanyVisit.create(visitDoc);
@@ -1733,6 +2655,9 @@ export async function updateCompanyVisit(
   const $set = pickDynamicUpdatePayload(data);
   if (Object.keys($set).length === 0) {
     return { acknowledged: true, modifiedCount: 0, upsertedCount: 0, matchedCount: 0 };
+  }
+  if ($set.roles !== undefined) {
+    $set.roles = sanitizeRolesArrayForPersist($set.roles);
   }
   const year = normalizeCompanyDetailYear(placementYear);
   $set.migratedAt = new Date();
@@ -1786,7 +2711,7 @@ export async function approveAndNormalizeSingleCompanyVisitById(
     companyId: cid,
     year,
     type: existing.type != null ? String(existing.type) : "",
-    roles: Array.isArray(existing.roles) ? existing.roles : [],
+    roles: sanitizeRolesArrayForPersist(Array.isArray(existing.roles) ? existing.roles : []),
     onlineQuestions: Array.isArray(existing.onlineQuestions) ? existing.onlineQuestions : [],
     onlineQuestions_solution: Array.isArray(existing.onlineQuestions_solution)
       ? existing.onlineQuestions_solution

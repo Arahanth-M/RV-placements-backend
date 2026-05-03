@@ -56,7 +56,8 @@ function toTimestamp(value) {
   return null;
 }
 
-function normalizeType(type) {
+/** Normalizes company/visit `type` strings for comparisons (same rules as list filters). */
+export function normalizeType(type) {
   return String(type || "")
     .trim()
     .replace(/\s+/g, "")
@@ -125,7 +126,11 @@ function isOffCampusCompany(company) {
 
 /** @param {Record<string, unknown>|null|undefined} visit */
 export function visitIsPpo(visit) {
-  return normalizeType(visit?.type).includes("ppo");
+  if (!visit || typeof visit !== "object") return false;
+  if (normalizeType(visit?.type).includes("ppo")) return true;
+  // Some legacy rows put the PPO marker on `cluster` only.
+  if (normalizeType(visit?.cluster).includes("ppo")) return true;
+  return false;
 }
 
 /** @param {Record<string, unknown>|null|undefined} visit */
@@ -179,6 +184,20 @@ export function visitQualifiesDreamHubListingVisit(visit) {
     return true;
   }
   return false;
+}
+
+/**
+ * Internship-only hub row: visit type is 6-month internship-only, or roles match internship-only (stipend, no CTC).
+ * Excludes PPO and off-campus (mirrors {@link CompanyStats} internship-only slice).
+ */
+export function visitQualifiesInternshipOnlyHubRow(visit) {
+  if (!visit || typeof visit !== "object") return false;
+  if (visitIsMarkedOffCampus(visit)) return false;
+  if (visitIsPpo(visit)) return false;
+  const norm = normalizeType(visit?.type);
+  if (norm.includes("onlyinternship")) return true;
+  if (norm.includes("only") && norm.includes("internship")) return true;
+  return isInternshipOnlyCompany({ roles: visit.roles });
 }
 
 /**

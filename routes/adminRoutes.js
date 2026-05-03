@@ -31,6 +31,7 @@ import {
   deleteCompanyVisitForYear,
   findOnePendingVisitForCompanyYear,
   mergeToLegacyShape,
+  normalizeRoleStipendFields,
   deleteSplitCompany,
   ensureAdminVisitForYear,
   getCompanyMergedForAdminById,
@@ -41,6 +42,7 @@ import {
   updateCompanyVisit,
 } from "../services/companyService.js";
 import { invalidateLeaderboardCache } from "./leaderboardRoutes.js";
+import { PPO_BRANCH_CODES } from "../utils/ppoBranchCodes.js";
 
 const adminRouter = express.Router();
 
@@ -153,8 +155,6 @@ function sanitizeText(text) {
   str = str.replace(/(?<![/:])\bdata\s*:[^\s"'<>]*/gi, '');
   return str.trim();
 }
-
-const PPO_BRANCH_CODES = new Set(["cd", "cy", "ise", "cse", "aiml", "bt"]);
 
 // Get total number of users
 adminRouter.get("/stats/users", async (req, res) => {
@@ -1470,11 +1470,11 @@ adminRouter.put(
           : numeric;
       });
 
-      return {
+      return normalizeRoleStipendFields({
         roleName,
         ctc,
         ...(internshipStipend !== undefined ? { internshipStipend } : {}),
-      };
+      });
     });
 
     const staticRow = await CompanyStatic.findById(req.params.id).lean();
