@@ -7,6 +7,7 @@ import helmet from "helmet";
 import { connectDB } from "./config/db.js";
 import { connectRedis } from "./src/utils/redisClient.js";
 import { config, routes, messages } from "./config/constants.js";
+import "./config/mongoCollections.js";
 import {
   globalLimiter,
   authLimiter,

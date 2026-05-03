@@ -35,7 +35,8 @@ export default {
     }
   },
   
-  // Setup files
+  // Setup files (jest.env must run before app imports mongoCollections)
+  setupFiles: ['<rootDir>/tests/jest.env.js'],
   setupFilesAfterEnv: ['<rootDir>/tests/setup.js'],
   
   // Clear mocks automatically

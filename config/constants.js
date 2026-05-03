@@ -114,19 +114,6 @@ export const ALLOWED_LOGIN_EMAIL =
 export const ADMIN_EMAIL =
   process.env.ADMIN_EMAIL?.trim() || DEFAULT_PLATFORM_OWNER_EMAIL;
 
-// Collection used to determine whether a student is in the active beta cohort.
-export const BETA_ACCESS_COLLECTION =
-  process.env.BETA_ACCESS_COLLECTION?.trim() || "users27_monday";
-
-// Student placement profile (USN/email lookup, popup companies, /api/students/profile).
-// Roster export name (case resolved at runtime when possible).
-export const STUDENT_PROFILE_COLLECTION =
-  process.env.STUDENT_PROFILE_COLLECTION?.trim() || "users27_monday";
-
-// Email column name in the exported student roster collection.
-export const STUDENT_EMAIL_FIELD =
-  process.env.STUDENT_EMAIL_FIELD?.trim() || "Email Address";
-
 // Default values
 export const defaults = {
   PAGINATION: {

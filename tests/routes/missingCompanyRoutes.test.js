@@ -1,17 +1,12 @@
 import request from "supertest";
 import jwt from "jsonwebtoken";
-import mongoose from "mongoose";
 import app from "../../server.js";
 import MissingCompany from "../../models/MissingCompany.js";
+import PlacementData from "../../models/PlacementData.js";
+import Student from "../../models/Student.js";
 import { seedApprovedSplitCompany } from "../helpers/seedSplitCompany.js";
 import User from "../../models/User.js";
 import { buildJwtPayloadFromUser } from "../../utils/jwtUserClaims.js";
-import {
-  STUDENT_PROFILE_COLLECTION,
-  STUDENT_EMAIL_FIELD,
-} from "../../config/constants.js";
-
-const STUDENT_COLLECTION = STUDENT_PROFILE_COLLECTION;
 
 function authCookieForUser(user, options = {}) {
   const secret = process.env.JWT_SECRET;
@@ -30,9 +25,15 @@ describe("Missing Company Routes", () => {
         isBetaListed: true,
       });
 
-      await mongoose.connection.db.collection(STUDENT_COLLECTION).insertOne({
-        [STUDENT_EMAIL_FIELD]: "beta1@example.com",
-        "FTE Company name": "Atlassian",
+      const student = await Student.create({
+        name: "Beta User One",
+        email: "beta1@example.com",
+        usn: "1RV22CSBETA1",
+      });
+      await PlacementData.create({
+        studentId: student._id,
+        companyPlaced: "Atlassian",
+        typeOfOffer: "FTE",
       });
 
       const response = await request(app)
@@ -67,9 +68,15 @@ describe("Missing Company Routes", () => {
         isBetaListed: true,
       });
 
-      await mongoose.connection.db.collection(STUDENT_COLLECTION).insertOne({
-        [STUDENT_EMAIL_FIELD]: "beta-name-of-company@example.com",
-        "Name of Company": "Zepto",
+      const student = await Student.create({
+        name: "Beta User Name Of Company",
+        email: "beta-name-of-company@example.com",
+        usn: "1RV22CSBETANC",
+      });
+      await PlacementData.create({
+        studentId: student._id,
+        companyPlaced: "Zepto",
+        typeOfOffer: "Internship",
       });
 
       const response = await request(app)
@@ -114,9 +121,15 @@ describe("Missing Company Routes", () => {
         isBetaListed: true,
       });
 
-      await mongoose.connection.db.collection(STUDENT_COLLECTION).insertOne({
-        [STUDENT_EMAIL_FIELD]: "beta2@example.com",
-        "FTE Company name": "Google",
+      const student = await Student.create({
+        name: "Beta User Two",
+        email: "beta2@example.com",
+        usn: "1RV22CSBETA2",
+      });
+      await PlacementData.create({
+        studentId: student._id,
+        companyPlaced: "Google",
+        typeOfOffer: "FTE",
       });
 
       await seedApprovedSplitCompany({
@@ -133,7 +146,6 @@ describe("Missing Company Routes", () => {
           category: "FTE",
         });
 
-      // Placeholder: enable when route checks `companies` / visits for existing names
       void response;
     });
   });
