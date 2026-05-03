@@ -57,7 +57,7 @@ import {
 const router = express.Router();
 router.use(authJWT);
 router.use(checkBetaAccess);
-router.use(authorize(["student", "admin"]));
+router.use(authorize(["student", "admin", "spc"]));
 
 const getAuthenticatedUserId = (req) => String(req.user?.userId || "").trim();
 const isSessionOwner = (session, userId) => String(session?.userId || "") === userId;

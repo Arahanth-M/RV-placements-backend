@@ -1,8 +1,16 @@
+/**
+ * Read-through cache for GET /api/students/profile (keyed by student login email).
+ * - Hit: return cached JSON (no MongoDB).
+ * - Miss: route loads DB, then setCachedStudentProfile().
+ * Invalidate per-user via invalidateStudentProfileCacheByEmail when placements/student rows change.
+ * TTL is a safety net if an invalidation path is missed.
+ */
 import { redisUrl } from "../src/utils/redisClient.js";
 import { getJSON, setJSON, deleteKey } from "../src/utils/redisHelpers.js";
 
 const KEY_PREFIX = "rv:student:profile:";
-const TTL_SECONDS = 300;
+/** Seconds; stale cache expires even if invalidation was forgotten */
+const TTL_SECONDS = 900;
 
 function normalizeEmail(email) {
   if (email == null || typeof email !== "string") return "";

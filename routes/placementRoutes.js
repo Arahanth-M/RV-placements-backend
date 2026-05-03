@@ -9,6 +9,7 @@ import requireSPC from "../middleware/requireSPC.js";
 import validateRequest from "../middleware/validateRequest.js";
 import { placementDataSchema } from "../validations/placement.validation.js";
 import { config, messages } from "../config/constants.js";
+import { invalidateStudentProfileCacheByEmail } from "../services/studentProfileCache.js";
 
 const router = express.Router();
 
@@ -235,6 +236,7 @@ router.post("/spc/submit", authJWT, requireSPC, async (req, res) => {
     });
 
     if (duplicate) {
+      await invalidateStudentProfileCacheByEmail(email).catch(() => {});
       return res.status(400).json({ message: "Duplicate entry" });
     }
 
@@ -247,6 +249,8 @@ router.post("/spc/submit", authJWT, requireSPC, async (req, res) => {
       ctc,
       createdBy: req.user?.id || req.user?._id || req.user?.email || "",
     });
+
+    await invalidateStudentProfileCacheByEmail(email).catch(() => {});
 
     return res.json({
       message: "Placement data submitted successfully",

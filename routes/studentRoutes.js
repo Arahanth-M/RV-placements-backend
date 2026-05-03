@@ -4,7 +4,6 @@ import authJWT from "../middleware/authJWT.js";
 import checkBetaAccess from "../middleware/checkBetaAccess.js";
 import authorize from "../middleware/authorize.js";
 import requireAdmin from "../middleware/requireAdmin.js";
-import PlacementData from "../models/PlacementData.js";
 import Student from "../models/Student.js";
 import {
   getCachedStudentProfile,
@@ -12,6 +11,7 @@ import {
   invalidateStudentProfileCacheByEmail,
   invalidateStudentProfileCacheByEmails,
 } from "../services/studentProfileCache.js";
+import { buildProfilePayloadFromStudentRecord } from "../services/studentProfileService.js";
 import {
   ADMIN_EMAIL,
   STUDENT_PROFILE_COLLECTION,
@@ -130,7 +130,7 @@ router.get(
   return res.status(410).json({ error: "Name-based lookup is disabled. Use /api/students/profile instead." });
 });
 
-// Get student profile by logged-in user email
+// GET profile: Redis read-through cache (see studentProfileCache.js); invalidated on placement/student updates.
 router.get("/profile", authJWT, checkBetaAccess, authorize(["student", "admin", "spc"]), async (req, res) => {
   try {
     if (!req.user || !req.user.email) {
@@ -164,37 +164,13 @@ router.get("/profile", authJWT, checkBetaAccess, authorize(["student", "admin", 
       return res.status(404).json({ error: "Profile not found" });
     }
 
-    const placements = await PlacementData.find({ studentId: studentRecord._id })
-      .sort({ createdAt: -1 })
-      .lean();
-
-    const placementCompanyMap = new Map();
-    for (const placement of placements) {
-      const companyName = normalizeText(placement?.companyPlaced);
-      if (!companyName) continue;
-      const key = companyName.toLowerCase();
-      if (!placementCompanyMap.has(key)) {
-        placementCompanyMap.set(key, companyName);
-      }
-    }
-    const placementCompanyNames = Array.from(placementCompanyMap.values());
-    const placementCompanies = placementCompanyNames.map((companyName) => ({
-      companyName,
-    }));
-    const primaryCompanyName = placementCompanyNames[0] || null;
-    const responsePayload = {
-      profileSource: "students_split",
-      student: studentRecord,
-      placements,
-      placementCompanies,
-      primaryCompanyName,
-      companyId: null,
-      Name: normalizeText(studentRecord?.name) || null,
-      Company: primaryCompanyName,
-    };
+    const responsePayload = await buildProfilePayloadFromStudentRecord(studentRecord);
+    const placementCount = Array.isArray(responsePayload.placements)
+      ? responsePayload.placements.length
+      : 0;
 
     console.log(
-      `✅ [Profile] Found student record and ${placements.length} placement entr${placements.length === 1 ? "y" : "ies"} for ${email}`
+      `✅ [Profile] Found student record and ${placementCount} placement entr${placementCount === 1 ? "y" : "ies"} for ${email}`
     );
 
     await setCachedStudentProfile(email, responsePayload);
