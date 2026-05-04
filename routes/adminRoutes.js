@@ -1,5 +1,6 @@
 import express from "express";
 import mongoose from "mongoose";
+import multer from "multer";
 import authJWT from "../middleware/authJWT.js";
 import authorize from "../middleware/authorize.js";
 import requireAdmin from "../middleware/requireAdmin.js";
@@ -43,13 +44,71 @@ import {
 } from "../services/companyService.js";
 import { invalidateLeaderboardCache } from "./leaderboardRoutes.js";
 import { PPO_BRANCH_CODES } from "../utils/ppoBranchCodes.js";
+import {
+  importStudentsFromXlsxBuffer,
+  STUDENT_BATCH_COLUMN_GUIDE,
+} from "../services/studentBatchImportService.js";
 
 const adminRouter = express.Router();
+
+const studentBatchUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 12 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const nameOk = /\.xlsx$/i.test(file.originalname || "");
+    const mimeOk =
+      file.mimetype ===
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    if (nameOk || mimeOk) cb(null, true);
+    else cb(new Error("Only .xlsx spreadsheets are allowed."));
+  },
+});
 
 // All admin routes: JWT → RBAC (admin role) → legacy admin session check
 adminRouter.use(authJWT);
 adminRouter.use(authorize(["admin"]));
 adminRouter.use(requireAdmin);
+
+adminRouter.get("/students/batch-import/column-guide", (_req, res) => {
+  res.json({ columns: STUDENT_BATCH_COLUMN_GUIDE });
+});
+
+adminRouter.post(
+  "/students/batch-import",
+  (req, res, next) => {
+    studentBatchUpload.single("file")(req, res, (err) => {
+      if (err) {
+        return res.status(400).json({
+          success: false,
+          error: err.message || "Upload failed",
+        });
+      }
+      next();
+    });
+  },
+  async (req, res) => {
+    try {
+      if (!req.file?.buffer) {
+        return res.status(400).json({
+          success: false,
+          error: 'No file uploaded. Use the form field name "file".',
+        });
+      }
+      const result = await importStudentsFromXlsxBuffer(req.file.buffer, Student);
+      if (!result.success) {
+        const status = result.code === "TRANSACTIONS_NOT_SUPPORTED" ? 503 : 400;
+        return res.status(status).json(result);
+      }
+      return res.json(result);
+    } catch (error) {
+      console.error("❌ Admin student batch import:", error?.message || error);
+      return res.status(500).json({
+        success: false,
+        error: "Server error during import",
+      });
+    }
+  }
+);
 
 /** Placement year for admin visit reads/writes (`?year=2026|2027`, default 2026). */
 function adminVisitYearFromQuery(req) {

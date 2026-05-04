@@ -25,6 +25,11 @@ const studentSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    branch: {
+      type: String,
+      trim: true,
+      default: "",
+    },
   },
   {
     timestamps: true,
