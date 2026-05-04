@@ -8,7 +8,6 @@ import {
   getCompanyMergedForAdminById,
   suggestCompaniesForSpc,
   incrementPpoBranchGotInForAnchoredVisit,
-  incrementPlacementAndPpoConvertedForSpcConversionDetails,
   incrementPlacementGotInBranchForAnchoredVisit,
   mapPlacementTypeOfOfferToSpcConversionType,
   resolveApprovedVisitForSpcPlacementOffer,
@@ -30,6 +29,63 @@ import { config, messages } from "../config/constants.js";
 import { invalidateStudentProfileCacheByEmail } from "../services/studentProfileCache.js";
 
 const router = express.Router();
+
+/** Escape string for case-insensitive exact match on {@link PlacementData.companyPlaced}. */
+function escapeRegexForExactMatch(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+const LEGACY_PPO_TYPE_REGEX = /^internship\s*\(ppo\)$/i;
+
+/**
+ * Locate an existing Internship(PPO) placement row for conversion append.
+ * Legacy `/spc/submit` rows often omit `companyId`; match those by canonical company name.
+ */
+async function findPlacementRowForSpcConversionDetails(
+  studentObjectId,
+  companyObjectId,
+  placementYear,
+  companyPlacedCanonical
+) {
+  const sid = studentObjectId;
+  const cid = companyObjectId;
+  const year = placementYear;
+  const name = String(companyPlacedCanonical || "").trim();
+  const nameRegex = name ? new RegExp(`^${escapeRegexForExactMatch(name)}$`, "i") : null;
+
+  const keyed = await PlacementData.findOne({
+    studentId: sid,
+    companyId: cid,
+    placementYear: year,
+    typeOfOffer: LEGACY_PPO_TYPE_REGEX,
+  })
+    .sort({ updatedAt: -1 })
+    .lean();
+  if (keyed) return { doc: keyed, matchKind: "keyed" };
+
+  if (!nameRegex) return { doc: null, matchKind: "none" };
+
+  const byNameYear = await PlacementData.findOne({
+    studentId: sid,
+    placementYear: year,
+    companyPlaced: nameRegex,
+    typeOfOffer: LEGACY_PPO_TYPE_REGEX,
+  })
+    .sort({ updatedAt: -1 })
+    .lean();
+  if (byNameYear) return { doc: byNameYear, matchKind: "legacy_name_year" };
+
+  const byNameMissingYear = await PlacementData.findOne({
+    studentId: sid,
+    companyPlaced: nameRegex,
+    typeOfOffer: LEGACY_PPO_TYPE_REGEX,
+    $or: [{ placementYear: null }, { placementYear: { $exists: false } }],
+  })
+    .sort({ updatedAt: -1 })
+    .lean();
+  if (byNameMissingYear) return { doc: byNameMissingYear, matchKind: "legacy_name_missing_year" };
+
+  return { doc: null, matchKind: "none" };
+}
 
 function getSafePlacementFormUrl() {
   const rawUrl = config.PLACEMENT_FORM_URL;
@@ -264,6 +320,7 @@ router.get("/spc/my-submissions", authJWT, requireSPC, async (req, res) => {
       placementYear: p.placementYear ?? null,
       branchCode: p.branchCode || "",
       typeOfOffer: p.typeOfOffer || "",
+      ppoConversionType: p.ppoConversionType || "",
       role: p.role || "",
       stipend: p.stipend || "",
       base: p.base || "",
@@ -313,6 +370,7 @@ router.post(
       const name = String(nameRaw || "").trim();
       const usn = String(usnRaw || "").trim().toUpperCase();
       const typeOfOffer = conversionType === "fte_internship" ? "Internship+FTE" : "FTE";
+      const ppoConversionType = typeOfOffer;
       const stipendVal =
         conversionType === "fte_internship" ? String(stipend ?? "").trim() : "";
       const roleTrim = String(roleRaw ?? "").trim();
@@ -421,23 +479,74 @@ router.post(
 
       const createdBy = String(req.user?.id || req.user?._id || req.user?.email || "");
 
-      const existing = await PlacementData.findOne({
-        studentId: student._id,
+      const resolvedPlacement = await findPlacementRowForSpcConversionDetails(
+        student._id,
+        cid,
+        placementYear,
+        companyPlaced
+      );
+      let existing = resolvedPlacement.doc;
+      let matchKind = resolvedPlacement.matchKind;
+
+      if (existing && matchKind !== "keyed") {
+        const keyedDup = await PlacementData.findOne({
+          studentId: student._id,
+          companyId: cid,
+          placementYear,
+        })
+          .sort({ updatedAt: -1 })
+          .lean();
+        if (keyedDup && String(keyedDup._id) !== String(existing._id)) {
+          existing = keyedDup;
+          matchKind = "keyed";
+        }
+      }
+
+      if (!existing) {
+        return res.status(400).json({
+          message:
+            "Conversion can be submitted only after an existing Internship(PPO) record is present for this student and company/year.",
+        });
+      }
+
+      const firstTimeConversionForThisRecord = !String(existing.ppoConversionType || "").trim();
+      const shouldIncrementConvertedOnly = Boolean(firstTimeConversionForThisRecord);
+
+      await PlacementData.findByIdAndUpdate(existing._id, {
+        companyPlaced,
         companyId: cid,
         placementYear,
-      }).lean();
+        ppoConversionType,
+        stipend: stipendVal,
+        base: baseTrim,
+        ctc: ctcTrim,
+        role: roleTrim,
+        branchCode: branchLower,
+        createdBy,
+      });
 
-      if (existing) {
-        await PlacementData.findByIdAndUpdate(existing._id, {
-          companyPlaced,
-          typeOfOffer,
-          stipend: stipendVal,
-          base: baseTrim,
-          ctc: ctcTrim,
-          role: roleTrim,
-          branchCode: branchLower,
-          createdBy,
-        });
+      let incVisitOk = true;
+      if (shouldIncrementConvertedOnly) {
+        const inc = await incrementPpoBranchGotInForAnchoredVisit(
+          companyId,
+          placementYear,
+          branchCode,
+          0,
+          1,
+          {
+            placementListContext: placementCtxForVisit,
+            resolvedVisit,
+            spcConversion: visitSyncFields,
+          }
+        );
+        incVisitOk = inc.ok;
+        if (!incVisitOk) {
+          console.warn(
+            "SPC conversion-details: PPO converted increment failed:",
+            inc.reason
+          );
+        }
+      } else {
         const visitSync = await syncAnchoredVisitSpcConversionFields(
           companyId,
           placementYear,
@@ -448,98 +557,21 @@ router.post(
         if (!visitSync.ok) {
           console.warn("SPC conversion-details: visit extras sync failed:", visitSync.reason);
         }
-        await invalidateStudentProfileCacheByEmail(email).catch(() => {});
-        return res.json({
-          message: "Conversion details updated",
-          studentId: student._id,
-          placementId: existing._id,
-          branchConvertedIncremented: false,
-        });
       }
 
-      let placement;
-      try {
-        placement = await PlacementData.create({
-          studentId: student._id,
-          companyPlaced,
-          typeOfOffer,
-          stipend: stipendVal,
-          base: baseTrim,
-          ctc: ctcTrim,
-          role: roleTrim,
-          companyId: cid,
-          placementYear,
-          branchCode: branchLower,
-          createdBy,
-        });
-      } catch (createErr) {
-        if (createErr?.code === 11000) {
-          const raced = await PlacementData.findOne({
-            studentId: student._id,
-            companyId: cid,
-            placementYear,
-          }).lean();
-          if (raced) {
-            await PlacementData.findByIdAndUpdate(raced._id, {
-              companyPlaced,
-              typeOfOffer,
-              stipend: stipendVal,
-              base: baseTrim,
-              ctc: ctcTrim,
-              role: roleTrim,
-              branchCode: branchLower,
-              createdBy,
-            });
-            const visitSyncRace = await syncAnchoredVisitSpcConversionFields(
-              companyId,
-              placementYear,
-              visitSyncFields,
-              placementCtxForVisit,
-              { resolvedVisit }
-            );
-            if (!visitSyncRace.ok) {
-              console.warn(
-                "SPC conversion-details: visit extras sync failed:",
-                visitSyncRace.reason
-              );
-            }
-            await invalidateStudentProfileCacheByEmail(email).catch(() => {});
-            return res.json({
-              message: "Conversion details updated",
-              studentId: student._id,
-              placementId: raced._id,
-              branchConvertedIncremented: false,
-            });
-          }
-        }
-        throw createErr;
-      }
-
-      const inc = await incrementPlacementAndPpoConvertedForSpcConversionDetails(
-        companyId,
-        placementYear,
-        branchCode,
-        1,
-        1,
-        visitSyncFields,
-        placementCtxForVisit,
-        { resolvedVisit }
-      );
-      if (!inc.ok) {
-        await PlacementData.deleteOne({ _id: placement._id });
+      if (!incVisitOk) {
         return res.status(500).json({
-          message: "Failed to update company visit (placement got-in / PPO conversion stats)",
+          message: "Failed to update company visit PPO conversion stats",
         });
       }
 
       await invalidateStudentProfileCacheByEmail(email).catch(() => {});
 
       return res.json({
-        message: "Conversion details saved",
+        message: shouldIncrementConvertedOnly ? "Conversion details saved" : "Conversion details updated",
         studentId: student._id,
-        placementId: placement._id,
-        branchPlacementGotInIncremented: true,
-        ppoBranchConvertedIncremented: true,
+        placementId: existing._id,
+        ppoBranchConvertedIncremented: shouldIncrementConvertedOnly,
       });
     } catch (error) {
       console.error("❌ Error submitting SPC conversion details:", error.message);

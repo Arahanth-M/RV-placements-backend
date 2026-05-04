@@ -54,6 +54,11 @@ const placementDataSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    ppoConversionType: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     createdBy: {
       type: String,
       trim: true,
