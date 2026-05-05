@@ -24,6 +24,11 @@ const placementDataSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    "6-months-internship-stipend": {
+      type: String,
+      trim: true,
+      default: "",
+    },
     base: {
       type: String,
       trim: true,

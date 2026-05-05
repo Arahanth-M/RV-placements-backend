@@ -82,9 +82,40 @@ export const spcSubmitPlacementSchema = Joi.object({
   placementListContext: Joi.string().trim().max(80).allow("").optional(),
 }).unknown(false);
 
+export const spcUpdatePlacementSchema = Joi.object({
+  studentName: Joi.string().trim().min(1).optional(),
+  studentEmail: Joi.string().trim().email().optional(),
+  studentUsn: Joi.string().trim().min(1).optional(),
+  companyPlaced: Joi.string().trim().min(1).optional(),
+  typeOfOffer: Joi.string()
+    .trim()
+    .valid(...SPC_SUBMIT_TYPE_OF_OFFER_VALUES)
+    .optional(),
+  placementYear: Joi.number()
+    .integer()
+    .valid(...COMPANY_DETAIL_VISIT_YEARS)
+    .allow(null)
+    .optional(),
+  branchCode: Joi.string()
+    .trim()
+    .lowercase()
+    .valid(...PPO_BRANCH_CODES_ARRAY, "")
+    .optional(),
+  role: Joi.string().trim().max(200).allow("").optional(),
+  stipend: Joi.string().trim().allow("").optional(),
+  base: Joi.string().trim().allow("").optional(),
+  ctc: Joi.string().trim().allow("").optional(),
+  ppoConversionType: Joi.string()
+    .trim()
+    .valid("", "FTE", "Internship+FTE")
+    .optional(),
+  sixMonthsInternshipStipend: Joi.string().trim().allow("").optional(),
+}).min(1).unknown(false);
+
 export default {
   placementDataSchema,
   spcConversionDetailsSchema,
   spcCompanySuggestQuerySchema,
   spcSubmitPlacementSchema,
+  spcUpdatePlacementSchema,
 };

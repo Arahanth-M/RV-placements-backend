@@ -24,6 +24,7 @@ import {
   spcConversionDetailsSchema,
   spcCompanySuggestQuerySchema,
   spcSubmitPlacementSchema,
+  spcUpdatePlacementSchema,
 } from "../validations/placement.validation.js";
 import { config, messages } from "../config/constants.js";
 import { invalidateStudentProfileCacheByEmail } from "../services/studentProfileCache.js";
@@ -252,6 +253,113 @@ router.get(
   }
 );
 
+router.put(
+  "/spc/placements/:placementId",
+  authJWT,
+  requireSPC,
+  validateRequest({ bodySchema: spcUpdatePlacementSchema }),
+  async (req, res) => {
+    try {
+      const placementId = String(req.params?.placementId || "").trim();
+      if (!placementId || !mongoose.Types.ObjectId.isValid(placementId)) {
+        return res.status(400).json({ message: "Invalid placement id" });
+      }
+
+      const placement = await PlacementData.findById(placementId).lean();
+      if (!placement) {
+        return res.status(404).json({ message: "Placement record not found" });
+      }
+
+      const email = String(req.user?.email || "").trim().toLowerCase();
+      const userId = String(req.user?._id || req.user?.id || "").trim();
+      const createdByRaw = String(placement.createdBy || "").trim();
+      const createdByLower = createdByRaw.toLowerCase();
+      const canEdit =
+        (userId && createdByRaw === userId) || (email && createdByLower === email);
+      if (!canEdit) {
+        return res.status(403).json({
+          message: "You can edit only placement records submitted by your account.",
+        });
+      }
+
+      const payload = {};
+      if (req.body.companyPlaced !== undefined) {
+        payload.companyPlaced = String(req.body.companyPlaced ?? "").trim();
+      }
+      if (req.body.typeOfOffer !== undefined) {
+        payload.typeOfOffer = String(req.body.typeOfOffer ?? "").trim();
+      }
+      if (req.body.placementYear !== undefined) {
+        payload.placementYear =
+          req.body.placementYear == null ? null : Number(req.body.placementYear);
+      }
+      if (req.body.branchCode !== undefined) {
+        payload.branchCode = String(req.body.branchCode ?? "").trim().toLowerCase();
+      }
+      if (req.body.role !== undefined) payload.role = String(req.body.role ?? "").trim();
+      if (req.body.stipend !== undefined) payload.stipend = String(req.body.stipend ?? "").trim();
+      if (req.body.base !== undefined) payload.base = String(req.body.base ?? "").trim();
+      if (req.body.ctc !== undefined) payload.ctc = String(req.body.ctc ?? "").trim();
+      if (req.body.ppoConversionType !== undefined) {
+        payload.ppoConversionType = String(req.body.ppoConversionType ?? "").trim();
+      }
+      if (req.body.sixMonthsInternshipStipend !== undefined) {
+        payload["6-months-internship-stipend"] = String(
+          req.body.sixMonthsInternshipStipend ?? ""
+        ).trim();
+      }
+
+      if (Object.keys(payload).length === 0) {
+        const hasStudentEdits =
+          req.body.studentName !== undefined ||
+          req.body.studentEmail !== undefined ||
+          req.body.studentUsn !== undefined;
+        if (!hasStudentEdits) {
+          return res.status(400).json({ message: "No editable fields provided" });
+        }
+      }
+
+      payload.createdBy = String(req.user?.id || req.user?._id || req.user?.email || "");
+
+      const previousStudent = await Student.findById(placement.studentId).lean();
+      let nextStudentEmail = String(previousStudent?.email || "").trim().toLowerCase();
+      if (
+        req.body.studentName !== undefined ||
+        req.body.studentEmail !== undefined ||
+        req.body.studentUsn !== undefined
+      ) {
+        const studentDoc = await Student.findById(placement.studentId);
+        if (studentDoc) {
+          if (req.body.studentName !== undefined) {
+            studentDoc.name = String(req.body.studentName ?? "").trim();
+          }
+          if (req.body.studentEmail !== undefined) {
+            studentDoc.email = String(req.body.studentEmail ?? "").trim().toLowerCase();
+          }
+          if (req.body.studentUsn !== undefined) {
+            studentDoc.usn = String(req.body.studentUsn ?? "").trim().toUpperCase();
+          }
+          await studentDoc.save();
+          nextStudentEmail = String(studentDoc.email || "").trim().toLowerCase();
+        }
+      }
+
+      await PlacementData.findByIdAndUpdate(placementId, payload);
+
+      const previousEmail = String(previousStudent?.email || "").trim().toLowerCase();
+      if (previousEmail) await invalidateStudentProfileCacheByEmail(previousEmail).catch(() => {});
+      if (nextStudentEmail && nextStudentEmail !== previousEmail) {
+        await invalidateStudentProfileCacheByEmail(nextStudentEmail).catch(() => {});
+      }
+
+      return res.json({ message: "Placement record updated successfully" });
+    } catch (error) {
+      console.error("❌ Error updating SPC placement record:", error.message);
+      return res.status(500).json({ message: "Server error" });
+    }
+  }
+);
+
 /** Escape string for use inside a RegExp source (email-safe). */
 function escapeRegexForEmail(value) {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -323,6 +431,7 @@ router.get("/spc/my-submissions", authJWT, requireSPC, async (req, res) => {
       ppoConversionType: p.ppoConversionType || "",
       role: p.role || "",
       stipend: p.stipend || "",
+      sixMonthsInternshipStipend: p["6-months-internship-stipend"] || "",
       base: p.base || "",
       ctc: p.ctc || "",
       studentName: p.studentId?.name || "—",
@@ -371,20 +480,13 @@ router.post(
       const usn = String(usnRaw || "").trim().toUpperCase();
       const typeOfOffer = conversionType === "fte_internship" ? "Internship+FTE" : "FTE";
       const ppoConversionType = typeOfOffer;
-      const stipendVal =
-        conversionType === "fte_internship" ? String(stipend ?? "").trim() : "";
+      const stipendInput = String(stipend ?? "").trim();
+      const conversionStipendVal =
+        conversionType === "fte_internship" ? stipendInput : "";
       const roleTrim = String(roleRaw ?? "").trim();
       const ctcTrim = String(ctc ?? "").trim();
       const baseTrim = String(base ?? "").trim();
       const branchLower = String(branchCode || "").trim().toLowerCase();
-
-      const visitSyncFields = {
-        conversionType,
-        role: roleTrim,
-        ctc: ctcTrim,
-        base: baseTrim,
-        stipend: stipendVal,
-      };
 
       if (!email) {
         return res.status(400).json({ message: "Email of student is required" });
@@ -511,13 +613,24 @@ router.post(
 
       const firstTimeConversionForThisRecord = !String(existing.ppoConversionType || "").trim();
       const shouldIncrementConvertedOnly = Boolean(firstTimeConversionForThisRecord);
+      const stipendVal =
+        conversionType === "fte_internship"
+          ? stipendInput
+          : String(existing.stipend ?? "").trim();
+      const visitSyncFields = {
+        conversionType,
+        role: roleTrim,
+        ctc: ctcTrim,
+        base: baseTrim,
+        stipend: stipendVal,
+      };
 
       await PlacementData.findByIdAndUpdate(existing._id, {
         companyPlaced,
         companyId: cid,
         placementYear,
         ppoConversionType,
-        stipend: stipendVal,
+        "6-months-internship-stipend": conversionStipendVal,
         base: baseTrim,
         ctc: ctcTrim,
         role: roleTrim,
@@ -626,6 +739,12 @@ router.post(
       Student.findOne({ usn }),
     ]);
 
+    if (!studentByEmail) {
+      return res.status(400).json({
+        message: "Student email does not exist. Add the student record before submitting placement.",
+      });
+    }
+
     if (
       studentByEmail &&
       studentByUsn &&
@@ -637,29 +756,17 @@ router.post(
     }
 
     let student = studentByEmail || studentByUsn;
-    if (!student) {
-      student = await Student.create({
-        email,
-        name,
-        usn,
-      });
-    } else {
-      let shouldSave = false;
-      if (student.email !== email) {
-        student.email = email;
-        shouldSave = true;
-      }
-      if (student.usn !== usn) {
-        student.usn = usn;
-        shouldSave = true;
-      }
-      if (student.name !== name) {
-        student.name = name;
-        shouldSave = true;
-      }
-      if (shouldSave) {
-        await student.save();
-      }
+    let shouldSave = false;
+    if (student.usn !== usn) {
+      student.usn = usn;
+      shouldSave = true;
+    }
+    if (student.name !== name) {
+      student.name = name;
+      shouldSave = true;
+    }
+    if (shouldSave) {
+      await student.save();
     }
 
     const createdBy = String(req.user?.id || req.user?._id || req.user?.email || "");
