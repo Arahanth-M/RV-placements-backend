@@ -20,6 +20,20 @@ function ctcToPlain(ctc) {
  * @returns {Record<string, unknown>}
  */
 export function projectCompanyListResponse(c) {
+  const resolveCluster = () => {
+    const direct = c.cluster ?? c.Cluster;
+    if (direct != null && String(direct).trim() !== "") return direct;
+    for (const [k, v] of Object.entries(c || {})) {
+      const key = String(k || "")
+        .replace(/\s+/g, "")
+        .toLowerCase();
+      if (key === "cluster" && v != null && String(v).trim() !== "") {
+        return v;
+      }
+    }
+    return "";
+  };
+
   const roles = Array.isArray(c.roles)
     ? c.roles.map((r) => {
         if (!r || typeof r !== "object")
@@ -33,6 +47,7 @@ export function projectCompanyListResponse(c) {
 
   return {
     _id: c._id,
+    placementCompanyVisitId: c.placementCompanyVisitId,
     name: c.name,
     logo: c.logo,
     type: c.type,
@@ -40,6 +55,7 @@ export function projectCompanyListResponse(c) {
     business_model: c.business_model,
     date_of_visit: c.date_of_visit,
     messageDate: c.messageDate,
+    cluster: resolveCluster(),
     updatedAt: c.updatedAt,
     createdAt: c.createdAt,
     focusTags: c.focusTags,

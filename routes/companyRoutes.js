@@ -22,6 +22,10 @@ import {
   mergeToLegacyShape,
   normalizeCompanyDetailYear,
 } from "../services/companyService.js";
+import {
+  clusterKeyFromPlacementVisitClusterField,
+  normalizePlacementClusterQuery,
+} from "../utils/placementCluster.js";
 import mongoose from "mongoose";
 import { getAuthUserModel } from "../utils/authUserModel.js";
 dotenv.config();
@@ -61,10 +65,18 @@ companyRouter.post("/", authJWT, validateRequest(companyCreateSchema), async (re
 companyRouter.get("/", async (req, res) => {
   try {
     const selectedYear = req.query?.year;
+    const requestedCluster = normalizePlacementClusterQuery(req.query?.cluster);
     // New DB: `companies` + approved `company_visits` (year-aware when `?year=` is sent)
     const companies = await listApprovedCompaniesLegacyMerged(selectedYear);
+    const scopedCompanies =
+      requestedCluster == null
+        ? companies
+        : companies.filter(
+            (c) =>
+              clusterKeyFromPlacementVisitClusterField(c?.cluster) === requestedCluster
+          );
 
-    const list = companies.map((c) => {
+    const list = scopedCompanies.map((c) => {
       const focusTags = getCompanyFocusTags(c);
       const { onlineQuestions, interviewQuestions, interviewProcess, Must_Do_Topics, ...rest } = c;
       const withCategory = attachPlacementCategoryToCompany({ ...rest, focusTags });
@@ -158,7 +170,20 @@ companyRouter.post("/helpful/status/batch", authJWT, async (req, res) => {
 companyRouter.get("/:id", authJWT, async (req, res) => {
   const id = req.params.id;
   const placementVisitYear = normalizeCompanyDetailYear(req.query?.year);
-  const key = companyDetailRedisKey(id, placementVisitYear, req.query?.placementContext);
+  const placementCompanyVisitIdRaw = String(req.query?.placementCompanyVisitId || "").trim();
+  const useExactVisitHint = placementCompanyVisitIdRaw !== "";
+  const placementClusterResolved = normalizePlacementClusterQuery(
+    req.query?.placementCluster
+  );
+  // Exact visit-id detail fetch must bypass cache because cache key does not include visit-id.
+  const key = useExactVisitHint
+    ? null
+    : companyDetailRedisKey(
+        id,
+        placementVisitYear,
+        req.query?.placementContext,
+        placementClusterResolved
+      );
 
   try {
     const AuthUserModel = getAuthUserModel(req);
@@ -212,7 +237,9 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
     const { merged: companyObj, visit: visitForViews } = await getCompanyDetailLegacyMergedById(
       id,
       placementVisitYear,
-      req.query?.placementContext
+      req.query?.placementContext,
+      useExactVisitHint ? placementCompanyVisitIdRaw : null,
+      placementClusterResolved
     );
 
     if (!companyObj) {

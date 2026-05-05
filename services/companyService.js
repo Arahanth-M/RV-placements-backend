@@ -28,6 +28,10 @@ import {
   COMPANY_DETAIL_VISIT_YEARS,
   COMPANY_VISIT_DEFAULT_YEAR,
 } from "../utils/placementYears.js";
+import {
+  clusterKeyFromPlacementVisitClusterField,
+  normalizePlacementClusterQuery,
+} from "../utils/placementCluster.js";
 import { PPO_BRANCH_CODES, PPO_BRANCH_CODES_ARRAY } from "../utils/ppoBranchCodes.js";
 import escapeRegexLiteral from "../utils/regexEscape.js";
 import { invalidateCompanyDetailCache } from "./companyDetailCache.js";
@@ -1221,10 +1225,27 @@ export async function findLatestVisitForCompany(companyId, year = COMPANY_VISIT_
 export async function findApprovedVisitForCompanyDetail(
   companyId,
   yearRaw,
-  placementContextRaw = null
+  placementContextRaw = null,
+  companyVisitIdHint = null,
+  placementClusterRaw = null
 ) {
-  const candidates = await fetchApprovedVisitsForCompanyDetailYear(companyId, yearRaw);
+  let candidates = await fetchApprovedVisitsForCompanyDetailYear(companyId, yearRaw);
   if (!candidates.length) return null;
+
+  const clusterFilter = normalizePlacementClusterQuery(placementClusterRaw);
+  if (clusterFilter) {
+    const scoped = candidates.filter(
+      (v) =>
+        clusterKeyFromPlacementVisitClusterField(v?.cluster) === clusterFilter
+    );
+    if (scoped.length > 0) candidates = scoped;
+  }
+
+  const hint = toObjectId(companyVisitIdHint);
+  if (hint) {
+    const exact = candidates.find((v) => String(v?._id) === String(hint));
+    if (exact) return exact;
+  }
   const ctx = normalizePlacementContextParam(placementContextRaw);
   return pickVisitCandidateForPlacementContext(candidates, ctx);
 }
@@ -1274,7 +1295,9 @@ export async function incrementVisitViews(companyId, visitId, placementYear) {
 export async function getCompanyDetailLegacyMergedById(
   id,
   placementYear = COMPANY_VISIT_YEAR,
-  placementContextRaw = null
+  placementContextRaw = null,
+  companyVisitIdHint = null,
+  placementClusterRaw = null
 ) {
   const ctx = normalizePlacementContextParam(placementContextRaw);
   const _id = toObjectId(id);
@@ -1295,7 +1318,9 @@ export async function getCompanyDetailLegacyMergedById(
   const visitApproved = await findApprovedVisitForCompanyDetail(
     _id,
     placementYear,
-    placementContextRaw
+    placementContextRaw,
+    companyVisitIdHint,
+    placementClusterRaw
   );
   if (visitApproved) {
     const merged = {
@@ -1389,58 +1414,120 @@ export async function listApprovedCompaniesLegacyMerged(
   const visitsByCompany = await fetchApprovedVisitsForDetailYearsByCompany(companyIds);
 
   const list = [];
+  const normalizedListingYear =
+    placementYear != null && placementYear !== ""
+      ? normalizeCompanyDetailYear(placementYear)
+      : null;
+
+  const sortVisitsForListing = (a, b) => {
+    const ya = Number(a?.year) || 0;
+    const yb = Number(b?.year) || 0;
+    if (ya !== yb) return ya - yb;
+    const ma = a?.migratedAt ? new Date(a.migratedAt).getTime() : 0;
+    const mb = b?.migratedAt ? new Date(b.migratedAt).getTime() : 0;
+    if (ma !== mb) return mb - ma;
+    const ida = a?._id ? String(a._id) : "";
+    const idb = b?._id ? String(b._id) : "";
+    return ida.localeCompare(idb);
+  };
+
+  const clusterFromVisit = (visit) => {
+    if (!visit || typeof visit !== "object") return "";
+    const direct =
+      visit?.cluster ??
+      visit?.Cluster;
+    if (direct != null && String(direct).trim() !== "") return direct;
+
+    for (const [k, v] of Object.entries(visit)) {
+      const key = String(k || "")
+        .replace(/\s+/g, "")
+        .toLowerCase();
+      if (key === "cluster" && v != null && String(v).trim() !== "") {
+        return v;
+      }
+    }
+    return "";
+  };
+
+  const normalizeClusterKey = (raw) =>
+    String(raw || "")
+      .trim()
+      .toLowerCase();
+
   for (const row of rows) {
     const staticRow = row.c;
     if (!staticRow) continue;
     const allVisits = visitsByCompany.get(String(row._id)) ?? [];
-    const totalGotInByYear = buildTotalGotInByYearFromVisits(allVisits);
-    const visit = pickPrimaryVisitForListing(allVisits, placementYear);
-    if (!visit) continue;
-    const merged = mergeToLegacyShape(staticRow, visit);
-    const placementAnyYearPpoOnCampus = companyHasAnyYearSummerPpoFromVisits(allVisits);
-    const placementHasDreamTierVisit = companyHasDreamTierVisitFromVisits(allVisits);
-    const listingYearNorm =
-      placementYear != null && placementYear !== ""
-        ? normalizeCompanyDetailYear(placementYear)
-        : null;
-    const placementDreamTierForListingYear =
-      listingYearNorm == null
-        ? placementHasDreamTierVisit
-        : hasDreamTierVisitForYear(allVisits, listingYearNorm);
-    /** Strict internship(PPO) row in 2026 or 2027 — hub membership must not drop sibling-year-only visits when `?year=` is set. */
-    const placementSummerInternshipForListingYear =
-      companyHasAnyYearSummerInternshipListingFromVisits(allVisits);
-    /** Per listing year: whether that year has a strict summer row (card label; mirrors dream-tier listing flag). */
-    const placementSummerStrictVisitForListingYear =
-      listingYearNorm == null
-        ? placementSummerInternshipForListingYear
-        : hasSummerInternshipListingVisitForYear(allVisits, listingYearNorm);
-    const placementMeta = getListPlacementCategoryMetaFromVisits(
-      allVisits,
-      visitWithPlainRoleCtc(visit),
-      placementYear
-    );
-    const {
-      dreamDisplayType: placementDreamDisplayType,
-      dreamDetailYear: placementDreamDetailYear,
-      ...catMeta
-    } = placementMeta;
-    const summerPref = getSummerPlacementPrefFromVisits(allVisits, placementYear);
-    list.push({
-      ...merged,
-      totalGotInByYear,
-      category: catMeta.category,
-      totalCtcRupees: catMeta.totalCtcRupees,
-      placementAnyYearPpoOnCampus,
-      placementHasDreamTierVisit,
-      placementDreamTierForListingYear,
-      placementSummerInternshipForListingYear,
-      placementSummerStrictVisitForListingYear,
-      placementDreamDisplayType,
-      placementDreamDetailYear,
-      placementSummerDisplayType: summerPref.displayType,
-      placementSummerDetailYear: summerPref.detailYear,
-    });
+    const visitsForListing =
+      normalizedListingYear == null
+        ? [...allVisits].sort(sortVisitsForListing)
+        : allVisits
+            .filter((v) => (Number(v?.year) || 0) === normalizedListingYear)
+            .sort(sortVisitsForListing);
+
+    /** One list row per company per cluster (avoid duplicate company cards within same cluster). */
+    const visitsByCluster = new Map();
+    for (const visit of visitsForListing) {
+      const clusterKey = normalizeClusterKey(clusterFromVisit(visit));
+      if (!visitsByCluster.has(clusterKey)) visitsByCluster.set(clusterKey, []);
+      visitsByCluster.get(clusterKey).push(visit);
+    }
+
+    for (const clusterVisits of visitsByCluster.values()) {
+      const visit = [...clusterVisits].sort(sortVisitsForListing)[0];
+      if (!visit) continue;
+
+      const clusterKey = normalizeClusterKey(clusterFromVisit(visit));
+      const clusterScopedVisits = allVisits.filter(
+        (v) => normalizeClusterKey(clusterFromVisit(v)) === clusterKey
+      );
+      const scopedVisits = clusterScopedVisits.length > 0 ? clusterScopedVisits : [visit];
+
+      const totalGotInByYear = buildTotalGotInByYearFromVisits(scopedVisits);
+      const merged = mergeToLegacyShape(staticRow, visit);
+      const placementAnyYearPpoOnCampus =
+        companyHasAnyYearSummerPpoFromVisits(scopedVisits);
+      const placementHasDreamTierVisit =
+        companyHasDreamTierVisitFromVisits(scopedVisits);
+      const placementDreamTierForListingYear =
+        normalizedListingYear == null
+          ? placementHasDreamTierVisit
+          : hasDreamTierVisitForYear(scopedVisits, normalizedListingYear);
+      /** Strict internship(PPO) row in 2026 or 2027. */
+      const placementSummerInternshipForListingYear =
+        companyHasAnyYearSummerInternshipListingFromVisits(scopedVisits);
+      const placementSummerStrictVisitForListingYear =
+        normalizedListingYear == null
+          ? placementSummerInternshipForListingYear
+          : hasSummerInternshipListingVisitForYear(scopedVisits, normalizedListingYear);
+      const placementMeta = getListPlacementCategoryMetaFromVisits(
+        scopedVisits,
+        visitWithPlainRoleCtc(visit),
+        placementYear
+      );
+      const {
+        dreamDisplayType: placementDreamDisplayType,
+        dreamDetailYear: placementDreamDetailYear,
+        ...catMeta
+      } = placementMeta;
+      const summerPref = getSummerPlacementPrefFromVisits(scopedVisits, placementYear);
+      list.push({
+        ...merged,
+        placementCompanyVisitId: visit?._id ? String(visit._id) : undefined,
+        totalGotInByYear,
+        category: catMeta.category,
+        totalCtcRupees: catMeta.totalCtcRupees,
+        placementAnyYearPpoOnCampus,
+        placementHasDreamTierVisit,
+        placementDreamTierForListingYear,
+        placementSummerInternshipForListingYear,
+        placementSummerStrictVisitForListingYear,
+        placementDreamDisplayType,
+        placementDreamDetailYear,
+        placementSummerDisplayType: summerPref.displayType,
+        placementSummerDetailYear: summerPref.detailYear,
+      });
+    }
   }
   return list;
 }
