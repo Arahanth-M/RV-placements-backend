@@ -3,6 +3,7 @@ import {
   COMPANY_DETAIL_VISIT_YEARS,
   COMPANY_VISIT_DEFAULT_YEAR,
 } from "../utils/placementYears.js";
+import { normalizePlacementClusterQuery } from "../utils/placementCluster.js";
 
 /** Detail Redis keys include every year in {@link COMPANY_DETAIL_VISIT_YEARS}. */
 const DETAIL_CACHE_YEAR_SUFFIXES = COMPANY_DETAIL_VISIT_YEARS.map(String);
@@ -10,11 +11,14 @@ const DETAIL_CACHE_YEAR_SUFFIXES = COMPANY_DETAIL_VISIT_YEARS.map(String);
 /** Slug segment for Redis key; matches `placementContext` query values. */
 const DETAIL_CONTEXT_SLUGS = ["_", "summer_internship", "dream", "open_dream"];
 
+/** Cluster segment for GET /companies/:id cache keys (`placementCluster` query). */
+const DETAIL_CLUSTER_SLUGS = ["_", "cs", "ec", "me"];
+
 /**
  * Bump when cached GET /companies/:id payload shape changes so stale Redis rows are not reused.
- * @see placementDetailHeadlineType, placementContext merge selection, date_of_visit coalesce
+ * @see placementDetailHeadlineType, placementContext merge selection, date_of_visit coalesce, placementCluster
  */
-export const COMPANY_DETAIL_CACHE_SCHEMA = "v12";
+export const COMPANY_DETAIL_CACHE_SCHEMA = "v13";
 
 /**
  * @param {unknown} raw — req.query.placementContext or equivalent
@@ -32,14 +36,25 @@ export function placementDetailCacheContextSlug(raw) {
 }
 
 /**
+ * @param {unknown} raw — `req.query.placementCluster`
+ * @returns {string} "_" or cs|ec|me
+ */
+export function placementDetailClusterSlug(raw) {
+  const c = normalizePlacementClusterQuery(raw);
+  return c == null ? "_" : c;
+}
+
+/**
  * @param {unknown} companyId
  * @param {number|string|null|undefined} placementYear resolved placement year (e.g. 2026)
  * @param {unknown} [placementContextRaw] optional GET placementContext query
+ * @param {unknown} [placementClusterRaw] optional GET placementCluster query
  */
 export function companyDetailRedisKey(
   companyId,
   placementYear,
-  placementContextRaw = null
+  placementContextRaw = null,
+  placementClusterRaw = null
 ) {
   if (companyId == null || companyId === "") return null;
   const id =
@@ -52,7 +67,8 @@ export function companyDetailRedisKey(
       ? String(COMPANY_VISIT_DEFAULT_YEAR)
       : String(placementYear);
   const slug = placementDetailCacheContextSlug(placementContextRaw);
-  return `company:${id}:y${y}:${COMPANY_DETAIL_CACHE_SCHEMA}:${slug}`;
+  const clusterSlug = placementDetailClusterSlug(placementClusterRaw);
+  return `company:${id}:y${y}:${COMPANY_DETAIL_CACHE_SCHEMA}:${slug}:${clusterSlug}`;
 }
 
 /**
@@ -74,6 +90,9 @@ export async function invalidateCompanyDetailCache(companyId) {
       for (const schema of ["v6", "v7", COMPANY_DETAIL_CACHE_SCHEMA]) {
         for (const slug of DETAIL_CONTEXT_SLUGS) {
           parts.push(`company:${id}:y${y}:${schema}:${slug}`);
+          for (const cl of DETAIL_CLUSTER_SLUGS) {
+            parts.push(`company:${id}:y${y}:${schema}:${slug}:${cl}`);
+          }
         }
       }
       return parts;

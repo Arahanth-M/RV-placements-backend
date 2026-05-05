@@ -1,6 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import multer from "multer";
+import XLSX from "xlsx";
 import authJWT from "../middleware/authJWT.js";
 import authorize from "../middleware/authorize.js";
 import requireAdmin from "../middleware/requireAdmin.js";
@@ -18,6 +19,7 @@ import {
 import User from "../models/User.js";
 import User1 from "../models/User1.js";
 import Student from "../models/Student.js";
+import PlacementData from "../models/PlacementData.js";
 import Submission from "../models/Submission.js";
 import CompanyStatic from "../models/CompanyStatic.js";
 import CompanyVisit from "../models/CompanyVisit.js";
@@ -199,6 +201,112 @@ function companyToJsonSafePlainObject(doc) {
   }
 }
 
+async function buildStudentPlacementStatsByYear(yearRaw) {
+  const requestedYear =
+    yearRaw == null || yearRaw === ""
+      ? null
+      : Number.parseInt(String(yearRaw), 10);
+  if (yearRaw != null && yearRaw !== "" && !Number.isFinite(requestedYear)) {
+    const err = new Error("INVALID_YEAR");
+    throw err;
+  }
+
+  const yearValues = (await PlacementData.distinct("placementYear", {
+    placementYear: { $ne: null },
+  }))
+    .map((v) => Number.parseInt(String(v), 10))
+    .filter((v) => Number.isFinite(v))
+    .sort((a, b) => b - a);
+
+  const selectedYear =
+    requestedYear != null
+      ? requestedYear
+      : yearValues.length > 0
+        ? yearValues[0]
+        : null;
+
+  if (selectedYear == null) {
+    return {
+      years: yearValues,
+      selectedYear: null,
+      branches: [],
+    };
+  }
+
+  const rows = await PlacementData.aggregate([
+    { $match: { placementYear: selectedYear } },
+    {
+      $lookup: {
+        from: Student.collection.name,
+        localField: "studentId",
+        foreignField: "_id",
+        as: "student",
+      },
+    },
+    {
+      $unwind: {
+        path: "$student",
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        name: { $ifNull: ["$student.name", ""] },
+        usn: { $ifNull: ["$student.usn", ""] },
+        email: { $ifNull: ["$student.email", ""] },
+        companyPlaced: { $ifNull: ["$companyPlaced", ""] },
+        stipend: { $ifNull: ["$stipend", ""] },
+        ctc: { $ifNull: ["$ctc", ""] },
+        role: { $ifNull: ["$role", ""] },
+        ppoConversionType: { $ifNull: ["$ppoConversionType", ""] },
+        branchCode: { $ifNull: ["$branchCode", "unknown"] },
+        createdAt: { $ifNull: ["$createdAt", null] },
+      },
+    },
+    {
+      $sort: {
+        branchCode: 1,
+        usn: 1,
+        name: 1,
+        createdAt: -1,
+      },
+    },
+  ]);
+
+  const branchMap = new Map();
+  for (const row of rows) {
+    const branchCode = String(row.branchCode || "unknown").trim().toLowerCase() || "unknown";
+    if (!branchMap.has(branchCode)) {
+      branchMap.set(branchCode, []);
+    }
+    branchMap.get(branchCode).push({
+      name: row.name || "",
+      usn: row.usn || "",
+      email: row.email || "",
+      companyPlaced: row.companyPlaced || "",
+      stipend: row.stipend || "",
+      ctc: row.ctc || "",
+      role: row.role || "",
+      ppoConversionType: row.ppoConversionType || "",
+    });
+  }
+
+  const branches = Array.from(branchMap.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([branchCode, students]) => ({
+      branchCode,
+      count: students.length,
+      students,
+    }));
+
+  return {
+    years: yearValues,
+    selectedYear,
+    branches,
+  };
+}
+
 // Sanitize text for company content (remove script tags; keep other text as-is)
 function sanitizeText(text) {
   if (text === undefined || text === null) return '';
@@ -223,6 +331,71 @@ adminRouter.get("/stats/users", async (req, res) => {
   } catch (error) {
     console.error("❌ Error fetching user count:", error.message);
     res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Branch-wise placed students grouped by placement year (admin-only)
+adminRouter.get("/students/placement-stats", async (req, res) => {
+  try {
+    const data = await buildStudentPlacementStatsByYear(req.query?.year);
+    return res.json(data);
+  } catch (error) {
+    if (error?.message === "INVALID_YEAR") {
+      return res.status(400).json({ error: "year must be a valid number" });
+    }
+    console.error("❌ Error fetching placement student stats:", error.message);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+adminRouter.get("/students/placement-stats/export", async (req, res) => {
+  try {
+    const data = await buildStudentPlacementStatsByYear(req.query?.year);
+    const workbook = XLSX.utils.book_new();
+
+    for (const branch of data.branches) {
+      const rows = (Array.isArray(branch.students) ? branch.students : []).map(
+        (student) => ({
+          Name: student.name || "",
+          USN: student.usn || "",
+          "Email ID": student.email || "",
+          "Company Placed": student.companyPlaced || "",
+          Stipend: student.stipend || "",
+          CTC: student.ctc || "",
+          Role: student.role || "",
+          "PPO Conversion Type": student.ppoConversionType || "",
+        })
+      );
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const sheetName =
+        String(branch.branchCode || "unknown")
+          .toUpperCase()
+          .replace(/[\\/?*[\]:]/g, "-")
+          .slice(0, 31) || "UNKNOWN";
+      XLSX.utils.book_append_sheet(workbook, ws, sheetName);
+    }
+
+    if (workbook.SheetNames.length === 0) {
+      const ws = XLSX.utils.json_to_sheet([]);
+      XLSX.utils.book_append_sheet(workbook, ws, "NO_DATA");
+    }
+
+    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+    const yearLabel = data.selectedYear != null ? data.selectedYear : "all";
+    const fileName = `student-placement-stats-${yearLabel}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    return res.send(buffer);
+  } catch (error) {
+    if (error?.message === "INVALID_YEAR") {
+      return res.status(400).json({ error: "year must be a valid number" });
+    }
+    console.error("❌ Error fetching placement student stats:", error.message);
+    return res.status(500).json({ error: "Server error" });
   }
 });
 

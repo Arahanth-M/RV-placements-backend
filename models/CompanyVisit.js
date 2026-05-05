@@ -21,8 +21,13 @@ const companyVisitSchema = new mongoose.Schema(
     date_of_visit: { type: String, trim: true },
     /** Optional; e.g. from `companies1_copy` / backfill. Type preserved (Date, string, etc.) */
     messageDate: { type: mongoose.Schema.Types.Mixed },
-    /** Part of composite uniqueness with companyId + year + type (empty string when unset). */
+    /**
+     * Hub / branch cluster for this visit row (part of composite uniqueness with companyId + year + type).
+     * Often stored as a full department name (e.g. `"Computer Science and Engineering"`), not `cs`/`ec`.
+     * Empty string when unset — APIs treat empty as CS for legacy compatibility.
+     */
     cluster: { type: String, trim: true, default: "" },
+    branch: { type: String, trim: true, default: "" },
     count: { type: String, trim: true },
     selectedCandidates: [{ type: mongoose.Schema.Types.Mixed }],
     status: { type: String, trim: true },
