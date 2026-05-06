@@ -10,16 +10,17 @@
 
 /**
  * @param {unknown} raw — e.g. `req.query.cluster` or `req.query.placementCluster`
- * @returns {"cs"|"ec"|"me"|null}
+ * @returns {string|null}
  */
 export function normalizePlacementClusterQuery(raw) {
   const v = String(raw ?? "")
     .trim()
     .toLowerCase();
+  if (!v) return null;
   if (v === "cs" || v === "cse") return "cs";
   if (v === "ec" || v === "ece") return "ec";
   if (v === "me") return "me";
-  return null;
+  return v;
 }
 
 /**
@@ -27,7 +28,7 @@ export function normalizePlacementClusterQuery(raw) {
  * `"Computer Science and Engineering"` → `"cs"`.
  *
  * @param {unknown} raw — visit.cluster on company_visits
- * @returns {"cs"|"ec"|"me"}
+ * @returns {string}
  */
 export function clusterKeyFromPlacementVisitClusterField(raw) {
   const v = String(raw ?? "").trim().toLowerCase();
@@ -50,5 +51,5 @@ export function clusterKeyFromPlacementVisitClusterField(raw) {
     return "ec";
   }
   if (v === "me" || v.includes("mechanical")) return "me";
-  return "cs";
+  return v;
 }

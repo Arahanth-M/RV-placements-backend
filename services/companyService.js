@@ -894,7 +894,8 @@ function mergeApprovedVisitsIntoSyntheticVisit(visitsSortedDesc) {
  */
 export async function findAnyLatestVisitForCompanyYear(
   companyId,
-  year = COMPANY_VISIT_YEAR
+  year = COMPANY_VISIT_YEAR,
+  placementClusterRaw = null
 ) {
   const match = buildCompanyVisitCompanyYearMatch(companyId, year);
   if (!match) return null;
@@ -902,7 +903,13 @@ export async function findAnyLatestVisitForCompanyYear(
     .sort({ migratedAt: -1, _id: -1 })
     .limit(1)
     .lean();
-  return one[0] ?? null;
+  if (!one.length) return null;
+  const clusterFilter = normalizePlacementClusterQuery(placementClusterRaw);
+  if (!clusterFilter) return one[0] ?? null;
+  const scoped = one.filter(
+    (v) => clusterKeyFromPlacementVisitClusterField(v?.cluster) === clusterFilter
+  );
+  return scoped[0] ?? null;
 }
 
 /** @param {Record<string, unknown>} visit */
@@ -1183,7 +1190,8 @@ async function findApprovedVisitForSpcWrite(companyId, yearRaw, placementContext
 async function findAnyLatestVisitForCompanyYearMatchingContext(
   companyId,
   yearRaw,
-  placementContextRaw
+  placementContextRaw,
+  placementClusterRaw = null
 ) {
   const ctx = normalizePlacementContextParam(placementContextRaw);
   const year = normalizeCompanyDetailYear(yearRaw);
@@ -1196,7 +1204,15 @@ async function findAnyLatestVisitForCompanyYearMatchingContext(
 
   if (!candidatesRaw.length) return null;
 
-  const candidates = candidatesRaw.map((v) => visitWithPlainRoleCtc(v));
+  const clusterFilter = normalizePlacementClusterQuery(placementClusterRaw);
+  const scopedRaw =
+    clusterFilter == null
+      ? candidatesRaw
+      : candidatesRaw.filter(
+          (v) => clusterKeyFromPlacementVisitClusterField(v?.cluster) === clusterFilter
+        );
+  if (!scopedRaw.length) return null;
+  const candidates = scopedRaw.map((v) => visitWithPlainRoleCtc(v));
   return pickVisitCandidateForPlacementContext(candidates, ctx);
 }
 
@@ -1238,7 +1254,9 @@ export async function findApprovedVisitForCompanyDetail(
       (v) =>
         clusterKeyFromPlacementVisitClusterField(v?.cluster) === clusterFilter
     );
-    if (scoped.length > 0) candidates = scoped;
+    // Strict cluster isolation: if a cluster is requested, never fall back to another cluster.
+    if (scoped.length === 0) return null;
+    candidates = scoped;
   }
 
   const hint = toObjectId(companyVisitIdHint);
@@ -1255,16 +1273,27 @@ export async function findApprovedVisitForCompanyDetail(
  * @param {import("mongoose").Types.ObjectId|string} companyId
  * @returns {Promise<number[]>}
  */
-export async function getApprovedPlacementYearsForCompany(companyId) {
+export async function getApprovedPlacementYearsForCompany(
+  companyId,
+  placementClusterRaw = null
+) {
   const cid = toObjectId(companyId);
   if (!cid) return [];
   const allowed = new Set(COMPANY_DETAIL_VISIT_YEARS);
-  const years = await CompanyVisit.distinct("year", {
+  const rows = await CompanyVisit.find({
     companyId: cid,
     status: "approved",
-  });
-  return years
-    .map((y) => Number(y))
+  })
+    .select("year cluster")
+    .lean();
+  const clusterFilter = normalizePlacementClusterQuery(placementClusterRaw);
+  const years = (clusterFilter == null
+    ? rows
+    : rows.filter(
+        (v) => clusterKeyFromPlacementVisitClusterField(v?.cluster) === clusterFilter
+      )
+  ).map((v) => Number(v?.year));
+  return [...new Set(years)]
     .filter((y) => Number.isFinite(y) && allowed.has(y))
     .sort((a, b) => a - b);
 }
@@ -1300,6 +1329,7 @@ export async function getCompanyDetailLegacyMergedById(
   placementClusterRaw = null
 ) {
   const ctx = normalizePlacementContextParam(placementContextRaw);
+  const clusterFilter = normalizePlacementClusterQuery(placementClusterRaw);
   const _id = toObjectId(id);
   if (!_id) {
     return { merged: null, visit: null, staticRow: null };
@@ -1310,9 +1340,16 @@ export async function getCompanyDetailLegacyMergedById(
   }
   const visitsByCompany = await fetchApprovedVisitsForDetailYearsByCompany([_id]);
   const allApprovedVisits = visitsByCompany.get(String(_id)) ?? [];
-  const totalGotInByYear = buildTotalGotInByYearFromVisits(allApprovedVisits);
+  const scopedApprovedVisits =
+    clusterFilter == null
+      ? allApprovedVisits
+      : allApprovedVisits.filter(
+          (v) =>
+            clusterKeyFromPlacementVisitClusterField(v?.cluster) === clusterFilter
+        );
+  const totalGotInByYear = buildTotalGotInByYearFromVisits(scopedApprovedVisits);
   const placementBranchStatsByYear = buildPlacementBranchStatsByYearFromVisits(
-    allApprovedVisits,
+    scopedApprovedVisits,
     placementContextRaw
   );
   const visitApproved = await findApprovedVisitForCompanyDetail(
@@ -1330,32 +1367,36 @@ export async function getCompanyDetailLegacyMergedById(
     };
     const visitPlain = visitWithPlainRoleCtc(visitApproved);
     const headline = getCompanyDetailHeadlineTypeFromVisits(
-      allApprovedVisits,
+      scopedApprovedVisits,
       visitPlain,
       placementYear
     );
     if (headline) merged.placementDetailHeadlineType = headline;
     merged.placementDreamTierVisitMissingForYear =
       ctx === "dream" || ctx === "open_dream"
-        ? !hasDreamTierVisitForYear(allApprovedVisits, placementYear)
+        ? !hasDreamTierVisitForYear(scopedApprovedVisits, placementYear)
         : false;
     merged.placementDreamTierVisitByYear =
-      buildPlacementDreamTierVisitByYearMap(allApprovedVisits);
+      buildPlacementDreamTierVisitByYearMap(scopedApprovedVisits);
     merged.placementSummerInternshipVisitMissingForYear =
       ctx === "summer_internship"
-        ? !hasSummerInternshipListingVisitForYear(allApprovedVisits, placementYear)
+        ? !hasSummerInternshipListingVisitForYear(scopedApprovedVisits, placementYear)
         : false;
     merged.placementSummerInternshipVisitByYear =
-      buildPlacementSummerInternshipVisitByYearMap(allApprovedVisits);
+      buildPlacementSummerInternshipVisitByYearMap(scopedApprovedVisits);
     merged.date_of_visit = mergedDateOfVisitForApi(
       visitApproved,
-      allApprovedVisits,
+      scopedApprovedVisits,
       placementYear
     );
     return { merged, visit: visitApproved, staticRow };
   }
   // No approved visit for this year: if any visit exists for that year (e.g. pending), match old API — 404
-  const anyVisit = await findAnyLatestVisitForCompanyYear(_id, placementYear);
+  const anyVisit = await findAnyLatestVisitForCompanyYear(
+    _id,
+    placementYear,
+    placementClusterRaw
+  );
   if (anyVisit) {
     return { merged: null, visit: null, staticRow: null };
   }
@@ -1367,16 +1408,16 @@ export async function getCompanyDetailLegacyMergedById(
   };
   merged.placementDreamTierVisitMissingForYear =
     ctx === "dream" || ctx === "open_dream"
-      ? !hasDreamTierVisitForYear(allApprovedVisits, placementYear)
+      ? !hasDreamTierVisitForYear(scopedApprovedVisits, placementYear)
       : false;
   merged.placementDreamTierVisitByYear =
-    buildPlacementDreamTierVisitByYearMap(allApprovedVisits);
+    buildPlacementDreamTierVisitByYearMap(scopedApprovedVisits);
   merged.placementSummerInternshipVisitMissingForYear =
     ctx === "summer_internship"
-      ? !hasSummerInternshipListingVisitForYear(allApprovedVisits, placementYear)
+      ? !hasSummerInternshipListingVisitForYear(scopedApprovedVisits, placementYear)
       : false;
   merged.placementSummerInternshipVisitByYear =
-    buildPlacementSummerInternshipVisitByYearMap(allApprovedVisits);
+    buildPlacementSummerInternshipVisitByYearMap(scopedApprovedVisits);
   return { merged, visit: null, staticRow };
 }
 
