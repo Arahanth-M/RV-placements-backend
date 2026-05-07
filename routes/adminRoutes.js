@@ -531,6 +531,54 @@ function mapSubmissionListRow(doc) {
   return { ...o, content, contentTruncated: truncated };
 }
 
+async function enrichSubmissionVisitMeta(docs) {
+  const visitIds = [
+    ...new Set(
+      (docs || [])
+        .map((doc) => {
+          const raw = doc?.companyVisitId;
+          const id = raw ? String(raw).trim() : "";
+          return mongoose.Types.ObjectId.isValid(id) ? id : null;
+        })
+        .filter(Boolean)
+    ),
+  ];
+  if (visitIds.length === 0) {
+    return docs.map((doc) => {
+      const o = doc.toObject ? doc.toObject() : { ...doc };
+      return {
+        ...o,
+        placementYear: o.placementYear ?? null,
+        cluster: null,
+      };
+    });
+  }
+
+  const visits = await CompanyVisit.find({
+    _id: { $in: visitIds.map((id) => new mongoose.Types.ObjectId(id)) },
+  })
+    .select("_id year cluster")
+    .lean();
+  const visitById = new Map(
+    visits.map((visit) => [String(visit._id), visit])
+  );
+
+  return docs.map((doc) => {
+    const o = doc.toObject ? doc.toObject() : { ...doc };
+    const visit = o.companyVisitId
+      ? visitById.get(String(o.companyVisitId))
+      : null;
+    return {
+      ...o,
+      placementYear: o.placementYear ?? visit?.year ?? null,
+      cluster:
+        visit?.cluster != null && String(visit.cluster).trim() !== ""
+          ? String(visit.cluster).trim()
+          : null,
+    };
+  });
+}
+
 // Paginated submissions list (trimmed content for table rows; use GET /submissions/:id for full body)
 adminRouter.get("/submissions", async (req, res) => {
   try {
@@ -551,7 +599,8 @@ adminRouter.get("/submissions", async (req, res) => {
         .exec(),
     ]);
 
-    const items = docs.map(mapSubmissionListRow);
+    const enrichedDocs = await enrichSubmissionVisitMeta(docs);
+    const items = enrichedDocs.map(mapSubmissionListRow);
     const totalPages = Math.max(1, Math.ceil(total / limit));
 
     res.json({
@@ -574,7 +623,8 @@ adminRouter.get("/submissions/:id", async (req, res) => {
     if (!submission) {
       return res.status(404).json({ error: "Submission not found" });
     }
-    res.json(submission);
+    const [enrichedSubmission] = await enrichSubmissionVisitMeta([submission]);
+    res.json(enrichedSubmission);
   } catch (error) {
     console.error("❌ Error fetching submission:", error.message);
     res.status(500).json({ error: "Server error" });
@@ -872,6 +922,49 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
           }
         }
       }
+    } else if (submission.type === "internshipExperience") {
+      let experienceText =
+        parsedContent.experience || parsedContent.content || submission.content;
+      if (experienceText && typeof experienceText !== "string") {
+        experienceText = String(experienceText);
+      }
+      if (experienceText) {
+        const sanitizedExperience = sanitizeText(experienceText);
+        if (sanitizedExperience.length > 0) {
+          if (!merged.internshipExperience || !Array.isArray(merged.internshipExperience)) {
+            merged.internshipExperience = [];
+          }
+
+          const experienceExists = merged.internshipExperience.some((exp) => {
+            try {
+              const parsed = JSON.parse(exp);
+              if (parsed && typeof parsed === "object") {
+                const existingContent = parsed.content || parsed.experience || "";
+                return String(existingContent).trim() === sanitizedExperience;
+              }
+            } catch {
+              // Legacy plain-string format.
+            }
+            return String(exp || "").trim() === sanitizedExperience;
+          });
+
+          if (!experienceExists) {
+            const experienceEntry = JSON.stringify({
+              content: sanitizedExperience,
+              submittedBy: {
+                name: submission.submittedBy.name,
+                email: submission.submittedBy.email,
+              },
+              isAnonymous:
+                submission.isAnonymous === true || submission.isAnonymous === "true",
+            });
+            merged.internshipExperience.push(experienceEntry);
+            console.log("✅ Added internship experience to company:", merged._id);
+          } else {
+            console.log("⚠️ Internship experience already exists in company");
+          }
+        }
+      }
     } else if (submission.type === "mustDoTopics") {
       // Ensure we get a string value
       let topicText = parsedContent.question || parsedContent.content || parsedContent.topic || submission.content;
@@ -926,6 +1019,18 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
         const sanitized = sanitizeText(merged.interviewProcess);
         if (sanitized && sanitized.length > 0) {
           merged.interviewProcess = [sanitized];
+        }
+      }
+    }
+    if (merged.internshipExperience) {
+      if (Array.isArray(merged.internshipExperience)) {
+        merged.internshipExperience = merged.internshipExperience
+          .map((exp) => sanitizeText(exp))
+          .filter((exp) => exp && exp.length > 0);
+      } else if (typeof merged.internshipExperience === "string") {
+        const sanitized = sanitizeText(merged.internshipExperience);
+        if (sanitized && sanitized.length > 0) {
+          merged.internshipExperience = [sanitized];
         }
       }
     }

@@ -32,7 +32,9 @@ import {
   startRound,
   resolveInterviewCompanyName,
 } from "../services/interviewSessionService.js";
-import { generateInterviewPlan } from "../services/interviewEngine.js";
+import {
+  generateInterviewPlanFromCustomRounds,
+} from "../services/interviewEngine.js";
 import { interviewQueue } from "../services/queues/interviewQueue.js";
 import { EVALUATE_ANSWER } from "../services/queues/jobTypes.js";
 import { buildInterviewTips } from "../utils/interviewTips.js";
@@ -196,6 +198,7 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
       placementCluster,
       placementYear: placementYearRaw,
       mergePlacementByType: mergePlacementByTypeRaw,
+      customRounds = [],
     } = req.body;
     const userId = getAuthenticatedUserId(req);
 
@@ -229,7 +232,7 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
     }
     const companyData = loaded.merged;
 
-    let session = await getInProgressSession(
+    const existingSession = await getInProgressSession(
       userId,
       companyId,
       norm.type,
@@ -237,86 +240,71 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
       placementYear,
       mergePlacementByType
     );
-    const createdNewSession = !session;
-    if (!session) {
-      session = await createSession(userId, companyId, {
-        placementVisitType: norm.type,
-        placementCluster: mergePlacementByType ? "" : norm.cluster,
-        placementYear,
-        mergePlacementByType,
-      });
+    if (existingSession?._id) {
+      await Promise.all([
+        discardInProgressSession(existingSession._id),
+        invalidateInterviewDetail(existingSession._id),
+        clearInterviewProcessing(existingSession._id),
+      ]);
     }
+    const session = await createSession(userId, companyId, {
+      placementVisitType: norm.type,
+      placementCluster: mergePlacementByType ? "" : norm.cluster,
+      placementYear,
+      mergePlacementByType,
+    });
 
-    const isAlreadyInitialized = Boolean(session.currentQuestion);
-    let responsePayload = null;
-
-    if (isAlreadyInitialized) {
-      responsePayload = {
-        question: session.currentQuestion,
-        status: toClientStatus(session.state),
-        currentRound: session.currentRound || 1,
-        currentQuestionIndex: session.currentQuestionIndex ?? 0,
-        roundStatus: session.roundStatus || "IN_PROGRESS",
-        interviewStatus: toClientInterviewStatus(session.state),
-        rounds: session.rounds || [],
-        roundsPlan: session.roundsPlan || [],
-        roundsDetails: session.roundsDetails || [],
-        totalRounds: session.totalRounds || 0,
-        currentRoundIndex: roundIndexFromCurrentRound(session),
-        difficultyLevel: session.difficultyLevel || null,
-        placementVisitType: session.placementVisitType ?? norm.type,
-        placementCluster: session.placementCluster ?? norm.cluster,
-        placementYear: session.placementYear ?? placementYear,
-        mergePlacementByType:
-          session.mergePlacementByType === true ? true : mergePlacementByType,
-      };
-    } else {
-      const plan = await generateInterviewPlan(companyData);
-      await updateSession(session._id, {
-        rounds: plan.rounds,
-        roundsPlan: plan.roundsPlan || [],
-        roundsDetails: plan.roundsDetails || [],
-        totalRounds: plan.totalRounds,
-        currentRound: 1,
-        currentRoundIndex: 0,
-        currentQuestionIndex: 0,
-        roundStatus: "IN_PROGRESS",
-        state: INTERVIEW_STATES.IN_PROGRESS,
-      });
-
-      const roundStart = await startRound(session._id);
-      const refreshedSession = await getSession(session._id);
-      responsePayload = {
-        question: roundStart.question,
-        status: toClientStatus(refreshedSession?.state),
-        currentRound: refreshedSession?.currentRound || 1,
-        currentQuestionIndex: refreshedSession?.currentQuestionIndex ?? 0,
-        roundStatus: refreshedSession?.roundStatus || "IN_PROGRESS",
-        interviewStatus: toClientInterviewStatus(refreshedSession?.state),
-        rounds: refreshedSession?.rounds || [],
-        roundsPlan: refreshedSession?.roundsPlan || [],
-        roundsDetails: refreshedSession?.roundsDetails || [],
-        totalRounds: refreshedSession?.totalRounds || plan.totalRounds || 0,
-        currentRoundIndex: refreshedSession ? roundIndexFromCurrentRound(refreshedSession) : 0,
-        difficultyLevel:
-          refreshedSession?.rounds?.[0]?.difficulty || refreshedSession?.difficultyLevel || null,
-        placementVisitType: refreshedSession?.placementVisitType ?? norm.type,
-        placementCluster: refreshedSession?.placementCluster ?? norm.cluster,
-        placementYear: refreshedSession?.placementYear ?? placementYear,
-        mergePlacementByType:
-          refreshedSession?.mergePlacementByType === true ? true : mergePlacementByType,
-      };
+    let plan;
+    try {
+      plan = await generateInterviewPlanFromCustomRounds(customRounds);
+    } catch (planError) {
+      const message = planError?.message || "Invalid interview plan.";
+      return res.status(400).json({ error: message });
     }
+    await updateSession(session._id, {
+      rounds: plan.rounds,
+      roundsPlan: plan.roundsPlan || [],
+      roundsDetails: plan.roundsDetails || [],
+      totalRounds: plan.totalRounds,
+      currentRound: 1,
+      currentRoundIndex: 0,
+      currentQuestionIndex: 0,
+      roundStatus: "IN_PROGRESS",
+      state: INTERVIEW_STATES.IN_PROGRESS,
+    });
+
+    const roundStart = await startRound(session._id);
+    const refreshedSession = await getSession(session._id);
+    const responsePayload = {
+      question: roundStart.question,
+      status: toClientStatus(refreshedSession?.state),
+      currentRound: refreshedSession?.currentRound || 1,
+      currentQuestionIndex: refreshedSession?.currentQuestionIndex ?? 0,
+      roundStatus: refreshedSession?.roundStatus || "IN_PROGRESS",
+      interviewStatus: toClientInterviewStatus(refreshedSession?.state),
+      rounds: refreshedSession?.rounds || [],
+      roundsPlan: refreshedSession?.roundsPlan || [],
+      roundsDetails: refreshedSession?.roundsDetails || [],
+      totalRounds: refreshedSession?.totalRounds || plan.totalRounds || 0,
+      currentRoundIndex: refreshedSession ? roundIndexFromCurrentRound(refreshedSession) : 0,
+      difficultyLevel:
+        refreshedSession?.rounds?.[0]?.difficulty || refreshedSession?.difficultyLevel || null,
+      placementVisitType: refreshedSession?.placementVisitType ?? norm.type,
+      placementCluster: refreshedSession?.placementCluster ?? norm.cluster,
+      placementYear: refreshedSession?.placementYear ?? placementYear,
+      mergePlacementByType:
+        refreshedSession?.mergePlacementByType === true ? true : mergePlacementByType,
+    };
 
     await Promise.all([
       invalidateInterviewSummaries(userId),
       invalidateInterviewDetail(session._id),
     ]);
 
-    return res.status(createdNewSession ? 201 : 200).json({
+    return res.status(201).json({
       sessionId: session._id,
       ...responsePayload,
-      resumed: isAlreadyInitialized,
+      resumed: false,
     });
   } catch (error) {
     console.error("❌ Error starting interview:", error.message);
@@ -353,48 +341,15 @@ router.get("/resume-interview", async (req, res) => {
     const placementYear = mergePlacementByType
       ? normalizePlacementVisitYear(undefined)
       : normalizePlacementVisitYear(placementYearRaw);
-    const session = await getInProgressSession(
-      userId,
-      companyId,
-      norm.type,
-      mergePlacementByType ? "" : norm.cluster,
-      placementYear,
-      mergePlacementByType
-    );
-    if (!session) {
-      return res.json({
-        resumable: false,
-        sessionId: null,
-        question: null,
-        status: "idle",
-        placementVisitType: norm.type,
-        placementCluster: norm.cluster,
-        placementYear,
-        mergePlacementByType,
-      });
-    }
-
     return res.json({
-      resumable: true,
-      sessionId: session._id,
-      question: session.currentQuestion || null,
-      status: toClientStatus(session.state),
-      currentRound: session.currentRound || null,
-      currentQuestionIndex: session.currentQuestionIndex || 0,
-      roundStatus: session.roundStatus || "IN_PROGRESS",
-      interviewStatus: toClientInterviewStatus(session.state),
-      rounds: session.rounds || [],
-      roundsPlan: session.roundsPlan || [],
-      roundsDetails: session.roundsDetails || [],
-      totalRounds: session.totalRounds || 0,
-      currentRoundIndex: roundIndexFromCurrentRound(session),
-      difficultyLevel: session.difficultyLevel || null,
-      historyCount: Array.isArray(session.history) ? session.history.length : 0,
-      placementVisitType: session.placementVisitType ?? norm.type,
-      placementCluster: session.placementCluster ?? norm.cluster,
-      placementYear: session.placementYear ?? placementYear,
-      mergePlacementByType:
-        session.mergePlacementByType === true ? true : mergePlacementByType,
+      resumable: false,
+      sessionId: null,
+      question: null,
+      status: "idle",
+      placementVisitType: norm.type,
+      placementCluster: norm.cluster,
+      placementYear,
+      mergePlacementByType,
     });
   } catch (error) {
     console.error("❌ Error resuming interview:", error.message);

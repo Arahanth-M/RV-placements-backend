@@ -87,10 +87,6 @@ passport.use(
         ]);
         console.timeEnd("auth:db_parallel");
 
-        if (!studentRecord) {
-          return done(null, false, { reason: "not_found" });
-        }
-
         const existingUser = existingUserByGoogleId || existingUserByEmail;
 
         if (existingUser) {
@@ -117,6 +113,29 @@ passport.use(
           }
 
           return done(null, existingUser);
+        }
+
+        if (!studentRecord) {
+          console.time("auth:user_create_no_profile");
+          let userWithoutProfile;
+          try {
+            userWithoutProfile = await new User1({
+              googleId: profile.id,
+              username:
+                displayName ||
+                (normalizedEmail.includes("@")
+                  ? normalizedEmail.split("@")[0]
+                  : "Student"),
+              email: normalizedEmail,
+              profilePicture: picture,
+              role: "student",
+              lastLoginAt: new Date(),
+            }).save();
+          } finally {
+            console.timeEnd("auth:user_create_no_profile");
+          }
+
+          return done(null, userWithoutProfile);
         }
 
         console.time("auth:user_create");

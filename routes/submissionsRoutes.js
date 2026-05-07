@@ -40,6 +40,7 @@ submissionRouter.get(
         _id: submission._id,
         type: submission.type,
         content: submission.content,
+        isAnonymous: submission.isAnonymous === true,
         status: submission.status,
         submittedAt: submission.submittedAt,
         placementYear: submission.placementYear ?? null,
