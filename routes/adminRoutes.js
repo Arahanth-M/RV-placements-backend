@@ -256,11 +256,13 @@ async function buildStudentPlacementStatsByYear(yearRaw) {
         usn: { $ifNull: ["$student.usn", ""] },
         email: { $ifNull: ["$student.email", ""] },
         companyPlaced: { $ifNull: ["$companyPlaced", ""] },
+        typeOfOffer: { $ifNull: ["$typeOfOffer", ""] },
         stipend: { $ifNull: ["$stipend", ""] },
         sixMonthsInternshipStipend: { $ifNull: ["$6-months-internship-stipend", ""] },
         ctc: { $ifNull: ["$ctc", ""] },
         role: { $ifNull: ["$role", ""] },
         ppoConversionType: { $ifNull: ["$ppoConversionType", ""] },
+        createdBy: { $ifNull: ["$createdBy", ""] },
         branchCode: { $ifNull: ["$branchCode", "unknown"] },
         createdAt: { $ifNull: ["$createdAt", null] },
       },
@@ -275,22 +277,100 @@ async function buildStudentPlacementStatsByYear(yearRaw) {
     },
   ]);
 
+  const createdByKeys = Array.from(
+    new Set(
+      rows
+        .map((row) => String(row?.createdBy || "").trim())
+        .filter(Boolean)
+    )
+  );
+  const createdByObjectIds = createdByKeys
+    .filter((value) => mongoose.Types.ObjectId.isValid(value))
+    .map((value) => new mongoose.Types.ObjectId(value));
+  const createdByEmails = createdByKeys
+    .filter((value) => value.includes("@"))
+    .map((value) => value.toLowerCase());
+
+  const [usersById, usersByEmail] = await Promise.all([
+    createdByObjectIds.length > 0
+      ? User1.find({ _id: { $in: createdByObjectIds } })
+          .select("_id email username")
+          .lean()
+      : Promise.resolve([]),
+    createdByEmails.length > 0
+      ? User1.find({ email: { $in: createdByEmails } })
+          .select("_id email username")
+          .lean()
+      : Promise.resolve([]),
+  ]);
+
+  const creatorBaseByKey = new Map();
+  for (const user of [...usersById, ...usersByEmail]) {
+    const idKey = String(user?._id || "").trim();
+    const emailKey = String(user?.email || "").trim().toLowerCase();
+    const payload = {
+      name: String(user?.username || "").trim(),
+      email: String(user?.email || "").trim().toLowerCase(),
+    };
+    if (idKey) creatorBaseByKey.set(idKey, payload);
+    if (emailKey) creatorBaseByKey.set(emailKey, payload);
+  }
+
+  const creatorEmailsToResolve = Array.from(
+    new Set(
+      [
+        ...createdByEmails,
+        ...Array.from(creatorBaseByKey.values())
+          .map((entry) => String(entry?.email || "").trim().toLowerCase())
+          .filter(Boolean),
+      ].filter(Boolean)
+    )
+  );
+  const creatorStudentRows =
+    creatorEmailsToResolve.length > 0
+      ? await Student.find({ email: { $in: creatorEmailsToResolve } })
+          .select("name usn email")
+          .lean()
+      : [];
+  const creatorStudentByEmail = new Map(
+    creatorStudentRows.map((student) => [
+      String(student?.email || "").trim().toLowerCase(),
+      {
+        name: String(student?.name || "").trim(),
+        usn: String(student?.usn || "").trim(),
+      },
+    ])
+  );
+
   const branchMap = new Map();
   for (const row of rows) {
     const branchCode = String(row.branchCode || "unknown").trim().toLowerCase() || "unknown";
     if (!branchMap.has(branchCode)) {
       branchMap.set(branchCode, []);
     }
+    const createdByKey = String(row.createdBy || "").trim();
+    const createdByEmailKey = createdByKey.toLowerCase();
+    const creatorBase =
+      creatorBaseByKey.get(createdByKey) ||
+      creatorBaseByKey.get(createdByEmailKey) || { name: "", email: "" };
+    const creatorEmail = String(creatorBase.email || "").trim().toLowerCase();
+    const creatorStudent = creatorEmail ? creatorStudentByEmail.get(creatorEmail) : null;
+
     branchMap.get(branchCode).push({
       name: row.name || "",
       usn: row.usn || "",
       email: row.email || "",
       companyPlaced: row.companyPlaced || "",
+      typeOfOffer: row.typeOfOffer || "",
       stipend: row.stipend || "",
       sixMonthsInternshipStipend: row.sixMonthsInternshipStipend || "",
       ctc: row.ctc || "",
       role: row.role || "",
       ppoConversionType: row.ppoConversionType || "",
+      createdBy: row.createdBy || "",
+      addedByName: creatorStudent?.name || creatorBase.name || "",
+      addedByUsn: creatorStudent?.usn || "",
+      addedByEmail: creatorEmail || createdByEmailKey || "",
     });
   }
 
@@ -362,11 +442,13 @@ adminRouter.get("/students/placement-stats/export", async (req, res) => {
           USN: student.usn || "",
           "Email ID": student.email || "",
           "Company Placed": student.companyPlaced || "",
+          "Type of Offer": student.typeOfOffer || "",
           Stipend: student.stipend || "",
           "6 Months Internship Stipend": student.sixMonthsInternshipStipend || "",
           CTC: student.ctc || "",
           Role: student.role || "",
           "PPO Conversion Type": student.ppoConversionType || "",
+          "Added By": student.addedByEmail || "",
         })
       );
       const ws = XLSX.utils.json_to_sheet(rows);

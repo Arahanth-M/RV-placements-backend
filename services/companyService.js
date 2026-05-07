@@ -2307,8 +2307,8 @@ export async function incrementPpoBranchGotInForAnchoredVisit(
   const year = normalizeCompanyDetailYear(placementYear);
   const d = Number(gotInDelta);
   const cd = Number(convertedDelta);
-  const dOk = Number.isFinite(d) && d > 0;
-  const cdOk = Number.isFinite(cd) && cd > 0;
+  const dOk = Number.isFinite(d) && d !== 0;
+  const cdOk = Number.isFinite(cd) && cd !== 0;
   if (!dOk && !cdOk) {
     return { ok: false, reason: "invalid_delta" };
   }
@@ -2348,11 +2348,13 @@ export async function incrementPpoBranchGotInForAnchoredVisit(
     convertedNotApplicable: false,
   };
   if (dOk) {
-    cur.gotIn = Math.max(0, cur.gotIn) + d;
+    cur.gotIn = Math.max(0, Math.max(0, cur.gotIn) + d);
   }
   if (cdOk) {
-    cur.converted = Math.max(0, cur.converted) + cd;
-    cur.convertedNotApplicable = false;
+    cur.converted = Math.max(0, Math.max(0, cur.converted) + cd);
+    if (cd > 0) {
+      cur.convertedNotApplicable = false;
+    }
   }
   byCode.set(code, cur);
 
@@ -2512,7 +2514,7 @@ export async function incrementPlacementGotInBranchForAnchoredVisit(
   }
   const year = normalizeCompanyDetailYear(placementYear);
   const d = Number(gotInDelta);
-  if (!Number.isFinite(d) || d <= 0) {
+  if (!Number.isFinite(d) || d === 0) {
     return { ok: false, reason: "invalid_delta" };
   }
 
@@ -2539,7 +2541,7 @@ export async function incrementPlacementGotInBranchForAnchoredVisit(
   }
 
   const cur = byCode.get(code) || { branchCode: code, gotIn: 0 };
-  cur.gotIn = Math.max(0, cur.gotIn) + d;
+  cur.gotIn = Math.max(0, Math.max(0, cur.gotIn) + d);
   byCode.set(code, cur);
 
   const normalized = PPO_BRANCH_CODES_ARRAY.map((bc) =>
@@ -2547,12 +2549,13 @@ export async function incrementPlacementGotInBranchForAnchoredVisit(
   );
 
   const currentTotal = Math.max(0, Number.parseInt(String(merged.totalGotIn ?? 0), 10)) || 0;
+  const nextTotal = Math.max(0, currentTotal + d);
 
   await updateCompanyVisit(
     cid,
     {
       placementGotInBranchStats: normalized,
-      totalGotIn: currentTotal + d,
+      totalGotIn: nextTotal,
     },
     year,
     visitHint

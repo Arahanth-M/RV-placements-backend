@@ -37,6 +37,22 @@ function escapeRegexForExactMatch(value) {
 }
 const LEGACY_PPO_TYPE_REGEX = /^internship\s*\(ppo\)$/i;
 
+function normalizeOfferType(value) {
+  return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function isPpoOfferType(value) {
+  return normalizeOfferType(value) === "internship(ppo)";
+}
+
+async function resolveCompanyIdForPlacementName(companyPlacedRaw) {
+  const companyPlaced = String(companyPlacedRaw || "").trim();
+  if (!companyPlaced) return null;
+  const nameRegex = new RegExp(`^${escapeRegexForExactMatch(companyPlaced)}$`, "i");
+  const row = await CompanyStatic.findOne({ name: nameRegex }).select("_id").lean();
+  return row?._id || null;
+}
+
 /**
  * Locate an existing Internship(PPO) placement row for conversion append.
  * Legacy `/spc/submit` rows often omit `companyId`; match those by canonical company name.
@@ -308,6 +324,10 @@ router.put(
           req.body.sixMonthsInternshipStipend ?? ""
         ).trim();
       }
+      if (payload.companyPlaced !== undefined) {
+        const resolvedCompanyId = await resolveCompanyIdForPlacementName(payload.companyPlaced);
+        payload.companyId = resolvedCompanyId;
+      }
 
       if (Object.keys(payload).length === 0) {
         const hasStudentEdits =
@@ -344,7 +364,113 @@ router.put(
         }
       }
 
+      const previousCompanyId = placement.companyId ? String(placement.companyId) : "";
+      const previousPlacementYear = placement.placementYear ?? null;
+      const previousBranchCode = String(placement.branchCode || "").trim().toLowerCase();
+      const previousTypeOfOffer = String(placement.typeOfOffer || "").trim();
+
       await PlacementData.findByIdAndUpdate(placementId, payload);
+
+      const nextCompanyIdRaw =
+        payload.companyId !== undefined ? payload.companyId : placement.companyId;
+      const nextCompanyId = nextCompanyIdRaw ? String(nextCompanyIdRaw) : "";
+      const nextPlacementYear =
+        payload.placementYear !== undefined ? payload.placementYear : placement.placementYear;
+      const nextBranchCode = String(
+        payload.branchCode !== undefined ? payload.branchCode : placement.branchCode || ""
+      )
+        .trim()
+        .toLowerCase();
+      const nextTypeOfOffer = String(
+        payload.typeOfOffer !== undefined ? payload.typeOfOffer : placement.typeOfOffer || ""
+      ).trim();
+
+      const previousHasStatsContext =
+        Boolean(previousCompanyId) &&
+        Number.isInteger(Number(previousPlacementYear)) &&
+        PPO_BRANCH_CODES.has(previousBranchCode) &&
+        Boolean(previousTypeOfOffer);
+      const nextHasStatsContext =
+        Boolean(nextCompanyId) &&
+        Number.isInteger(Number(nextPlacementYear)) &&
+        PPO_BRANCH_CODES.has(nextBranchCode) &&
+        Boolean(nextTypeOfOffer);
+
+      if (previousHasStatsContext || nextHasStatsContext) {
+        const oldChanged =
+          previousCompanyId !== nextCompanyId ||
+          Number(previousPlacementYear) !== Number(nextPlacementYear) ||
+          previousBranchCode !== nextBranchCode ||
+          normalizeOfferType(previousTypeOfOffer) !== normalizeOfferType(nextTypeOfOffer);
+
+        if (oldChanged) {
+          if (previousHasStatsContext) {
+            const oldResolved = await resolveApprovedVisitForSpcPlacementOffer(
+              previousCompanyId,
+              Number(previousPlacementYear),
+              previousTypeOfOffer,
+              null
+            );
+            if (oldResolved.ok) {
+              const decOld = isPpoOfferType(previousTypeOfOffer)
+                ? await incrementPpoBranchGotInForAnchoredVisit(
+                    previousCompanyId,
+                    Number(previousPlacementYear),
+                    previousBranchCode,
+                    -1,
+                    0,
+                    { resolvedVisit: oldResolved.visit }
+                  )
+                : await incrementPlacementGotInBranchForAnchoredVisit(
+                    previousCompanyId,
+                    Number(previousPlacementYear),
+                    previousBranchCode,
+                    -1,
+                    null,
+                    { resolvedVisit: oldResolved.visit }
+                  );
+              if (!decOld.ok) {
+                console.warn("SPC placement edit: old company got-in decrement failed:", decOld.reason);
+              }
+            } else {
+              console.warn("SPC placement edit: old company visit resolution failed:", oldResolved.message);
+            }
+          }
+
+          if (nextHasStatsContext) {
+            const nextResolved = await resolveApprovedVisitForSpcPlacementOffer(
+              nextCompanyId,
+              Number(nextPlacementYear),
+              nextTypeOfOffer,
+              null
+            );
+            if (nextResolved.ok) {
+              const incNext = isPpoOfferType(nextTypeOfOffer)
+                ? await incrementPpoBranchGotInForAnchoredVisit(
+                    nextCompanyId,
+                    Number(nextPlacementYear),
+                    nextBranchCode,
+                    1,
+                    0,
+                    { resolvedVisit: nextResolved.visit }
+                  )
+                : await incrementPlacementGotInBranchForAnchoredVisit(
+                    nextCompanyId,
+                    Number(nextPlacementYear),
+                    nextBranchCode,
+                    1,
+                    null,
+                    { resolvedVisit: nextResolved.visit }
+                  );
+              if (!incNext.ok) {
+                console.warn("SPC placement edit: new company got-in increment failed:", incNext.reason);
+              }
+            } else {
+              console.warn("SPC placement edit: new company visit resolution failed:", nextResolved.message);
+            }
+          }
+        }
+      }
 
       const previousEmail = String(previousStudent?.email || "").trim().toLowerCase();
       if (previousEmail) await invalidateStudentProfileCacheByEmail(previousEmail).catch(() => {});
