@@ -45,7 +45,7 @@ import {
   updateCompanyVisit,
 } from "../services/companyService.js";
 import { invalidateLeaderboardCache } from "./leaderboardRoutes.js";
-import { PPO_BRANCH_CODES } from "../utils/ppoBranchCodes.js";
+import { PPO_BRANCH_CODES, PPO_BRANCH_CODES_ARRAY } from "../utils/ppoBranchCodes.js";
 import {
   importStudentsFromXlsxBuffer,
   STUDENT_BATCH_COLUMN_GUIDE,
@@ -115,6 +115,19 @@ adminRouter.post(
 /** Placement year for admin visit reads/writes (`?year=2026|2027`, default 2026). */
 function adminVisitYearFromQuery(req) {
   return normalizeCompanyDetailYear(req.query?.year);
+}
+
+/** Same hub / row resolution as public company detail (`?placementContext=` + optional `companyVisitId=`). */
+function adminStatsVisitResolutionArgs(req) {
+  const placementCtxRaw = req.query?.placementContext;
+  const placementListContext =
+    placementCtxRaw != null && String(placementCtxRaw).trim() !== ""
+      ? String(placementCtxRaw).trim()
+      : null;
+  const vidRaw = req.query?.companyVisitId;
+  const companyVisitIdHint =
+    vidRaw != null && String(vidRaw).trim() !== "" ? String(vidRaw).trim() : null;
+  return { placementListContext, companyVisitIdHint };
 }
 
 /** Placement-year filter for admin company listing (`?year=2026|2027|all`). */
@@ -1685,6 +1698,7 @@ adminRouter.put(
   async (req, res) => {
   try {
     const y = adminVisitYearFromQuery(req);
+    const { placementListContext, companyVisitIdHint } = adminStatsVisitResolutionArgs(req);
     const staticRow = await CompanyStatic.findById(req.params.id).lean();
     if (!staticRow) return res.status(404).json({ error: "Company not found" });
     const {
@@ -1697,6 +1711,7 @@ adminRouter.put(
       ppoConversionType,
       ppoConversionNotApplicable,
       ppoBranchStats,
+      placementGotInBranchStats,
     } = req.body || {};
     const payload = {};
     if (totalStudentsApplied !== undefined) {
@@ -1781,12 +1796,47 @@ adminRouter.put(
           : 0;
     }
 
+    if (placementGotInBranchStats !== undefined) {
+      if (!Array.isArray(placementGotInBranchStats)) {
+        return res.status(400).json({ error: "placementGotInBranchStats must be an array" });
+      }
+      const normalizedInput = [];
+      const seen = new Set();
+      for (const row of placementGotInBranchStats) {
+        const code = String(row?.branchCode || "").trim().toLowerCase();
+        if (!PPO_BRANCH_CODES.has(code)) {
+          return res.status(400).json({ error: `Invalid branch code: ${code}` });
+        }
+        if (seen.has(code)) {
+          return res.status(400).json({ error: `Duplicate branch code: ${code}` });
+        }
+        seen.add(code);
+        const gotIn = Number.parseInt(String(row?.gotIn ?? 0), 10);
+        if (Number.isNaN(gotIn) || gotIn < 0) {
+          return res.status(400).json({ error: `Invalid gotIn for branch: ${code}` });
+        }
+        normalizedInput.push({ branchCode: code, gotIn });
+      }
+      const byCode = new Map(normalizedInput.map((r) => [r.branchCode, r]));
+      const fullPlacement = PPO_BRANCH_CODES_ARRAY.map((bc) =>
+        byCode.has(bc) ? byCode.get(bc) : { branchCode: bc, gotIn: 0 }
+      );
+      payload.placementGotInBranchStats = fullPlacement;
+      payload.totalGotIn = fullPlacement.reduce((sum, item) => sum + (item.gotIn || 0), 0);
+    }
+
     const hasGotIn = payload.ppoConversionGotIn !== undefined;
     const hasConverted = payload.ppoConversionConverted !== undefined;
     if (hasGotIn || hasConverted) {
       let existingStats = null;
       if (!hasGotIn || !hasConverted) {
-        existingStats = (await getCompanyMergedForAdminById(req.params.id, y))?.merged || null;
+        existingStats =
+          (await getCompanyMergedForAdminById(
+            req.params.id,
+            y,
+            placementListContext,
+            companyVisitIdHint
+          ))?.merged || null;
       }
       const gotIn =
         payload.ppoConversionGotIn !== undefined
@@ -1806,9 +1856,19 @@ adminRouter.put(
       payload.ppoConversionAcceptanceRate = Number(n.toFixed(2));
     }
     await ensureAdminVisitForYear(req.params.id, y);
-    const statsVisitCtx = await getCompanyMergedForAdminById(req.params.id, y);
+    const statsVisitCtx = await getCompanyMergedForAdminById(
+      req.params.id,
+      y,
+      placementListContext,
+      companyVisitIdHint
+    );
     await updateCompanyVisit(req.params.id, payload, y, statsVisitCtx?.visit);
-    const out = (await getCompanyMergedForAdminById(req.params.id, y))?.merged;
+    const out = (await getCompanyMergedForAdminById(
+      req.params.id,
+      y,
+      placementListContext,
+      companyVisitIdHint
+    ))?.merged;
     res.json({ message: "Stats updated", company: out });
   } catch (error) {
     console.error("❌ Error updating company stats:", error.message);
@@ -1822,9 +1882,16 @@ adminRouter.patch(
   async (req, res) => {
     try {
       const y = adminVisitYearFromQuery(req);
+      const { placementListContext, companyVisitIdHint } = adminStatsVisitResolutionArgs(req);
       const delta = Number(req.body?.delta);
       await ensureAdminVisitForYear(req.params.id, y);
-      const gotInDoc = await adjustVisitTotalGotIn(req.params.id, delta, y);
+      const statsVisitCtx = await getCompanyMergedForAdminById(
+        req.params.id,
+        y,
+        placementListContext,
+        companyVisitIdHint
+      );
+      const gotInDoc = await adjustVisitTotalGotIn(req.params.id, delta, y, statsVisitCtx?.visit);
       if (!gotInDoc) {
         return res.status(404).json({ error: "Company not found" });
       }

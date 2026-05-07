@@ -2019,19 +2019,21 @@ export async function findOnePendingVisitForCompanyYear(
  * @param {string|import("mongoose").Types.ObjectId} companyId
  * @param {number} delta
  * @param {number} [placementYear]
+ * @param {Record<string, unknown>|null} [hintVisitDoc] — when set, adjust this row instead of latest for the year
  * @returns {Promise<{ _id: unknown, totalGotIn?: number } | null>}
  */
 export async function adjustVisitTotalGotIn(
   companyId,
   delta,
-  placementYear = COMPANY_VISIT_YEAR
+  placementYear = COMPANY_VISIT_YEAR,
+  hintVisitDoc = null
 ) {
   const cid = toObjectId(companyId);
   if (!cid) return null;
   const d = Number(delta);
   if (Number.isNaN(d)) return null;
   const year = normalizeCompanyDetailYear(placementYear);
-  const anchor = await resolveVisitAnchorDoc(cid, placementYear, null);
+  const anchor = await resolveVisitAnchorDoc(cid, placementYear, hintVisitDoc);
   if (!anchor?._id) return null;
   const doc = await CompanyVisit.findByIdAndUpdate(
     anchor._id,

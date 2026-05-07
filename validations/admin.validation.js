@@ -47,6 +47,20 @@ export const adminCompanyStatsSchema = Joi.object({
     )
     .max(6)
     .optional(),
+  /** Dream / open-dream / off-campus placement got-in by branch (visit row; not PPO conversion). */
+  placementGotInBranchStats: Joi.array()
+    .items(
+      Joi.object({
+        branchCode: Joi.string()
+          .trim()
+          .lowercase()
+          .valid("cd", "cy", "ise", "cse", "aiml", "bt")
+          .required(),
+        gotIn: nonNegIntField.required(),
+      }).unknown(false)
+    )
+    .max(6)
+    .optional(),
 }).unknown(true);
 
 export const adminCompanyTotalGotInAdjustmentSchema = Joi.object({
