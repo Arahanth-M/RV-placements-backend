@@ -212,7 +212,10 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
       try {
         const parsed = JSON.parse(cached);
         const placementYearsAvailable = companyOid
-          ? await getApprovedPlacementYearsForCompany(companyOid)
+          ? await getApprovedPlacementYearsForCompany(
+              companyOid,
+              placementClusterResolved
+            )
           : [];
         await Promise.all([
           companyOid
@@ -250,7 +253,10 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
       return res.status(404).json({ error: "Company not found" });
     }
 
-    const placementYearsAvailable = await getApprovedPlacementYearsForCompany(companyOid);
+    const placementYearsAvailable = await getApprovedPlacementYearsForCompany(
+      companyOid,
+      placementClusterResolved
+    );
 
     await Promise.all([
       incrementVisitViews(companyOid, visitForViews?._id ?? null, placementVisitYear).catch(() => {}),

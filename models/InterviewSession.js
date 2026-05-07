@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-const ROUND_TYPES = ["DSA", "System Design", "HR"];
+const ROUND_TYPES = ["DSA", "System Design", "SQL", "CS Fundamentals", "HR"];
 const ROUND_STATE = ["IN_PROGRESS", "COMPLETED"];
 const INTERVIEW_STATE = ["IN_PROGRESS", "COMPLETED"];
 const INTERVIEW_STATES = [

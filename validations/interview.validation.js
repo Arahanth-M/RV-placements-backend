@@ -13,6 +13,19 @@ export const interviewStartSchema = Joi.object({
   placementCluster: Joi.string().allow("").optional(),
   placementYear: Joi.number().integer().min(2000).max(2100).optional(),
   mergePlacementByType: Joi.boolean().optional(),
+  interviewPlanMode: Joi.string().valid("custom").optional(),
+  customRounds: Joi.array()
+    .min(1)
+    .max(4)
+    .items(
+      Joi.object({
+        type: Joi.string()
+          .valid("DSA", "System Design", "SQL", "CS Fundamentals", "HR")
+          .required(),
+        difficulty: Joi.string().valid("easy", "medium", "hard").required(),
+      })
+    )
+    .required(),
 }).unknown(true);
 
 export const interviewSubmitAnswerSchema = Joi.object({

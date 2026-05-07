@@ -23,6 +23,16 @@ const toSafeString = (value, fallback = "") => {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 };
 
+export const INTERVIEW_MAX_ROUNDS = 4;
+export const INTERVIEW_ALLOWED_ROUND_TYPES = [
+  "DSA",
+  "System Design",
+  "SQL",
+  "CS Fundamentals",
+  "HR",
+];
+const INTERVIEW_ALLOWED_DIFFICULTIES = ["easy", "medium", "hard"];
+
 function inferRoundAbout(roundType) {
   if (!roundType) {
     return "General Technical";
@@ -104,14 +114,82 @@ const inferDifficulty = (text) => {
 
 const inferQuestionCount = (roundType) => {
   if (roundType === "DSA") return 4;
+  if (roundType === "SQL") return 4;
   if (roundType === "System Design") return 3;
   return 3;
 };
 
 const getRoundPreviewLabel = (roundType) => {
   if (roundType === "System Design") return "System Design Round";
+  if (roundType === "SQL") return "SQL Round";
+  if (roundType === "CS Fundamentals") return "CS Fundamentals Round";
   if (roundType === "HR") return "HR/Behavioral Round";
   return "DSA/Coding Round";
+};
+
+const normalizeCustomRoundType = (value) => {
+  const safe = toSafeString(value);
+  return INTERVIEW_ALLOWED_ROUND_TYPES.includes(safe) ? safe : "DSA";
+};
+
+const normalizeCustomRoundDifficulty = (value) => {
+  const safe = toSafeString(value).toLowerCase();
+  return INTERVIEW_ALLOWED_DIFFICULTIES.includes(safe) ? safe : "medium";
+};
+
+const validateCustomRoundPlan = (rounds) => {
+  if (!Array.isArray(rounds) || rounds.length === 0) {
+    throw new Error("Custom interview plan must include at least one round.");
+  }
+  if (rounds.length > INTERVIEW_MAX_ROUNDS) {
+    throw new Error(`Custom interview plan cannot exceed ${INTERVIEW_MAX_ROUNDS} rounds.`);
+  }
+
+  const normalized = rounds.map((round, index) => ({
+    roundNumber: index + 1,
+    type: normalizeCustomRoundType(round?.type),
+    difficulty: normalizeCustomRoundDifficulty(round?.difficulty),
+  }));
+
+  const hrCount = normalized.filter((round) => round.type === "HR").length;
+  if (hrCount < 1) {
+    throw new Error("At least one HR round is required in the interview plan.");
+  }
+
+  const hardSystemDesignCount = normalized.filter(
+    (round) => round.type === "System Design" && round.difficulty === "hard"
+  ).length;
+  if (hardSystemDesignCount > 2) {
+    throw new Error("Too many hard System Design rounds. Use at most 2 hard System Design rounds.");
+  }
+
+  return normalized;
+};
+
+export const generateInterviewPlanFromCustomRounds = async (customRounds = []) => {
+  const normalizedRounds = validateCustomRoundPlan(customRounds);
+  const rounds = normalizedRounds.map((round, index) => ({
+    roundNumber: round.roundNumber,
+    type: round.type,
+    about: getRoundPreviewLabel(round.type),
+    difficulty: round.difficulty,
+    questionCount: inferQuestionCount(round.type),
+    questions: [],
+    feedback: {},
+    status: index === 0 ? "IN_PROGRESS" : "COMPLETED",
+  }));
+
+  return {
+    rounds,
+    roundsPlan: rounds.map((round) => getRoundPreviewLabel(round.type)),
+    roundsDetails: rounds.map((round) => ({
+      round: `Round ${round.roundNumber}`,
+      questionType: getRoundPreviewLabel(round.type),
+    })),
+    totalRounds: rounds.length,
+    currentRound: 1,
+    state: INTERVIEW_STATES.IN_PROGRESS,
+  };
 };
 
 const buildFallbackBlueprint = (companyContext, totalRounds, roundHints = [], evidence) => {
@@ -198,7 +276,10 @@ export const generateInterviewPlan = async (companyData) => {
   const companyContext = await getCompanyContext(companyData);
   const evidence = buildInterviewRoundEvidence(companyData);
   const { totalRounds: computedTotalRounds, roundHints } = await getNumberOfRounds(companyData);
-  const totalRounds = Math.max(1, Number(computedTotalRounds) || 3);
+  const totalRounds = Math.min(
+    INTERVIEW_MAX_ROUNDS,
+    Math.max(1, Number(computedTotalRounds) || 3)
+  );
 
   const fallbackBlueprint = buildFallbackBlueprint(companyContext, totalRounds, roundHints, evidence);
   let aiBlueprint = [];

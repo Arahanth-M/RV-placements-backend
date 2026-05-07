@@ -111,6 +111,15 @@ const normalizeExpectedAnswerMode = (value, fallback = "conceptual") => {
 const inferAnswerModeFromRoundType = (roundType) => {
   const safeRoundType = toSafeString(roundType, "general").toLowerCase();
   if (safeRoundType.includes("system")) return "design";
+  if (safeRoundType.includes("sql")) return "code";
+  if (
+    safeRoundType.includes("cs fundamentals") ||
+    safeRoundType.includes("oops") ||
+    safeRoundType.includes("dbms") ||
+    safeRoundType.includes("computer network")
+  ) {
+    return "conceptual";
+  }
   if (safeRoundType.includes("hr") || safeRoundType.includes("behavior")) return "story";
   if (safeRoundType.includes("dsa") || safeRoundType.includes("coding")) return "code";
   return "conceptual";
@@ -361,6 +370,67 @@ const buildFallbackRubric = ({ roundType, roundAbout }) => {
     );
   }
 
+  if (safeRoundType.includes("sql")) {
+    return normalizeExpectedPoints(
+      [
+        {
+          text: `Choose the right SQL approach for ${safeTopic}`,
+          category: "queryDesign",
+          importance: "mustHave",
+        },
+        {
+          text: "Handle joins/filters/aggregations correctly",
+          category: "correctness",
+          importance: "mustHave",
+        },
+        {
+          text: "Discuss performance implications and indexing",
+          category: "performance",
+          importance: "goodToHave",
+        },
+        {
+          text: "Cover edge cases like nulls or duplicates",
+          category: "edgeCases",
+          importance: "mustHave",
+        },
+      ],
+      { roundType, expectedAnswerMode: "code" }
+    );
+  }
+
+  if (
+    safeRoundType.includes("cs fundamentals") ||
+    safeRoundType.includes("oops") ||
+    safeRoundType.includes("dbms") ||
+    safeRoundType.includes("computer network")
+  ) {
+    return normalizeExpectedPoints(
+      [
+        {
+          text: `Explain core concepts for ${safeTopic} clearly`,
+          category: "coverage",
+          importance: "mustHave",
+        },
+        {
+          text: "Use correct technical terminology and reasoning",
+          category: "reasoning",
+          importance: "mustHave",
+        },
+        {
+          text: "Compare alternatives or trade-offs where relevant",
+          category: "tradeoffs",
+          importance: "goodToHave",
+        },
+        {
+          text: "Support explanation with practical examples",
+          category: "application",
+          importance: "goodToHave",
+        },
+      ],
+      { roundType, expectedAnswerMode: "conceptual" }
+    );
+  }
+
   return normalizeExpectedPoints(
     [
       {
@@ -398,6 +468,15 @@ const buildBasicFallbackQuestion = ({ roundType, roundAbout, difficulty }) => {
     question = `Can you share a situation where you handled a challenge related to ${safeTopic}, and what result you achieved?`;
   } else if (safeRoundType.includes("system")) {
     question = `How would you design a ${safeTopic} system at ${level} difficulty, and what trade-offs would you consider first?`;
+  } else if (safeRoundType.includes("sql")) {
+    question = `Can you write or explain an SQL approach for ${safeTopic} at ${level} difficulty, including performance considerations?`;
+  } else if (
+    safeRoundType.includes("cs fundamentals") ||
+    safeRoundType.includes("oops") ||
+    safeRoundType.includes("dbms") ||
+    safeRoundType.includes("computer network")
+  ) {
+    question = `Can you explain the key concepts behind ${safeTopic} and how they apply in real systems?`;
   } else {
     question = `Can you walk me through your approach to solving a ${level} ${safeTopic} problem, including edge cases?`;
   }

@@ -6,6 +6,16 @@ const TOOL_EVAL_MODEL = process.env.GROQ_TOOL_MODEL || "llama-3.1-8b-instant";
 const SCORING_VERSION = "v3-rubric-strict";
 const RUBRIC_MATCH_THRESHOLD = 0.72;
 const RUBRIC_PARTIAL_THRESHOLD = 0.55;
+const MAX_PROMPT_ANSWER_CHARS = Number(process.env.EVAL_PROMPT_ANSWER_CHARS || 1400);
+const MAX_PROMPT_QUESTION_CHARS = Number(process.env.EVAL_PROMPT_QUESTION_CHARS || 320);
+const MAX_PROMPT_REASONING_CHARS = Number(process.env.EVAL_PROMPT_REASONING_CHARS || 260);
+const MAX_PROMPT_COMPANY_CHARS = Number(process.env.EVAL_PROMPT_COMPANY_CHARS || 700);
+const MAX_PROMPT_RUBRIC_POINTS = Number(process.env.EVAL_PROMPT_RUBRIC_POINTS || 8);
+const LLM_CACHE_ENABLED = process.env.EVAL_LLM_CACHE !== "0";
+const LLM_CACHE_LIMIT = Number(process.env.EVAL_LLM_CACHE_LIMIT || 400);
+const FORCE_LLM_GRADING = process.env.EVAL_FORCE_LLM === "1";
+
+const llmGradeCache = new Map();
 
 const safeCosine = (a, b) => {
   const v = cosineSimilarity(a, b);
@@ -20,6 +30,73 @@ const clamp01 = (value) => {
 
 const toSafeString = (value, fallback = "") =>
   typeof value === "string" && value.trim() ? value.trim() : fallback;
+
+const trimForPrompt = (value, maxChars) => {
+  const text = toSafeString(value);
+  if (!text) return "";
+  if (!Number.isFinite(maxChars) || maxChars <= 0) return text;
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars - 3).trimEnd()}...`;
+};
+
+const compactCompanyContextForPrompt = (companyContext) => {
+  if (!companyContext || typeof companyContext !== "object") return {};
+  const compact = {
+    name: companyContext?.name,
+    role: companyContext?.role,
+    domain: companyContext?.domain,
+    techStack: companyContext?.techStack,
+    interviewFocus: companyContext?.interviewFocus,
+    skills: companyContext?.skills,
+  };
+  const serialized = trimForPrompt(JSON.stringify(compact), MAX_PROMPT_COMPANY_CHARS);
+  if (!serialized) return {};
+  try {
+    return JSON.parse(serialized);
+  } catch {
+    return { snippet: serialized };
+  }
+};
+
+const sanitizeRubricForPrompt = (rubricPoints = []) => {
+  const points = Array.isArray(rubricPoints) ? rubricPoints : [];
+  return points
+    .slice()
+    .sort((a, b) => {
+      const rank = (importance) =>
+        importance === "mustHave" ? 0 : importance === "redFlag" ? 1 : 2;
+      return rank(toSafeString(a?.importance)) - rank(toSafeString(b?.importance));
+    })
+    .slice(0, MAX_PROMPT_RUBRIC_POINTS)
+    .map((point) => ({
+      text: trimForPrompt(point?.text, 150),
+      category: toSafeString(point?.category, "coverage"),
+      importance: toSafeString(point?.importance, "mustHave"),
+    }));
+};
+
+const makeLLMCacheKey = ({ question, answer, type, rubricPoints }) => {
+  const rubricKey = (Array.isArray(rubricPoints) ? rubricPoints : [])
+    .slice(0, MAX_PROMPT_RUBRIC_POINTS)
+    .map((point) => `${toSafeString(point?.text)}|${toSafeString(point?.importance)}`)
+    .join("||");
+  return [
+    type,
+    trimForPrompt(question, 180),
+    trimForPrompt(answer, 700),
+    rubricKey,
+  ].join("::");
+};
+
+const setLLMCache = (key, value) => {
+  if (!LLM_CACHE_ENABLED || !key) return;
+  llmGradeCache.set(key, value);
+  if (llmGradeCache.size <= LLM_CACHE_LIMIT) return;
+  const oldestKey = llmGradeCache.keys().next().value;
+  if (oldestKey) {
+    llmGradeCache.delete(oldestKey);
+  }
+};
 
 const extractReasoningHighlight = (reasoning) => {
   const text = toSafeString(reasoning);
@@ -360,17 +437,13 @@ const buildLLMGradingPrompt = ({
   },
   {
     role: "user",
-    content: `Question: ${question}
-Candidate Answer: ${answer}
+    content: `Question: ${trimForPrompt(question, MAX_PROMPT_QUESTION_CHARS)}
+Candidate Answer: ${trimForPrompt(answer, MAX_PROMPT_ANSWER_CHARS)}
 Question Type: ${type}
-Company Context: ${JSON.stringify(companyContext || {})}
-Reference Reasoning: ${toSafeString(llmReasoning)}
+Company Context: ${JSON.stringify(compactCompanyContextForPrompt(companyContext))}
+Reference Reasoning: ${trimForPrompt(llmReasoning, MAX_PROMPT_REASONING_CHARS)}
 Rubric Points: ${JSON.stringify(
-      rubricPoints.map((point) => ({
-        text: point.text,
-        category: point.category,
-        importance: point.importance,
-      }))
+      sanitizeRubricForPrompt(rubricPoints)
     )}
 Current Deterministic Subscores: ${JSON.stringify(baseSubscores)}
 
@@ -389,6 +462,29 @@ Return STRICT JSON:
 }`,
   },
 ];
+
+const shouldUseLLMGrader = ({
+  rubricPointCount,
+  wordCount,
+  relevance,
+  mustHaveCoverage,
+  deterministicScore,
+}) => {
+  if (FORCE_LLM_GRADING) return true;
+  if (rubricPointCount === 0) return false;
+  if (wordCount <= 5) return false;
+  if (relevance < 0.45) return false;
+
+  const highConfidenceCorrect =
+    deterministicScore >= 0.86 && mustHaveCoverage >= 0.9 && relevance >= 0.78;
+  const highConfidenceIncorrect =
+    deterministicScore <= 0.24 || (mustHaveCoverage < 0.45 && relevance < 0.55);
+
+  if (highConfidenceCorrect || highConfidenceIncorrect) {
+    return false;
+  }
+  return true;
+};
 
 export const evaluateAnswer = async ({
   answer,
@@ -470,6 +566,8 @@ export const evaluateAnswer = async ({
     categoryScores: rubricSummary.categoryScores,
     structure,
   });
+  const weights = QUESTION_TYPE_WEIGHTS[type] || QUESTION_TYPE_WEIGHTS.general;
+  const deterministicScore = combineWeightedScore(weights, baseSubscores);
 
   let llmVerdict = "partial";
   let llmInsight = "";
@@ -479,43 +577,69 @@ export const evaluateAnswer = async ({
   let llmMissing = [];
   let llmSubscores = {};
 
-  try {
-    const llmEvalRaw = await callLLM(
-      buildLLMGradingPrompt({
-        question: safeQuestion,
-        answer: safeAnswer,
-        type,
-        companyContext,
-        llmReasoning,
-        rubricPoints,
-        baseSubscores,
-      }),
-      { model: TOOL_EVAL_MODEL }
-    );
-    const parsedEval = parseJSONResponse(llmEvalRaw);
-    const verdictCandidate = toSafeString(parsedEval?.verdict).toLowerCase();
-    if (["correct", "partial", "incorrect"].includes(verdictCandidate)) {
-      llmVerdict = verdictCandidate;
+  const useLLMGrader = shouldUseLLMGrader({
+    rubricPointCount: rubricPoints.length,
+    wordCount,
+    relevance,
+    mustHaveCoverage: rubricSummary.mustHaveCoverage,
+    deterministicScore,
+  });
+
+  if (useLLMGrader) {
+    const cacheKey = makeLLMCacheKey({
+      question: safeQuestion,
+      answer: safeAnswer,
+      type,
+      rubricPoints,
+    });
+    const cached = LLM_CACHE_ENABLED ? llmGradeCache.get(cacheKey) : null;
+
+    try {
+      const parsedEval = cached
+        ? cached
+        : parseJSONResponse(
+            await callLLM(
+              buildLLMGradingPrompt({
+                question: safeQuestion,
+                answer: safeAnswer,
+                type,
+                companyContext,
+                llmReasoning,
+                rubricPoints,
+                baseSubscores,
+              }),
+              { model: TOOL_EVAL_MODEL }
+            )
+          );
+
+      if (!cached) {
+        setLLMCache(cacheKey, parsedEval);
+      }
+
+      const verdictCandidate = toSafeString(parsedEval?.verdict).toLowerCase();
+      if (["correct", "partial", "incorrect"].includes(verdictCandidate)) {
+        llmVerdict = verdictCandidate;
+      }
+      llmInsight = toSafeString(parsedEval?.insight);
+      llmImprovement = toSafeString(parsedEval?.improvement);
+      llmConfidence = clamp01(parsedEval?.confidence || llmConfidence);
+      llmMatched = Array.isArray(parsedEval?.matchedRubricPoints)
+        ? parsedEval.matchedRubricPoints.map((item) => toSafeString(item)).filter(Boolean)
+        : [];
+      llmMissing = Array.isArray(parsedEval?.missingRubricPoints)
+        ? parsedEval.missingRubricPoints.map((item) => toSafeString(item)).filter(Boolean)
+        : [];
+      llmSubscores =
+        parsedEval?.subscores && typeof parsedEval.subscores === "object"
+          ? Object.fromEntries(
+              Object.entries(parsedEval.subscores)
+                .map(([key, value]) => [key, clamp01(value)])
+                .filter(([, value]) => Number.isFinite(value))
+            )
+          : {};
+    } catch (error) {
+      // Deterministic path remains the primary fallback.
     }
-    llmInsight = toSafeString(parsedEval?.insight);
-    llmImprovement = toSafeString(parsedEval?.improvement);
-    llmConfidence = clamp01(parsedEval?.confidence || llmConfidence);
-    llmMatched = Array.isArray(parsedEval?.matchedRubricPoints)
-      ? parsedEval.matchedRubricPoints.map((item) => toSafeString(item)).filter(Boolean)
-      : [];
-    llmMissing = Array.isArray(parsedEval?.missingRubricPoints)
-      ? parsedEval.missingRubricPoints.map((item) => toSafeString(item)).filter(Boolean)
-      : [];
-    llmSubscores =
-      parsedEval?.subscores && typeof parsedEval.subscores === "object"
-        ? Object.fromEntries(
-            Object.entries(parsedEval.subscores)
-              .map(([key, value]) => [key, clamp01(value)])
-              .filter(([, value]) => Number.isFinite(value))
-          )
-        : {};
-  } catch (error) {
-    // Deterministic path remains the primary fallback.
   }
 
   const mergedSubscores = { ...baseSubscores };
@@ -525,7 +649,6 @@ export const evaluateAnswer = async ({
     }
   }
 
-  const weights = QUESTION_TYPE_WEIGHTS[type] || QUESTION_TYPE_WEIGHTS.general;
   let normalizedScore = combineWeightedScore(weights, mergedSubscores);
 
   if (llmVerdict === "correct") normalizedScore += 0.03;
