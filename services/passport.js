@@ -2,7 +2,6 @@ import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import keys from "../config/keys.js";
 import Student from "../models/Student.js";
-import User from "../models/User.js";
 import User1 from "../models/User1.js";
 import { urls } from "../config/constants.js";
 import { sendWelcomeEmailWebhook } from "./webhookService.js";
@@ -51,29 +50,27 @@ passport.use(
 
         if (isAdminLogin) {
           const [existingAdminByGoogleId, existingAdminByEmail] = await Promise.all([
-            User.findOne({ userId: profile.id }),
-            User.findOne({ email: normalizedEmail }),
+            User1.findOne({ googleId: profile.id }),
+            User1.findOne({ email: normalizedEmail }),
           ]);
           const adminUser = existingAdminByGoogleId || existingAdminByEmail;
 
           if (adminUser) {
-            adminUser.userId = profile.id;
+            adminUser.googleId = profile.id;
             adminUser.email = normalizedEmail;
             if (displayName) adminUser.username = displayName;
-            if (picture) adminUser.picture = picture;
-            adminUser.lastActiveAt = new Date();
+            if (picture) adminUser.profilePicture = picture;
+            adminUser.lastLoginAt = new Date();
             await adminUser.save();
             return done(null, adminUser);
           }
 
-          const createdAdminUser = await new User({
-            userId: profile.id,
+          const createdAdminUser = await new User1({
+            googleId: profile.id,
             username: displayName,
             email: normalizedEmail,
-            picture,
-            fillForm: false,
-            isBetaListed: true,
-            lastActiveAt: new Date(),
+            profilePicture: picture,
+            lastLoginAt: new Date(),
           }).save();
 
           return done(null, createdAdminUser);

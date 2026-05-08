@@ -1,5 +1,6 @@
 import express from "express";
 import User1 from "../models/User1.js";
+import Student from "../models/Student.js";
 import Submission from "../models/Submission.js";
 import authJWT from "../middleware/authJWT.js";
 import { redisUrl } from "../src/utils/redisClient.js";
@@ -10,6 +11,28 @@ const LEADERBOARD_CACHE_KEY = "rv:leaderboard:top_contributors";
 const LEADERBOARD_TTL_SECONDS = 3 * 60 * 60; // 3 hours
 const PREVIOUS_DAY_TOP_CACHE_KEY_PREFIX = "rv:leaderboard:previous_day_top";
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+const LEADERBOARD_LOCK_MESSAGE = "LeaderBoard is warming up. Will be live soon";
+
+async function ensureLeaderboardAccess(req, res) {
+  const isAdminSession = req.user?.isAdminSession === true || req.user?.role === "admin";
+  if (isAdminSession) {
+    return true;
+  }
+
+  const loginEmail = String(req.user?.email || "").trim().toLowerCase();
+  if (!loginEmail) {
+    res.status(403).json({ error: LEADERBOARD_LOCK_MESSAGE });
+    return false;
+  }
+
+  const studentRecord = await Student.findOne({ email: loginEmail }).select("_id").lean();
+  if (!studentRecord) {
+    res.status(403).json({ error: LEADERBOARD_LOCK_MESSAGE });
+    return false;
+  }
+
+  return true;
+}
 
 function formatIstDateKey(date) {
   const shifted = new Date(date.getTime() + IST_OFFSET_MS);
@@ -52,6 +75,10 @@ export async function invalidateLeaderboardCache() {
 // GET /api/leaderboard/previous-day-top - previous IST day's top approved contributor
 leaderboardRouter.get("/previous-day-top", authJWT, async (req, res) => {
   try {
+    if (!(await ensureLeaderboardAccess(req, res))) {
+      return;
+    }
+
     const {
       now,
       previousDayStart,
@@ -135,6 +162,10 @@ leaderboardRouter.get("/previous-day-top", authJWT, async (req, res) => {
 // GET /api/leaderboard - top contributors by points (optional auth for visibility)
 leaderboardRouter.get("/", authJWT, async (req, res) => {
   try {
+    if (!(await ensureLeaderboardAccess(req, res))) {
+      return;
+    }
+
     if (redisUrl) {
       const cachedLeaderboard = await getJSON(LEADERBOARD_CACHE_KEY);
       if (Array.isArray(cachedLeaderboard)) {

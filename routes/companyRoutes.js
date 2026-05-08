@@ -5,6 +5,7 @@ import { companyCreateSchema } from "../validations/company.validation.js";
 import { submissionInputSchema } from "../validations/submission.validation.js";
 import dotenv from "dotenv";
 import Submission from "../models/Submission.js";
+import Student from "../models/Student.js";
 import { getCompanyFocusTags } from "../utils/companyFocusTags.js";
 import { attachPlacementCategoryToCompany } from "../utils/ctcCategory.js";
 import { projectCompanyListResponse } from "../utils/companyListProjection.js";
@@ -186,6 +187,20 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
       );
 
   try {
+    const isAdminSession = req.user?.isAdminSession === true || req.user?.role === "admin";
+    if (!isAdminSession) {
+      const loginEmail = String(req.user?.email || "").trim().toLowerCase();
+      if (!loginEmail) {
+        return res.status(403).json({ error: "Stay connected, we will be back soon" });
+      }
+      const studentRecord = await Student.findOne({ email: loginEmail })
+        .select("_id")
+        .lean();
+      if (!studentRecord) {
+        return res.status(403).json({ error: "Stay connected, we will be back soon" });
+      }
+    }
+
     const AuthUserModel = getAuthUserModel(req);
     const touchUserActivity = () =>
       AuthUserModel.updateOne(

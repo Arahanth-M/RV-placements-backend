@@ -1,6 +1,6 @@
 import { EVENT_TYPES } from "./eventTypes.js";
 import { enqueueNotificationJob } from "../queues/notificationQueue.js";
-import User from "../../models/User.js";
+import User1 from "../../models/User1.js";
 
 const BATCH_SIZE = 100;
 
@@ -29,11 +29,9 @@ async function handleCompanyApproved(payload) {
   const name =
     (companyName && String(companyName).trim()) || "A company on the platform";
 
-  // Fan-out to active students. DB field is `isBetaListed` (see User model, jwtUserClaims, checkBetaAccess).
-  // `betaAccess` is not stored on User but may exist in legacy documents — include both.
-  const cursor = User.find({
+  // Fan-out to student users.
+  const cursor = User1.find({
     role: "student",
-    $or: [{ isBetaListed: true }, { betaAccess: true }],
   })
     .select("_id")
     .lean()

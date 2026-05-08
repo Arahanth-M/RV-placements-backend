@@ -110,7 +110,6 @@ const STATIC_STORAGE_KEY_SET = new Set([
   "name",
   "logo",
   "business_model",
-  "must_do_topics",
   "about",
   "prev_coding_ques",
   "helpfulCount",
@@ -121,8 +120,12 @@ const STATIC_STORAGE_KEY_SET = new Set([
 
 /** Legacy / API keys → `companies` field names (no value coercion). */
 const LEGACY_TO_STATIC = {
-  Must_Do_Topics: "must_do_topics",
   "About The Company": "about",
+};
+
+/** Legacy / API keys → `company_visits` field names (no value coercion). */
+const LEGACY_TO_DYNAMIC = {
+  Must_Do_Topics: "must_do_topics",
 };
 
 const DYNAMIC_KEY_SET = new Set([
@@ -134,6 +137,7 @@ const DYNAMIC_KEY_SET = new Set([
   "interviewQuestions",
   "interviewQuestions_solution",
   "interviewProcess",
+  "must_do_topics",
   "selectedCandidates",
   "mcqQuestions",
   "internshipExperience",
@@ -472,6 +476,193 @@ async function fetchApprovedVisitsForDetailYearsByCompany(companyIds) {
 }
 
 /**
+ * Visit-level `must_do_topics` are shown cluster-wide for a company, independent
+ * of visit year/type. Keep this read separate from placement-year card stats.
+ * @param {import("mongoose").Types.ObjectId[]} companyIds
+ * @param {{ approvedOnly?: boolean }} [opts]
+ */
+async function fetchMustDoTopicVisitsByCompany(companyIds, opts = {}) {
+  /** @type {Map<string, Record<string, unknown>[]>} */
+  const map = new Map();
+  if (!companyIds.length) return map;
+  const filter = {
+    companyId: { $in: companyIds },
+    must_do_topics: { $exists: true, $ne: [] },
+  };
+  if (opts.approvedOnly) filter.status = "approved";
+
+  const visits = await CompanyVisit.find(filter)
+    .select("companyId cluster must_do_topics")
+    .sort({ year: 1, migratedAt: 1, _id: 1 })
+    .lean();
+  for (const v of visits) {
+    const k = String(v.companyId);
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(v);
+  }
+  return map;
+}
+
+/**
+ * @param {Record<string, unknown>[]} visits
+ * @param {unknown} clusterRaw
+ * @returns {string[]}
+ */
+function collectMustDoTopicsForCluster(visits, clusterRaw) {
+  const targetCluster = clusterKeyFromPlacementVisitClusterField(clusterRaw);
+  const seen = new Set();
+  const out = [];
+
+  for (const visit of Array.isArray(visits) ? visits : []) {
+    if (clusterKeyFromPlacementVisitClusterField(visit?.cluster) !== targetCluster) {
+      continue;
+    }
+    const topics = Array.isArray(visit?.must_do_topics) ? visit.must_do_topics : [];
+    for (const topic of topics) {
+      if (typeof topic !== "string") continue;
+      const normalized = topic.trim();
+      if (!normalized) continue;
+      const key = normalized.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(normalized);
+    }
+  }
+
+  return out;
+}
+
+/**
+ * @param {Record<string, unknown>|null|undefined} visit
+ * @param {Record<string, unknown>[]} mustDoTopicVisits
+ */
+function withClusterMustDoTopics(visit, mustDoTopicVisits) {
+  if (!visit || typeof visit !== "object") return visit;
+  const topics = collectMustDoTopicsForCluster(mustDoTopicVisits, visit.cluster);
+  return topics.length > 0 ? { ...visit, must_do_topics: topics } : visit;
+}
+
+/**
+ * @param {unknown[]} topics
+ */
+function normalizeMustDoTopicArray(topics) {
+  const seen = new Set();
+  const out = [];
+  for (const topic of Array.isArray(topics) ? topics : []) {
+    if (typeof topic !== "string") continue;
+    const value = topic.trim();
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(value);
+  }
+  return out;
+}
+
+/**
+ * Mutate the cluster-wide topic represented by the visible aggregate index.
+ * @param {string|import("mongoose").Types.ObjectId} companyId
+ * @param {unknown} clusterRaw
+ * @param {number} index
+ * @param {{ action: "update", topic: string } | { action: "delete" }} change
+ */
+export async function mutateMustDoTopicForCompanyCluster(
+  companyId,
+  clusterRaw,
+  index,
+  change
+) {
+  const cid = toObjectId(companyId);
+  if (!cid || !Number.isInteger(index) || index < 0) {
+    return { ok: false, reason: "invalid_input" };
+  }
+
+  const companyExpr = buildCompanyVisitCompanyExprMatch(cid);
+  if (!companyExpr) return { ok: false, reason: "invalid_input" };
+
+  const visits = await CompanyVisit.find({
+    ...companyExpr,
+    must_do_topics: { $exists: true, $ne: [] },
+  })
+    .select("_id companyId cluster must_do_topics year migratedAt")
+    .sort({ year: 1, migratedAt: 1, _id: 1 })
+    .lean();
+
+  const targetCluster = clusterKeyFromPlacementVisitClusterField(clusterRaw);
+  const clusterVisits = visits.filter(
+    (visit) => clusterKeyFromPlacementVisitClusterField(visit?.cluster) === targetCluster
+  );
+  const visibleTopics = collectMustDoTopicsForCluster(clusterVisits, clusterRaw);
+  const oldTopic = visibleTopics[index];
+  if (!oldTopic) return { ok: false, reason: "topic_not_found" };
+
+  const oldKey = oldTopic.trim().toLowerCase();
+  const newTopic =
+    change.action === "update" && typeof change.topic === "string"
+      ? change.topic.trim()
+      : "";
+  if (change.action === "update" && !newTopic) {
+    return { ok: false, reason: "empty_topic" };
+  }
+
+  let modifiedCount = 0;
+  const nextVisibleTopics = [];
+
+  for (const visit of clusterVisits) {
+    const current = normalizeMustDoTopicArray(visit.must_do_topics);
+    let changed = false;
+    const next = [];
+
+    for (const topic of current) {
+      if (topic.trim().toLowerCase() === oldKey) {
+        changed = true;
+        if (change.action === "update") next.push(newTopic);
+        continue;
+      }
+      next.push(topic);
+    }
+
+    if (!changed) continue;
+
+    const normalizedNext = normalizeMustDoTopicArray(next);
+    await CompanyVisit.updateOne(
+      { _id: visit._id },
+      { $set: { must_do_topics: normalizedNext } }
+    );
+    modifiedCount += 1;
+  }
+
+  if (modifiedCount > 0) {
+    await invalidateCompanyDetailCache(cid);
+  }
+
+  const refreshed = await CompanyVisit.find({
+    ...companyExpr,
+    must_do_topics: { $exists: true, $ne: [] },
+  })
+    .select("companyId cluster must_do_topics year migratedAt")
+    .sort({ year: 1, migratedAt: 1, _id: 1 })
+    .lean();
+  nextVisibleTopics.push(
+    ...collectMustDoTopicsForCluster(
+      refreshed.filter(
+        (visit) =>
+          clusterKeyFromPlacementVisitClusterField(visit?.cluster) === targetCluster
+      ),
+      clusterRaw
+    )
+  );
+
+  return {
+    ok: true,
+    modifiedCount,
+    topic: change.action === "update" ? newTopic : oldTopic,
+    topics: nextVisibleTopics,
+  };
+}
+
+/**
  * Which `company_visits` row drives merged list fields when multiple years exist.
  * @param {Record<string, unknown>[]|undefined} visits — approved rows for 2026/2027 (plain ctc)
  * @param {unknown} placementYearRaw — from `?year=`; null/undefined = prefer earliest year (2026-first)
@@ -600,8 +791,16 @@ function buildPlacementBranchStatsByYearFromVisits(visits, placementContextRaw =
  */
 export function mergeToLegacyShape(staticDoc, visitDoc) {
   const s = staticDoc && typeof staticDoc === "object" ? { ...staticDoc } : {};
+  const v = visitDoc && typeof visitDoc === "object" ? visitDoc : null;
   const aboutVal = s.about;
-  const must = s.must_do_topics;
+  const visitHasMustDoTopics =
+    v && Object.prototype.hasOwnProperty.call(v, "must_do_topics");
+  const canUseStaticMustDoTopicsFallback = !v;
+  const must = visitHasMustDoTopics
+    ? v.must_do_topics
+    : canUseStaticMustDoTopicsFallback
+      ? s.must_do_topics
+      : undefined;
 
   /** @type {Record<string, unknown>} */
   const out = {
@@ -615,12 +814,20 @@ export function mergeToLegacyShape(staticDoc, visitDoc) {
     out.Must_Do_Topics = must;
   }
 
-  if (visitDoc && typeof visitDoc === "object") {
-    const skip = new Set(["_id", "companyId", "year", "migratedAt", "sourceCopyId"]);
-    for (const [key, val] of Object.entries(visitDoc)) {
+  if (v) {
+    const skip = new Set([
+      "_id",
+      "companyId",
+      "year",
+      "migratedAt",
+      "sourceCopyId",
+      "must_do_topics",
+    ]);
+    for (const [key, val] of Object.entries(v)) {
       if (skip.has(key)) continue;
       if (STATIC_STORAGE_KEY_SET.has(key)) continue;
       if (Object.prototype.hasOwnProperty.call(LEGACY_TO_STATIC, key)) continue;
+      if (Object.prototype.hasOwnProperty.call(LEGACY_TO_DYNAMIC, key)) continue;
       if (val !== undefined) {
         out[key] = val;
       }
@@ -1340,6 +1547,10 @@ export async function getCompanyDetailLegacyMergedById(
   }
   const visitsByCompany = await fetchApprovedVisitsForDetailYearsByCompany([_id]);
   const allApprovedVisits = visitsByCompany.get(String(_id)) ?? [];
+  const mustDoTopicVisitsByCompany = await fetchMustDoTopicVisitsByCompany([_id], {
+    approvedOnly: true,
+  });
+  const mustDoTopicVisits = mustDoTopicVisitsByCompany.get(String(_id)) ?? [];
   const scopedApprovedVisits =
     clusterFilter == null
       ? allApprovedVisits
@@ -1360,8 +1571,9 @@ export async function getCompanyDetailLegacyMergedById(
     placementClusterRaw
   );
   if (visitApproved) {
+    const visitForMerge = withClusterMustDoTopics(visitApproved, mustDoTopicVisits);
     const merged = {
-      ...mergeToLegacyShape(staticRow, visitApproved),
+      ...mergeToLegacyShape(staticRow, visitForMerge),
       totalGotInByYear,
       placementBranchStatsByYear,
     };
@@ -1452,7 +1664,10 @@ export async function listApprovedCompaniesLegacyMerged(
 
   const rows = await CompanyVisit.aggregate(pipeline);
   const companyIds = rows.map((r) => r._id);
-  const visitsByCompany = await fetchApprovedVisitsForDetailYearsByCompany(companyIds);
+  const [visitsByCompany, mustDoTopicVisitsByCompany] = await Promise.all([
+    fetchApprovedVisitsForDetailYearsByCompany(companyIds),
+    fetchMustDoTopicVisitsByCompany(companyIds, { approvedOnly: true }),
+  ]);
 
   const list = [];
   const normalizedListingYear =
@@ -1525,7 +1740,9 @@ export async function listApprovedCompaniesLegacyMerged(
       const scopedVisits = clusterScopedVisits.length > 0 ? clusterScopedVisits : [visit];
 
       const totalGotInByYear = buildTotalGotInByYearFromVisits(scopedVisits);
-      const merged = mergeToLegacyShape(staticRow, visit);
+      const mustDoTopicVisits = mustDoTopicVisitsByCompany.get(String(row._id)) ?? [];
+      const visitForMerge = withClusterMustDoTopics(visit, mustDoTopicVisits);
+      const merged = mergeToLegacyShape(staticRow, visitForMerge);
       const placementAnyYearPpoOnCampus =
         companyHasAnyYearSummerPpoFromVisits(scopedVisits);
       const placementHasDreamTierVisit =
@@ -1747,8 +1964,11 @@ export async function getCompanyMergedForAdminById(
         ? await findAnyLatestVisitForCompanyYearMatchingContext(_id, year, ctxTrim)
         : await findAnyLatestVisitForCompanyYear(_id, year);
   }
-  const merged = mergeToLegacyShape(staticRow, visit);
-  return { merged, staticRow, visit: visit ?? null };
+  const mustDoTopicVisitsByCompany = await fetchMustDoTopicVisitsByCompany([_id]);
+  const mustDoTopicVisits = mustDoTopicVisitsByCompany.get(String(_id)) ?? [];
+  const visitForMerge = withClusterMustDoTopics(visit, mustDoTopicVisits);
+  const merged = mergeToLegacyShape(staticRow, visitForMerge);
+  return { merged, staticRow, visit: visitForMerge ?? null };
 }
 
 /**
@@ -1836,6 +2056,16 @@ export async function listAdminPaginatedCompaniesFromSplit({
     const facet = agg[0] || {};
     const total = facet.totalCount?.[0]?.n ?? 0;
     const page = facet.page || [];
+    const pageCompanyIds = [
+      ...new Map(
+        page
+          .map((row) => toObjectId(row.companyIdForJoin))
+          .filter(Boolean)
+          .map((id) => [String(id), id])
+      ).values(),
+    ];
+    const mustDoTopicVisitsByCompany =
+      await fetchMustDoTopicVisitsByCompany(pageCompanyIds);
     const STRIP_ROW_KEYS = new Set([
       "s",
       "companyIdForJoin",
@@ -1849,8 +2079,14 @@ export async function listAdminPaginatedCompaniesFromSplit({
         if (!STRIP_ROW_KEYS.has(k)) visitForMerge[k] = v;
       }
       const companyVisitId = visitForMerge._id;
+      const mustDoTopicVisits =
+        mustDoTopicVisitsByCompany.get(String(row.companyIdForJoin)) ?? [];
+      const visitWithTopics = withClusterMustDoTopics(
+        visitForMerge,
+        mustDoTopicVisits
+      );
       return {
-        ...mergeToLegacyShape(staticRow, visitForMerge),
+        ...mergeToLegacyShape(staticRow, visitWithTopics),
         placementYear: placementYearNum,
         companyVisitId: companyVisitId != null ? String(companyVisitId) : null,
       };
@@ -1863,14 +2099,19 @@ export async function listAdminPaginatedCompaniesFromSplit({
     .skip(skip)
     .limit(limit)
     .lean();
+  const mustDoTopicVisitsByCompany = await fetchMustDoTopicVisitsByCompany(
+    statics.map((s) => s._id)
+  );
   const items = [];
   for (const s of statics) {
     const v = await findAnyLatestVisitForCompanyYear(
       /** @type {import("mongoose").Types.ObjectId} */ (s._id),
       year == null ? COMPANY_VISIT_YEAR : year
     );
+    const mustDoTopicVisits = mustDoTopicVisitsByCompany.get(String(s._id)) ?? [];
+    const visitWithTopics = withClusterMustDoTopics(v, mustDoTopicVisits);
     items.push({
-      ...mergeToLegacyShape(s, v),
+      ...mergeToLegacyShape(s, visitWithTopics),
       placementYear: Number(v?.year ?? (year == null ? COMPANY_VISIT_YEAR : year)) || null,
     });
   }
@@ -2663,6 +2904,13 @@ function splitStaticAndDynamicForWrite(data, opts = {}) {
       }
       continue;
     }
+    if (Object.prototype.hasOwnProperty.call(LEGACY_TO_DYNAMIC, k)) {
+      const target = LEGACY_TO_DYNAMIC[/** @type {keyof typeof LEGACY_TO_DYNAMIC} */ (k)];
+      if (dynamicDoc[target] === undefined) {
+        dynamicDoc[target] = v;
+      }
+      continue;
+    }
     if (DYNAMIC_KEY_SET.has(k)) {
       dynamicDoc[k] = v;
       continue;
@@ -2693,6 +2941,9 @@ function pickStaticUpdatePayload(data, opts = {}) {
       out[LEGACY_TO_STATIC[/** @type {keyof typeof LEGACY_TO_STATIC} */ (k)]] = v;
       continue;
     }
+    if (Object.prototype.hasOwnProperty.call(LEGACY_TO_DYNAMIC, k)) {
+      continue;
+    }
     if (STATIC_STORAGE_KEY_SET.has(k)) {
       out[k] = v;
     }
@@ -2711,6 +2962,11 @@ function pickStaticUpdatePayload(data, opts = {}) {
 function pickDynamicUpdatePayload(data) {
   if (!data || typeof data !== "object") return {};
   const out = /** @type {Record<string, unknown>} */ ({});
+  for (const [legacyKey, dynamicKey] of Object.entries(LEGACY_TO_DYNAMIC)) {
+    if (Object.prototype.hasOwnProperty.call(data, legacyKey)) {
+      out[dynamicKey] = data[legacyKey];
+    }
+  }
   for (const k of DYNAMIC_KEY_SET) {
     if (Object.prototype.hasOwnProperty.call(data, k)) {
       out[k] = data[k];

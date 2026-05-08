@@ -10,6 +10,7 @@ import {
   adminOaQuestionUpdateSchema,
   adminInterviewQuestionUpdateSchema,
   adminInterviewProcessUpdateSchema,
+  adminMustDoTopicUpdateSchema,
   adminCompanyStatsSchema,
   adminCompanyTotalGotInAdjustmentSchema,
   adminCompanyRolesSchema,
@@ -39,6 +40,7 @@ import {
   ensureAdminVisitForYear,
   getCompanyMergedForAdminById,
   listAdminPaginatedCompaniesFromSplit,
+  mutateMustDoTopicForCompanyCluster,
   normalizeCompanyDetailYear,
   persistMergedCompany,
   updateCompanyStatic,
@@ -1294,8 +1296,7 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
         : POINTS_QUESTION; // onlineQuestions, interviewQuestions, mustDoTopics
 
     const contributor =
-      (await User1.findOne({ email: submission.submittedBy?.email })) ||
-      (await User.findOne({ email: submission.submittedBy?.email }));
+      (await User1.findOne({ email: submission.submittedBy?.email })) || null;
     if (contributor) {
       contributor.points = (contributor.points || 0) + pointsToAdd;
       await contributor.save();
@@ -1688,6 +1689,116 @@ adminRouter.delete("/companies/:id/interview-process/:index", async (req, res) =
   } catch (error) {
     console.error("❌ Error deleting interview process:", error.message);
     res.status(500).json({ error: "Server error" });
+  }
+});
+
+adminRouter.put(
+  "/companies/:id/must-do-topics/:index",
+  validateRequest(adminMustDoTopicUpdateSchema),
+  async (req, res) => {
+    try {
+      const y = adminVisitYearFromQuery(req);
+      const { placementListContext, companyVisitIdHint } =
+        adminStatsVisitResolutionArgs(req);
+      const loaded = await getCompanyMergedForAdminById(
+        req.params.id,
+        y,
+        placementListContext,
+        companyVisitIdHint
+      );
+      if (!loaded?.merged || !loaded?.visit) {
+        return res.status(404).json({ error: "Company visit not found" });
+      }
+      const index = parseInt(req.params.index, 10);
+      if (Number.isNaN(index) || index < 0) {
+        return res.status(400).json({ error: "Invalid index" });
+      }
+
+      const topic = sanitizeText(req.body?.topic);
+      if (!topic) return res.status(400).json({ error: "topic required" });
+
+      const result = await mutateMustDoTopicForCompanyCluster(
+        req.params.id,
+        loaded.visit.cluster,
+        index,
+        { action: "update", topic }
+      );
+      if (!result.ok) {
+        return res.status(result.reason === "topic_not_found" ? 404 : 400).json({
+          error:
+            result.reason === "topic_not_found"
+              ? "Topic not found"
+              : "Unable to update topic",
+        });
+      }
+
+      const out = (
+        await getCompanyMergedForAdminById(
+          req.params.id,
+          y,
+          placementListContext,
+          companyVisitIdHint
+        )
+      )?.merged;
+      res.json({ message: "Must do topic updated", company: out });
+    } catch (error) {
+      console.error("❌ Error updating must do topic:", error.message);
+      if (error.name === "ValidationError") {
+        return res
+          .status(400)
+          .json({ error: "Validation failed", details: error.errors });
+      }
+      res.status(500).json({ error: "Server error", details: error.message });
+    }
+  }
+);
+
+adminRouter.delete("/companies/:id/must-do-topics/:index", async (req, res) => {
+  try {
+    const y = adminVisitYearFromQuery(req);
+    const { placementListContext, companyVisitIdHint } =
+      adminStatsVisitResolutionArgs(req);
+    const loaded = await getCompanyMergedForAdminById(
+      req.params.id,
+      y,
+      placementListContext,
+      companyVisitIdHint
+    );
+    if (!loaded?.merged || !loaded?.visit) {
+      return res.status(404).json({ error: "Company visit not found" });
+    }
+    const index = parseInt(req.params.index, 10);
+    if (Number.isNaN(index) || index < 0) {
+      return res.status(400).json({ error: "Invalid index" });
+    }
+
+    const result = await mutateMustDoTopicForCompanyCluster(
+      req.params.id,
+      loaded.visit.cluster,
+      index,
+      { action: "delete" }
+    );
+    if (!result.ok) {
+      return res.status(result.reason === "topic_not_found" ? 404 : 400).json({
+        error:
+          result.reason === "topic_not_found"
+            ? "Topic not found"
+            : "Unable to delete topic",
+      });
+    }
+
+    const out = (
+      await getCompanyMergedForAdminById(
+        req.params.id,
+        y,
+        placementListContext,
+        companyVisitIdHint
+      )
+    )?.merged;
+    res.json({ message: "Must do topic deleted", company: out });
+  } catch (error) {
+    console.error("❌ Error deleting must do topic:", error.message);
+    res.status(500).json({ error: "Server error", details: error.message });
   }
 });
 

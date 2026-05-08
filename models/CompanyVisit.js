@@ -17,6 +17,7 @@ const companyVisitSchema = new mongoose.Schema(
     interviewQuestions: [{ type: String, trim: true }],
     interviewQuestions_solution: [{ type: String, trim: true }],
     interviewProcess: [{ type: String, trim: true }],
+    must_do_topics: [{ type: String, trim: true }],
     eligibility: { type: String, trim: true },
     date_of_visit: { type: String, trim: true },
     /** Optional; e.g. from `companies1_copy` / backfill. Type preserved (Date, string, etc.) */

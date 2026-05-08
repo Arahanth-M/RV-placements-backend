@@ -21,6 +21,10 @@ export const adminInterviewProcessUpdateSchema = Joi.object({
   content: Joi.string().max(50000).required(),
 }).unknown(true);
 
+export const adminMustDoTopicUpdateSchema = Joi.object({
+  topic: Joi.string().trim().max(500).required(),
+}).unknown(true);
+
 export const adminCompanyStatsSchema = Joi.object({
   totalStudentsApplied: nonNegIntField.optional(),
   totalClearedOA: nonNegIntField.optional(),
@@ -88,6 +92,7 @@ export default {
   adminOaQuestionUpdateSchema,
   adminInterviewQuestionUpdateSchema,
   adminInterviewProcessUpdateSchema,
+  adminMustDoTopicUpdateSchema,
   adminCompanyStatsSchema,
   adminCompanyTotalGotInAdjustmentSchema,
   adminCompanyRolesSchema,

@@ -1,4 +1,5 @@
 import User from "../models/User.js";
+import User1 from "../models/User1.js";
 import Submission from "../models/Submission.js";
 import CompanyStatic from "../models/CompanyStatic.js";
 import CompanyVisit from "../models/CompanyVisit.js";
@@ -44,7 +45,7 @@ function normalizeSeries(days, docs) {
 }
 
 async function aggregateUsersByDay(fieldName, startDate) {
-  return User.aggregate([
+  return User1.aggregate([
     {
       $match: {
         [fieldName]: { $gte: startDate },
@@ -216,7 +217,7 @@ export async function computeAdminStatsSnapshot() {
     Submission.countDocuments(),
     CompanyVisit.countDocuments({ year: COMPANY_VISIT_YEAR, status: "pending" }),
     MissingCompany.countDocuments(),
-    User.countDocuments({ lastActiveAt: { $gte: todayStart } }),
+    User1.countDocuments({ lastLoginAt: { $gte: todayStart } }),
     MissingCompany.find({})
       .select("name requestCount status")
       .sort({ requestCount: -1, createdAt: -1 })
@@ -226,7 +227,7 @@ export async function computeAdminStatsSnapshot() {
     findMostHelpfulApprovedCompanies(5),
     aggregateTopSubmittedCompanies(5),
     aggregateUsersByDay("createdAt", sevenDayStart),
-    aggregateUsersByDay("lastActiveAt", sevenDayStart),
+    aggregateUsersByDay("lastLoginAt", sevenDayStart),
     aggregateSubmissionsByDay("submittedAt", sevenDayStart),
     aggregateSubmissionsByDay("approvedAt", sevenDayStart, { status: "approved" }),
   ]);
