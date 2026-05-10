@@ -1,6 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import CompanyStatic from "../models/CompanyStatic.js";
+import InterviewQuestion from "../models/InterviewQuestion.js";
 import {
   getInterviewMergedCompanyPayload,
   listInterviewVisitSlotsForCompany,
@@ -18,6 +19,7 @@ import {
   interviewStartSchema,
   interviewSubmitAnswerSchema,
   interviewMoveRoundSchema,
+  interviewRunPreviewSchema,
 } from "../validations/interview.validation.js";
 import {
   createSession,
@@ -55,6 +57,7 @@ import {
   isInterviewProcessing,
   clearInterviewProcessing,
 } from "../services/interviewCache.js";
+import { executeCode, normalizeExecutionLanguage } from "../services/codeExecution/executeCode.js";
 
 const router = express.Router();
 router.use(authJWT);
@@ -71,9 +74,61 @@ const toClientInterviewStatus = (state) =>
   state === INTERVIEW_STATES.INTERVIEW_COMPLETE ? "COMPLETED" : "IN_PROGRESS";
 
 const toRelevanceLabel = (value) => {
+  if (value == null || value === "") return null;
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return null;
   return numeric >= 0.62 ? "relevant" : "irrelevant";
+};
+
+const buildLastCodeExecutionSummary = (evaluationTrace) => {
+  const ex = evaluationTrace?.execution;
+  if (!ex || typeof ex !== "object") return null;
+  const totalCount = Number(ex.totalCount);
+  if (!Number.isFinite(totalCount) || totalCount < 0) return null;
+  return {
+    status: String(ex.status || ""),
+    totalCount,
+    passedCount: Number(ex.passedCount) || 0,
+    failedCount: Number(ex.failedCount) || 0,
+    visibleTotalCount: Number(ex.visibleTotalCount) || 0,
+    visiblePassedCount: Number(ex.visiblePassedCount) || 0,
+    hiddenTotalCount: Number(ex.hiddenTotalCount) || 0,
+    hiddenPassedCount: Number(ex.hiddenPassedCount) || 0,
+  };
+};
+
+const resolveSupportedCodingLanguages = (
+  questionSlot,
+  evaluationStrategyFallback = "",
+  dsaMetadataFallback = null
+) => {
+  const fromSlot = questionSlot?.supportedCodingLanguages;
+  const fromMeta = dsaMetadataFallback?.supportedLanguages;
+  const rawSlot = Array.isArray(fromSlot) && fromSlot.length > 0 ? fromSlot : null;
+  const rawMeta = Array.isArray(fromMeta) && fromMeta.length > 0 ? fromMeta : null;
+  const raw = rawSlot || rawMeta;
+  const isCodeExec = String(evaluationStrategyFallback || "").toLowerCase() === "code_execution";
+
+  if (Array.isArray(raw) && raw.length > 0) {
+    const s = new Set();
+    for (const item of raw) {
+      const v = normalizeExecutionLanguage(String(item || ""));
+      if (v === "python" || v === "cpp") s.add(v);
+    }
+    let out = [...s];
+    if (out.length === 0 && isCodeExec) {
+      return ["python", "cpp"];
+    }
+    if (isCodeExec) {
+      if (!out.includes("python")) out.unshift("python");
+      if (!out.includes("cpp")) out.push("cpp");
+    }
+    return out.length > 0 ? out : ["python"];
+  }
+  if (isCodeExec) {
+    return ["python", "cpp"];
+  }
+  return ["python"];
 };
 
 /** 0-based index into `session.rounds`; `currentRound` (1-based) is the source of truth. */
@@ -148,6 +203,165 @@ const latencyWindows = {
   sessions: [],
   sessionDetail: [],
 };
+const previewCooldownBySessionUser = new Map();
+const PREVIEW_COOLDOWN_MS = 2000;
+const PREVIEW_RUN_LIMIT_PER_QUESTION = 3;
+const PREVIEW_QUESTION_LOOKUP_CANDIDATE_LIMIT = 2000;
+
+const toSafeString = (value, fallback = "") =>
+  typeof value === "string" && value.trim() ? value.trim() : fallback;
+
+const escapeRegex = (value = "") => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const normalizeQuestionForLookup = (value) =>
+  toSafeString(value)
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[^a-z0-9 ]/g, "")
+    .trim();
+
+const buildPreviewLookupLogContext = ({
+  route,
+  sessionId,
+  currentRoundIndex,
+  currentQuestionIndex,
+  roundType,
+  slotQuestionId,
+  slotQuestionText,
+  rootQuestionText,
+  resolvedQuestionId,
+  resolvedQuestionText,
+  strategy,
+  visibleCount,
+  totalTestCases,
+  hasSqlMetadata,
+}) => ({
+  route,
+  sessionId: toSafeString(sessionId),
+  currentRoundIndex: Number(currentRoundIndex) || 0,
+  currentQuestionIndex: Number(currentQuestionIndex) || 0,
+  roundType: toSafeString(roundType),
+  strategy: toSafeString(strategy),
+  slotQuestionId: toSafeString(slotQuestionId),
+  slotQuestionTextLen: toSafeString(slotQuestionText).length,
+  rootQuestionTextLen: toSafeString(rootQuestionText).length,
+  resolvedQuestionId: toSafeString(resolvedQuestionId),
+  resolvedQuestionTextLen: toSafeString(resolvedQuestionText).length,
+  totalTestCases: Number(totalTestCases) || 0,
+  visibleCount: Number(visibleCount) || 0,
+  hasSqlMetadata: hasSqlMetadata === true,
+});
+
+const buildLooseQuestionRegex = (questionText) => {
+  const normalized = normalizeQuestionForLookup(questionText);
+  if (!normalized) return null;
+  const tokens = normalized.split(" ").filter(Boolean).slice(0, 8);
+  if (tokens.length === 0) return null;
+  const escaped = tokens.map((token) => escapeRegex(token));
+  return escaped.join(".*");
+};
+
+const classifyRoundForLookup = (roundType) => {
+  const safe = toSafeString(roundType).toLowerCase();
+  if (!safe) return null;
+  if (
+    safe.includes("sql") ||
+    safe.includes("database") ||
+    safe.includes("dbms")
+  ) {
+    return "sql";
+  }
+  if (
+    safe.includes("dsa") ||
+    safe.includes("coding") ||
+    safe.includes("algorithm") ||
+    safe.includes("data structure")
+  ) {
+    return "dsa";
+  }
+  return null;
+};
+
+async function resolveInterviewQuestionDoc({
+  questionId = "",
+  questionText = "",
+  roundType = "",
+  includeFullDoc = false,
+}) {
+  const safeQuestionId = toSafeString(questionId);
+  const safeQuestionText = toSafeString(questionText);
+  const projection = includeFullDoc ? "" : "questionId testCases sqlMetadata dsaMetadata";
+  const applyProjection = (query) => (projection ? query.select(projection) : query);
+
+  if (safeQuestionId) {
+    const byId = await applyProjection(InterviewQuestion.findOne({ questionId: safeQuestionId })).lean();
+    if (byId) return byId;
+  }
+
+  if (safeQuestionText) {
+    const byExact = await applyProjection(
+      InterviewQuestion.findOne({ question: safeQuestionText })
+    ).lean();
+    if (byExact) return byExact;
+
+    const byCaseInsensitiveExact = await applyProjection(
+      InterviewQuestion.findOne({
+        question: { $regex: `^${escapeRegex(safeQuestionText)}$`, $options: "i" },
+      })
+    ).lean();
+    if (byCaseInsensitiveExact) return byCaseInsensitiveExact;
+
+    const looseRegex = buildLooseQuestionRegex(safeQuestionText);
+    if (looseRegex) {
+      const family = classifyRoundForLookup(roundType);
+      const familyFilter =
+        family === "sql"
+          ? { roundType: { $regex: "(sql|database|dbms)", $options: "i" } }
+          : family === "dsa"
+          ? { roundType: { $regex: "(dsa|coding|algorithm|data\\s*structure)", $options: "i" } }
+          : {};
+      const byLooseRegex = await applyProjection(
+        InterviewQuestion.findOne({
+          ...familyFilter,
+          question: { $regex: looseRegex, $options: "i" },
+        })
+      ).lean();
+      if (byLooseRegex) return byLooseRegex;
+    }
+  }
+
+  const normalizedTarget = normalizeQuestionForLookup(safeQuestionText);
+  if (!normalizedTarget) return null;
+
+  const family = classifyRoundForLookup(roundType);
+  const familyFilter =
+    family === "sql"
+      ? { roundType: { $regex: "(sql|database|dbms)", $options: "i" } }
+      : family === "dsa"
+      ? { roundType: { $regex: "(dsa|coding|algorithm|data\\s*structure)", $options: "i" } }
+      : {};
+
+  const candidateDocs = await InterviewQuestion.find(familyFilter)
+    .select(includeFullDoc ? "" : "question testCases sqlMetadata dsaMetadata")
+    .limit(PREVIEW_QUESTION_LOOKUP_CANDIDATE_LIMIT)
+    .lean();
+
+  const fallbackMatch = candidateDocs.find(
+    (doc) => normalizeQuestionForLookup(doc?.question) === normalizedTarget
+  );
+  if (fallbackMatch) {
+    console.log("[previewQuestionLookup] matched by normalized text", {
+      includeFullDoc,
+      hasQuestionId: Boolean(safeQuestionId),
+      roundType: toSafeString(roundType),
+      matchedQuestion: toSafeString(fallbackMatch?.question).slice(0, 120),
+      visibleCount: Array.isArray(fallbackMatch?.testCases)
+        ? fallbackMatch.testCases.filter((t) => t?.isHidden !== true).length
+        : 0,
+    });
+  }
+  return fallbackMatch || null;
+}
 
 function recordLatencyMetric(metricName, durationMs) {
   const window = latencyWindows[metricName];
@@ -170,6 +384,16 @@ async function invalidateSessionAndSummaryCaches(userId, sessionId) {
     invalidateInterviewDetail(sessionId),
     invalidateInterviewSummaries(userId),
   ]);
+}
+
+function resolveActiveQuestionContext(session) {
+  const rounds = Array.isArray(session?.rounds) ? session.rounds : [];
+  const currentRoundNumber = Number(session?.currentRound) || 1;
+  const currentRoundIndex = Math.max(0, Math.min(rounds.length - 1, currentRoundNumber - 1));
+  const currentQuestionIndex = Number(session?.currentQuestionIndex) || 0;
+  const currentRoundDoc = rounds[currentRoundIndex];
+  const questionSlot = currentRoundDoc?.questions?.[currentQuestionIndex] || null;
+  return { rounds, currentRoundIndex, currentQuestionIndex, currentRoundDoc, questionSlot };
 }
 
 router.get("/visit-options/:companyId", async (req, res) => {
@@ -472,7 +696,7 @@ router.get("/analytics/:userId", async (req, res) => {
 
 router.post("/submit-answer", validateRequest(interviewSubmitAnswerSchema), async (req, res) => {
   try {
-    const { sessionId, answer } = req.body;
+    const { sessionId, answer, language: languageRaw } = req.body;
     const userId = getAuthenticatedUserId(req);
 
     if (!userId) {
@@ -493,12 +717,32 @@ router.post("/submit-answer", validateRequest(interviewSubmitAnswerSchema), asyn
       return res.status(403).json({ error: "Forbidden" });
     }
 
+    const wantLang = normalizeExecutionLanguage(languageRaw);
+    const { questionSlot } = resolveActiveQuestionContext(session);
+    const submitEvalStrategy = String(
+      questionSlot?.evaluationStrategy ||
+        (String(languageRaw || "").toLowerCase() === "sql" ? "rubric_llm" : "code_execution")
+    ).trim();
+    if (submitEvalStrategy === "code_execution") {
+      const allowed = resolveSupportedCodingLanguages(
+        questionSlot,
+        submitEvalStrategy,
+        null
+      );
+      if (!allowed.includes(wantLang)) {
+        return res.status(400).json({
+          error: `Language "${wantLang}" is not enabled for this question.`,
+        });
+      }
+    }
+
     try {
       await markInterviewProcessing(sessionId);
       await invalidateSessionAndSummaryCaches(userId, sessionId);
       const job = await interviewQueue.add(EVALUATE_ANSWER, {
         sessionId,
         answer: answer.trim(),
+        language: wantLang,
       });
       console.log("[submit-answer] BullMQ job enqueued", {
         jobId: job.id,
@@ -518,6 +762,242 @@ router.post("/submit-answer", validateRequest(interviewSubmitAnswerSchema), asyn
   } catch (error) {
     console.error("❌ Error submitting interview answer:", error?.stack || error?.message || error);
     return res.status(500).json({ error: "Failed to submit answer" });
+  }
+});
+
+router.post("/run-preview", validateRequest(interviewRunPreviewSchema), async (req, res) => {
+  try {
+    const { sessionId, code, language } = req.body;
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const session = await getSession(sessionId);
+    if (!session) return res.status(404).json({ error: "Session not found" });
+    if (!isSessionOwner(session, userId)) return res.status(403).json({ error: "Forbidden" });
+    if (session.state === INTERVIEW_STATES.INTERVIEW_COMPLETE) {
+      return res.status(400).json({ success: false, message: "Interview already completed." });
+    }
+
+    const cooldownKey = `${userId}:${sessionId}`;
+    const now = Date.now();
+    const lastRunAt = Number(previewCooldownBySessionUser.get(cooldownKey) || 0);
+    if (lastRunAt && now - lastRunAt < PREVIEW_COOLDOWN_MS) {
+      return res.status(429).json({
+        success: false,
+        message: "Please wait before running another preview.",
+      });
+    }
+
+    const { currentRoundIndex, currentQuestionIndex, questionSlot } = resolveActiveQuestionContext(session);
+    if (!questionSlot || typeof questionSlot.question !== "string" || !questionSlot.question.trim()) {
+      return res.status(400).json({ success: false, message: "No active question available." });
+    }
+
+    const runCount = Number(questionSlot.previewRunCount) || 0;
+    if (runCount >= PREVIEW_RUN_LIMIT_PER_QUESTION) {
+      return res.status(429).json({
+        success: false,
+        message: "Preview run limit reached for this question.",
+      });
+    }
+
+    const strategy = String(
+      questionSlot.evaluationStrategy ||
+        (String(language || "").toLowerCase() === "sql" ? "rubric_llm" : "code_execution")
+    ).trim();
+    const questionId = String(questionSlot.questionId || "").trim();
+    const questionText = String(questionSlot.question || session?.currentQuestion || "").trim();
+    const roundTypeForLookup =
+      session?.rounds?.[currentRoundIndex]?.type ||
+      session?.roundsDetails?.[currentRoundIndex]?.questionType ||
+      "";
+    const questionDoc = await resolveInterviewQuestionDoc({
+      questionId,
+      questionText,
+      roundType: roundTypeForLookup,
+      includeFullDoc: true,
+    });
+    if (!questionDoc) {
+      console.warn(
+        "[previewQuestionLookup] run-preview: no questionDoc",
+        buildPreviewLookupLogContext({
+          route: "run-preview",
+          sessionId,
+          currentRoundIndex,
+          currentQuestionIndex,
+          roundType: roundTypeForLookup,
+          slotQuestionId: questionId,
+          slotQuestionText: questionSlot?.question || "",
+          rootQuestionText: session?.currentQuestion || "",
+          strategy,
+          visibleCount: 0,
+          totalTestCases: 0,
+          hasSqlMetadata: false,
+        })
+      );
+      return res.status(400).json({
+        success: false,
+        message: "Preview is unavailable for this question.",
+      });
+    }
+
+    if (strategy === "code_execution") {
+      const wantLang = normalizeExecutionLanguage(language);
+      const allowedLangs = resolveSupportedCodingLanguages(
+        questionSlot,
+        strategy,
+        questionDoc?.dsaMetadata || null
+      );
+      if (!allowedLangs.includes(wantLang)) {
+        return res.status(400).json({
+          success: false,
+          message: `Language "${wantLang}" is not enabled for this question.`,
+        });
+      }
+    }
+
+    if (!questionId && questionDoc?.questionId) {
+      const slotQuestionIdPath = `rounds.${currentRoundIndex}.questions.${currentQuestionIndex}.questionId`;
+      await mongoose.connection.collection("interviewsessions").updateOne(
+        {
+          _id: session._id,
+          [slotQuestionIdPath]: { $exists: false },
+        },
+        {
+          $set: { [slotQuestionIdPath]: String(questionDoc.questionId).trim() },
+        }
+      );
+    }
+
+    previewCooldownBySessionUser.set(cooldownKey, now);
+
+    let executionPayload;
+    if (strategy === "code_execution") {
+      const visibleTestCases = (Array.isArray(questionDoc.testCases) ? questionDoc.testCases : []).filter(
+        (testcase) => testcase?.isHidden !== true
+      );
+      console.log(
+        "[previewQuestionLookup] run-preview: resolved coding question",
+        buildPreviewLookupLogContext({
+          route: "run-preview",
+          sessionId,
+          currentRoundIndex,
+          currentQuestionIndex,
+          roundType: roundTypeForLookup,
+          slotQuestionId: questionId,
+          slotQuestionText: questionSlot?.question || "",
+          rootQuestionText: session?.currentQuestion || "",
+          resolvedQuestionId: questionDoc?.questionId || "",
+          resolvedQuestionText: questionDoc?.question || "",
+          strategy,
+          visibleCount: visibleTestCases.length,
+          totalTestCases: Array.isArray(questionDoc?.testCases) ? questionDoc.testCases.length : 0,
+          hasSqlMetadata: Boolean(questionDoc?.sqlMetadata),
+        })
+      );
+      if (visibleTestCases.length === 0) {
+        console.warn(
+          "[previewQuestionLookup] run-preview: zero visible coding testcases",
+          buildPreviewLookupLogContext({
+            route: "run-preview",
+            sessionId,
+            currentRoundIndex,
+            currentQuestionIndex,
+            roundType: roundTypeForLookup,
+            slotQuestionId: questionId,
+            slotQuestionText: questionSlot?.question || "",
+            rootQuestionText: session?.currentQuestion || "",
+            resolvedQuestionId: questionDoc?.questionId || "",
+            resolvedQuestionText: questionDoc?.question || "",
+            strategy,
+            visibleCount: 0,
+            totalTestCases: Array.isArray(questionDoc?.testCases) ? questionDoc.testCases.length : 0,
+            hasSqlMetadata: Boolean(questionDoc?.sqlMetadata),
+          })
+        );
+        return res.status(400).json({
+          success: false,
+          message: "No visible testcases configured for this question preview.",
+        });
+      }
+      executionPayload = await executeCode({
+        language: normalizeExecutionLanguage(language),
+        code,
+        testCases: visibleTestCases,
+        functionSignature: questionDoc?.dsaMetadata?.functionSignature || "",
+        jobId: `preview-${sessionId}-${currentRoundIndex}-${currentQuestionIndex}-${Date.now()}`,
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Code preview is only available for coding (DSA) questions. Theoretical SQL and other text rounds are evaluated after submit.",
+      });
+    }
+
+    const previewPath = `rounds.${currentRoundIndex}.questions.${currentQuestionIndex}.previewRunCount`;
+    const runCountFilter =
+      runCount === 0
+        ? {
+            $or: [{ [previewPath]: 0 }, { [previewPath]: { $exists: false } }],
+          }
+        : { [previewPath]: runCount };
+    const updateResult = await mongoose.connection.collection("interviewsessions").updateOne(
+      {
+        _id: session._id,
+        ...runCountFilter,
+      },
+      {
+        $inc: { [previewPath]: 1 },
+      }
+    );
+    if (!updateResult?.matchedCount) {
+      return res.status(409).json({
+        success: false,
+        message: "Preview run state changed. Please retry.",
+      });
+    }
+
+    const remainingRuns = Math.max(0, PREVIEW_RUN_LIMIT_PER_QUESTION - (runCount + 1));
+    console.log("[runPreview] completed", {
+      sessionId,
+      questionId: questionDoc?.questionId || "",
+      remainingRuns,
+      strategy,
+      status: executionPayload?.status,
+    });
+    console.log("[previewExecution] status", {
+      sessionId,
+      questionId: questionDoc?.questionId || "",
+      status: executionPayload?.status,
+    });
+
+    return res.json({
+      success: true,
+      remainingRuns,
+      execution: {
+        status: executionPayload?.status,
+        error: typeof executionPayload?.error === "string" ? executionPayload.error : "",
+        passedCount: Number(executionPayload?.passedCount) || 0,
+        failedCount: Number(executionPayload?.failedCount) || 0,
+        totalCount: Number(executionPayload?.totalCount) || 0,
+        executionTime: Number(executionPayload?.executionTime) || 0,
+        results: Array.isArray(executionPayload?.results)
+          ? executionPayload.results.map((item) => ({
+              passed: item?.passed === true,
+              isHidden: Boolean(item?.isHidden),
+              input: item?.input,
+              expectedOutput: item?.expectedOutput,
+              actualOutput: item?.actualOutput,
+              error: item?.error || "",
+              executionTime: Number(item?.executionTime) || 0,
+            }))
+          : [],
+      },
+    });
+  } catch (error) {
+    console.error("[runPreview] failed", error?.message || error);
+    return res.status(500).json({ success: false, message: "Failed to run preview." });
   }
 });
 
@@ -581,6 +1061,61 @@ router.get("/interview-status/:sessionId", async (req, res) => {
       currentQuestionIndex,
       desiredCount: 8,
     });
+    const activeQuestionId = String(slotNow?.questionId || "").trim();
+    const activeQuestionText = String(slotNow?.question || effectiveCurrentQuestion || "").trim();
+    const previewQuestionDoc = await resolveInterviewQuestionDoc({
+      questionId: activeQuestionId,
+      questionText: activeQuestionText,
+      roundType,
+      includeFullDoc: false,
+    });
+    console.log(
+      "[previewQuestionLookup] interview-status: resolved question",
+      buildPreviewLookupLogContext({
+        route: "interview-status",
+        sessionId,
+        currentRoundIndex,
+        currentQuestionIndex,
+        roundType,
+        slotQuestionId: activeQuestionId,
+        slotQuestionText: slotNow?.question || "",
+        rootQuestionText: effectiveCurrentQuestion || "",
+        resolvedQuestionId: previewQuestionDoc?.questionId || "",
+        resolvedQuestionText: previewQuestionDoc?.question || "",
+        strategy: slotNow?.evaluationStrategy || "",
+        visibleCount: Array.isArray(previewQuestionDoc?.testCases)
+          ? previewQuestionDoc.testCases.filter((testcase) => testcase?.isHidden !== true).length
+          : 0,
+        totalTestCases: Array.isArray(previewQuestionDoc?.testCases)
+          ? previewQuestionDoc.testCases.length
+          : 0,
+        hasSqlMetadata: Boolean(previewQuestionDoc?.sqlMetadata),
+      })
+    );
+    if (!activeQuestionId && slotNow && previewQuestionDoc?.questionId) {
+      const slotQuestionIdPath = `rounds.${currentRoundIndex}.questions.${currentQuestionIndex}.questionId`;
+      await mongoose.connection.collection("interviewsessions").updateOne(
+        {
+          _id: session._id,
+          [slotQuestionIdPath]: { $exists: false },
+        },
+        {
+          $set: { [slotQuestionIdPath]: String(previewQuestionDoc.questionId).trim() },
+        }
+      );
+    }
+    const visibleTestCases = Array.isArray(previewQuestionDoc?.testCases)
+      ? previewQuestionDoc.testCases
+          .filter((testcase) => testcase?.isHidden !== true)
+          .map((testcase) => ({
+            input: testcase?.input ?? null,
+            expectedOutput: testcase?.expectedOutput ?? null,
+            weight: Number(testcase?.weight) || 1,
+          }))
+      : [];
+    const previewRunCount = Number(slotNow?.previewRunCount) || 0;
+    const previewRunsRemaining = Math.max(0, PREVIEW_RUN_LIMIT_PER_QUESTION - previewRunCount);
+    const previewSqlContext = null;
 
     const sessionInterviewStatus = session.state;
     const roundCompleted =
@@ -661,6 +1196,22 @@ router.get("/interview-status/:sessionId", async (req, res) => {
       session.state !== INTERVIEW_STATES.INTERVIEW_COMPLETE &&
       !isProcessing;
 
+    const slotEvalStrat = String(slotNow?.evaluationStrategy || "").toLowerCase();
+    const hasCodingTests =
+      Array.isArray(previewQuestionDoc?.testCases) && previewQuestionDoc.testCases.length > 0;
+    const roundLooksDsa = String(roundType || "").toLowerCase().includes("dsa");
+    const treatSlotAsCodeExecution =
+      slotEvalStrat === "code_execution" ||
+      (slotEvalStrat === "" && hasCodingTests && roundLooksDsa);
+
+    const supportedCodingLanguages = treatSlotAsCodeExecution
+      ? resolveSupportedCodingLanguages(
+          slotNow,
+          "code_execution",
+          previewQuestionDoc?.dsaMetadata || null
+        )
+      : [];
+
     return res.json({
       status: toClientStatus(session.state),
       currentRound: session.currentRound,
@@ -678,6 +1229,9 @@ router.get("/interview-status/:sessionId", async (req, res) => {
       lastRelevance: exposePrevFeedback
         ? toRelevanceLabel(prevQuestion?.evaluationTrace?.relevance)
         : null,
+      lastCodeExecutionSummary: exposePrevFeedback
+        ? buildLastCodeExecutionSummary(prevQuestion?.evaluationTrace)
+        : null,
       lastQuestionCanReattempt,
       roundStatus: currentRoundDoc?.status ?? session.roundStatus ?? null,
       interviewStatus: toClientInterviewStatus(session.state),
@@ -685,6 +1239,14 @@ router.get("/interview-status/:sessionId", async (req, res) => {
       roundsQuestionSummary,
       questionsPlannedThisRound,
       currentQuestionNumberWithinRound,
+      previewRunCount,
+      previewRunsRemaining,
+      visibleTestCases,
+      supportedCodingLanguages,
+      codingFunctionSignature: previewQuestionDoc?.dsaMetadata?.functionSignature || "",
+      codingStarterCode: previewQuestionDoc?.dsaMetadata?.starterCode || "",
+      codingQuestionId: activeQuestionId || "",
+      previewSqlContext,
       isProcessing,
       tips: selectedTips,
       totalRounds: session.totalRounds || 0,

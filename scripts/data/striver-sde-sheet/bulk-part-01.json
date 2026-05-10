@@ -1,0 +1,1890 @@
+[
+  {
+    "questionId": "striver-sde-sheet-bulk-001",
+    "title": "Longest Substring Without Repeating Characters",
+    "question": "Given a string `s`, return the length of the longest substring without repeating characters.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "hashing",
+      "strings",
+      "sliding window"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def length_of_longest_substring(s):",
+      "starterCode": "def length_of_longest_substring(s):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "s": "abcabcbb"
+        },
+        "expectedOutput": 3,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "bbbbb"
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "pwwkew"
+        },
+        "expectedOutput": 3,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": ""
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(min(n,m))"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-002",
+    "title": "Reverse Words in a String",
+    "question": "Given a string `s`, reverse the order of words. Words are non-empty sequences separated by spaces. Trim leading/trailing spaces and collapse internal spaces to single spaces in the output.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "strings",
+      "two pointers"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def reverse_words(s):",
+      "starterCode": "def reverse_words(s):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "s": "the sky is blue"
+        },
+        "expectedOutput": "blue is sky the",
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "  hello world  "
+        },
+        "expectedOutput": "world hello",
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "a good   example"
+        },
+        "expectedOutput": "example good a",
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "word"
+        },
+        "expectedOutput": "word",
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(n)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-003",
+    "title": "Longest Palindromic Substring Length",
+    "question": "Given a string `s`, return the length of its longest palindromic substring.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "strings",
+      "dynamic programming"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def longest_palindrome_length(s):",
+      "starterCode": "def longest_palindrome_length(s):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "s": "babad"
+        },
+        "expectedOutput": 3,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "cbbd"
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "a"
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "ac"
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(n^2)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-004",
+    "title": "Majority Element II",
+    "question": "Given an integer array `nums` of length `n`, return all elements that appear strictly more than `floor(n/3)` times. Return the list sorted in ascending order.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "arrays",
+      "hashing"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def majority_elements(nums):",
+      "starterCode": "def majority_elements(nums):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "nums": [
+            3,
+            2,
+            3
+          ]
+        },
+        "expectedOutput": [
+          3
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            2
+          ]
+        },
+        "expectedOutput": [
+          1,
+          2
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            1,
+            1,
+            2,
+            2,
+            2,
+            3,
+            3
+          ]
+        },
+        "expectedOutput": [
+          1,
+          2
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            0,
+            0,
+            0
+          ]
+        },
+        "expectedOutput": [
+          0
+        ],
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-005",
+    "title": "Find Peak Element",
+    "question": "Given `nums`, find any index `i` where `nums[i] > nums[i+1]` and `nums[i] > nums[i-1]` (use `-inf` outside bounds). Return such an index.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "arrays",
+      "binary search"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def find_peak_element(nums):",
+      "starterCode": "def find_peak_element(nums):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "nums": [
+            1,
+            2,
+            3,
+            1
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            2,
+            1,
+            3,
+            5,
+            6,
+            4
+          ]
+        },
+        "expectedOutput": 5,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1
+          ]
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            2
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(log n)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-006",
+    "title": "Search Insert Position",
+    "question": "Given sorted distinct `nums` and `target`, return the index where `target` exists, or the index where it would be inserted to keep order.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "arrays",
+      "binary search"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def search_insert(nums, target):",
+      "starterCode": "def search_insert(nums, target):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "nums": [
+            1,
+            3,
+            5,
+            6
+          ],
+          "target": 5
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            3,
+            5,
+            6
+          ],
+          "target": 2
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            3,
+            5,
+            6
+          ],
+          "target": 7
+        },
+        "expectedOutput": 4,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            3,
+            5,
+            6
+          ],
+          "target": 0
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(log n)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-007",
+    "title": "Sqrt(x)",
+    "question": "Given non-negative integer `x`, return the integer part of `sqrt(x)` truncated.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "math",
+      "binary search"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def my_sqrt(x):",
+      "starterCode": "def my_sqrt(x):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "x": 4
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "x": 8
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "x": 0
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "x": 15
+        },
+        "expectedOutput": 3,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(log x)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-008",
+    "title": "Pow(x, n)",
+    "question": "Implement `x` raised to integer `n`. `n` can be negative.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "recursion",
+      "math"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def my_pow(x, n):",
+      "starterCode": "def my_pow(x, n):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "x": 2,
+          "n": 10
+        },
+        "expectedOutput": 1024,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "x": 2.1,
+          "n": 3
+        },
+        "expectedOutput": 9.261,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "x": 2,
+          "n": -2
+        },
+        "expectedOutput": 0.25,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "x": 1,
+          "n": 1000000
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(log |n|)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-009",
+    "title": "Count Primes",
+    "question": "Given `n`, return the number of prime numbers strictly less than `n`.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "math",
+      "number theory"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def count_primes(n):",
+      "starterCode": "def count_primes(n):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "n": 10
+        },
+        "expectedOutput": 4,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 0
+        },
+        "expectedOutput": 0,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 1
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 100
+        },
+        "expectedOutput": 25,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(n log log n)",
+      "space": "O(n)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-010",
+    "title": "Jump Game",
+    "question": "Given `nums` where `nums[i]` is max jump length from `i`, return whether you can reach the last index starting at 0.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "arrays",
+      "greedy"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def can_jump(nums):",
+      "starterCode": "def can_jump(nums):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "nums": [
+            2,
+            3,
+            1,
+            1,
+            4
+          ]
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            3,
+            2,
+            1,
+            0,
+            4
+          ]
+        },
+        "expectedOutput": false,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            0
+          ]
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            0
+          ]
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-011",
+    "title": "Jump Game II",
+    "question": "Given `nums` as in Jump Game (always reachable last), return the minimum jumps to reach last index.",
+    "roundType": "DSA",
+    "difficulty": "hard",
+    "topics": [
+      "arrays",
+      "greedy"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def jump(nums):",
+      "starterCode": "def jump(nums):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "nums": [
+            2,
+            3,
+            1,
+            1,
+            4
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            2,
+            3,
+            0,
+            1,
+            4
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            1,
+            1,
+            1
+          ]
+        },
+        "expectedOutput": 3,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            2
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-012",
+    "title": "Gas Station",
+    "question": "Given `gas[i]` and `cost[i]` for a circular route, return starting station index to complete circuit once, or `-1` if impossible.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "arrays",
+      "greedy"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def can_complete_circuit(gas, cost):",
+      "starterCode": "def can_complete_circuit(gas, cost):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "gas": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "cost": [
+            3,
+            4,
+            5,
+            1,
+            2
+          ]
+        },
+        "expectedOutput": 3,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "gas": [
+            2,
+            3,
+            4
+          ],
+          "cost": [
+            3,
+            4,
+            3
+          ]
+        },
+        "expectedOutput": -1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "gas": [
+            5,
+            1,
+            2,
+            3,
+            5
+          ],
+          "cost": [
+            4,
+            4,
+            3,
+            4,
+            5
+          ]
+        },
+        "expectedOutput": 4,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "gas": [
+            3,
+            1,
+            1
+          ],
+          "cost": [
+            1,
+            2,
+            2
+          ]
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-013",
+    "title": "Candy",
+    "question": "`n` children in a line with `ratings`. Give each at least one candy; higher rating than neighbor must get more candies. Return minimum total candies.",
+    "roundType": "DSA",
+    "difficulty": "hard",
+    "topics": [
+      "arrays",
+      "greedy"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def candy(ratings):",
+      "starterCode": "def candy(ratings):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "ratings": [
+            1,
+            0,
+            2
+          ]
+        },
+        "expectedOutput": 5,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "ratings": [
+            1,
+            2,
+            2
+          ]
+        },
+        "expectedOutput": 4,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "ratings": [
+            1,
+            3,
+            2,
+            2,
+            1
+          ]
+        },
+        "expectedOutput": 7,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "ratings": [
+            1,
+            2,
+            87,
+            87,
+            87,
+            1
+          ]
+        },
+        "expectedOutput": 9,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(n)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-014",
+    "title": "Trapping Rain Water",
+    "question": "Given non-negative elevation map `height`, compute trapped rain water units between bars.",
+    "roundType": "DSA",
+    "difficulty": "hard",
+    "topics": [
+      "arrays",
+      "two pointers",
+      "stack"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def trap(height):",
+      "starterCode": "def trap(height):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "height": [
+            0,
+            1,
+            0,
+            2,
+            1,
+            0,
+            1,
+            3,
+            2,
+            1,
+            2,
+            1
+          ]
+        },
+        "expectedOutput": 6,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "height": [
+            4,
+            2,
+            0,
+            3,
+            2,
+            5
+          ]
+        },
+        "expectedOutput": 9,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "height": [
+            1,
+            0,
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "height": [
+            3,
+            0,
+            2,
+            0,
+            4
+          ]
+        },
+        "expectedOutput": 7,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-015",
+    "title": "Container With Most Water",
+    "question": "Given vertical lines at x=i with height `height[i]`, find two lines that with x-axis form a container holding max water.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "arrays",
+      "two pointers"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def max_area(height):",
+      "starterCode": "def max_area(height):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "height": [
+            1,
+            8,
+            6,
+            2,
+            5,
+            4,
+            8,
+            3,
+            7
+          ]
+        },
+        "expectedOutput": 49,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "height": [
+            1,
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "height": [
+            2,
+            3,
+            4,
+            5,
+            18,
+            17,
+            6
+          ]
+        },
+        "expectedOutput": 17,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "height": [
+            1,
+            2,
+            1
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-016",
+    "title": "3Sum Closest",
+    "question": "Given integer array `nums` and `target`, find three integers in `nums` whose sum is closest to `target`. Return that sum.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "arrays",
+      "two pointers",
+      "sorting"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def three_sum_closest(nums, target):",
+      "starterCode": "def three_sum_closest(nums, target):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "nums": [
+            -1,
+            2,
+            1,
+            -4
+          ],
+          "target": 1
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            0,
+            0,
+            0
+          ],
+          "target": 1
+        },
+        "expectedOutput": 0,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            1,
+            1,
+            0
+          ],
+          "target": 100
+        },
+        "expectedOutput": 3,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            4,
+            5,
+            6
+          ],
+          "target": 0
+        },
+        "expectedOutput": 15,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(n^2)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-017",
+    "title": "Letter Combinations of a Phone Number",
+    "question": "Given `digits` containing digits 2-9, return all letter combinations the number could represent on a phone pad. Return list sorted lexicographically.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "strings",
+      "backtracking"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def letter_combinations(digits):",
+      "starterCode": "def letter_combinations(digits):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "digits": "23"
+        },
+        "expectedOutput": [
+          "ad",
+          "ae",
+          "af",
+          "bd",
+          "be",
+          "bf",
+          "cd",
+          "ce",
+          "cf"
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "digits": ""
+        },
+        "expectedOutput": [],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "digits": "2"
+        },
+        "expectedOutput": [
+          "a",
+          "b",
+          "c"
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "digits": "79"
+        },
+        "expectedOutput": [
+          "pw",
+          "px",
+          "py",
+          "pz",
+          "qw",
+          "qx",
+          "qy",
+          "qz",
+          "rw",
+          "rx",
+          "ry",
+          "rz",
+          "sw",
+          "sx",
+          "sy",
+          "sz"
+        ],
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(4^n)",
+      "space": "O(4^n)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-018",
+    "title": "Combination Sum",
+    "question": "Given distinct positive `candidates` and `target`, return all unique combinations that sum to `target` (reuse allowed). Each combination sorted ascending; outer list sorted lexicographically.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "arrays",
+      "backtracking"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def combination_sum(candidates, target):",
+      "starterCode": "def combination_sum(candidates, target):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "candidates": [
+            2,
+            3,
+            6,
+            7
+          ],
+          "target": 7
+        },
+        "expectedOutput": [
+          [
+            7
+          ],
+          [
+            2,
+            2,
+            3
+          ]
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "candidates": [
+            2,
+            3,
+            5
+          ],
+          "target": 8
+        },
+        "expectedOutput": [
+          [
+            2,
+            3,
+            3
+          ],
+          [
+            3,
+            5
+          ]
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "candidates": [
+            2
+          ],
+          "target": 1
+        },
+        "expectedOutput": [],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "candidates": [
+            1
+          ],
+          "target": 2
+        },
+        "expectedOutput": [
+          [
+            1,
+            1
+          ]
+        ],
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(2^n)",
+      "space": "O(target)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-019",
+    "title": "Generate Parentheses",
+    "question": "Given `n` pairs of parentheses, return all well-formed strings of length `2n`, sorted lexicographically.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "strings",
+      "backtracking"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def generate_parenthesis(n):",
+      "starterCode": "def generate_parenthesis(n):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "n": 3
+        },
+        "expectedOutput": [
+          "((()))",
+          "(()())",
+          "(())()",
+          "()(())",
+          "()()()"
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 1
+        },
+        "expectedOutput": [
+          "()"
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 2
+        },
+        "expectedOutput": [
+          "(())",
+          "()()"
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 0
+        },
+        "expectedOutput": [
+          ""
+        ],
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(4^n / sqrt(n))",
+      "space": "O(4^n / sqrt(n))"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-020",
+    "title": "Permutation in String",
+    "question": "Return `True` if some permutation of `s1` is a substring of `s2`, else `False`.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "strings",
+      "sliding window",
+      "hashing"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def check_inclusion(s1, s2):",
+      "starterCode": "def check_inclusion(s1, s2):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "s1": "ab",
+          "s2": "eidbaooo"
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s1": "ab",
+          "s2": "eidboaoo"
+        },
+        "expectedOutput": false,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s1": "adc",
+          "s2": "dcda"
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s1": "hello",
+          "s2": "ooolleoooleh"
+        },
+        "expectedOutput": false,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  }
+]

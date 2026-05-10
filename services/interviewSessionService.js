@@ -260,7 +260,14 @@ export const startRound = async (sessionId) => {
   // 3) Call MCP generateQuestion with companyContext + round context
   const companyData = (await resolveInterviewMergedCompanyForSession(session)) ?? null;
   const companyContext = await getCompanyContext(companyData || {});
-  const { question, expectedPoints, expectedAnswerMode } = await generateQuestion({
+  const {
+    question,
+    expectedPoints,
+    expectedAnswerMode,
+    questionId,
+    evaluationStrategy,
+    supportedCodingLanguages,
+  } = await generateQuestion({
     userId: String(session.userId || ""),
     companyContext,
     roundType: currentRound.type,
@@ -275,12 +282,19 @@ export const startRound = async (sessionId) => {
     placementCluster: session.placementCluster,
     placementYear: session.placementYear,
     mergePlacementByType: session.mergePlacementByType === true,
-  });
+    });
 
   // 4) Store first question in round.questions
   currentRound.questions = [
     {
       question,
+      questionId: toSafeString(questionId) || undefined,
+      supportedCodingLanguages: Array.isArray(supportedCodingLanguages)
+        ? supportedCodingLanguages
+        : undefined,
+      evaluationStrategy: toSafeString(evaluationStrategy) || undefined,
+      sourceType: toSafeString(questionId) ? "retrieved" : "generated",
+      previewRunCount: 0,
       answer: "",
       score: null,
       feedback: "",

@@ -1,0 +1,2330 @@
+[
+  {
+    "questionId": "striver-sde-sheet-bulk-021",
+    "title": "Minimum Window Substring",
+    "question": "Return the minimum window substring of `s` containing all characters of `t` with multiplicity. If none, return empty string.",
+    "roundType": "DSA",
+    "difficulty": "hard",
+    "topics": [
+      "strings",
+      "sliding window",
+      "hashing"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def min_window(s, t):",
+      "starterCode": "def min_window(s, t):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "s": "ADOBECODEBANC",
+          "t": "ABC"
+        },
+        "expectedOutput": "BANC",
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "a",
+          "t": "a"
+        },
+        "expectedOutput": "a",
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "a",
+          "t": "aa"
+        },
+        "expectedOutput": "",
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "bbaa",
+          "t": "aba"
+        },
+        "expectedOutput": "baa",
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(|s|+|t|)",
+      "space": "O(|t|)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-022",
+    "title": "Sliding Window Maximum",
+    "question": "Return max of each contiguous subarray of size `k` in order.",
+    "roundType": "DSA",
+    "difficulty": "hard",
+    "topics": [
+      "arrays",
+      "deque",
+      "sliding window"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def max_sliding_window(nums, k):",
+      "starterCode": "def max_sliding_window(nums, k):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "nums": [
+            1,
+            3,
+            -1,
+            -3,
+            5,
+            3,
+            6,
+            7
+          ],
+          "k": 3
+        },
+        "expectedOutput": [
+          3,
+          3,
+          5,
+          5,
+          6,
+          7
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1
+          ],
+          "k": 1
+        },
+        "expectedOutput": [
+          1
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            -1
+          ],
+          "k": 1
+        },
+        "expectedOutput": [
+          1,
+          -1
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            9,
+            11
+          ],
+          "k": 2
+        },
+        "expectedOutput": [
+          11
+        ],
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(k)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-023",
+    "title": "Largest Rectangle in Histogram",
+    "question": "Given bar heights, return largest rectangle area in histogram.",
+    "roundType": "DSA",
+    "difficulty": "hard",
+    "topics": [
+      "arrays",
+      "stack"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def largest_rectangle_area(heights):",
+      "starterCode": "def largest_rectangle_area(heights):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "heights": [
+            2,
+            1,
+            5,
+            6,
+            2,
+            3
+          ]
+        },
+        "expectedOutput": 10,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "heights": [
+            2,
+            4
+          ]
+        },
+        "expectedOutput": 4,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "heights": [
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "heights": [
+            0,
+            9
+          ]
+        },
+        "expectedOutput": 9,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(n)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-024",
+    "title": "Maximal Rectangle",
+    "question": "`matrix` is list of equal-length strings of `'0'`/`'1'`. Return area of largest rectangle containing only ones.",
+    "roundType": "DSA",
+    "difficulty": "hard",
+    "topics": [
+      "arrays",
+      "stack",
+      "dynamic programming"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def maximal_rectangle(matrix):",
+      "starterCode": "def maximal_rectangle(matrix):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "matrix": [
+            "10100",
+            "10111",
+            "11111",
+            "10010"
+          ]
+        },
+        "expectedOutput": 6,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "matrix": [
+            "0"
+          ]
+        },
+        "expectedOutput": 0,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "matrix": [
+            "1"
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "matrix": [
+            "11",
+            "11"
+          ]
+        },
+        "expectedOutput": 4,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(m n)",
+      "space": "O(n)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-025",
+    "title": "Median of Two Sorted Arrays",
+    "question": "Given two sorted arrays, return the median of the combined multiset (as float; for even length use average of two middle values).",
+    "roundType": "DSA",
+    "difficulty": "hard",
+    "topics": [
+      "arrays",
+      "binary search"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def find_median_sorted_arrays(nums1, nums2):",
+      "starterCode": "def find_median_sorted_arrays(nums1, nums2):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "nums1": [
+            1,
+            3
+          ],
+          "nums2": [
+            2
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums1": [
+            1,
+            2
+          ],
+          "nums2": [
+            3,
+            4
+          ]
+        },
+        "expectedOutput": 2.5,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums1": [],
+          "nums2": [
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums1": [
+            2
+          ],
+          "nums2": []
+        },
+        "expectedOutput": 2,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(log(min(m,n)))",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-026",
+    "title": "Word Search",
+    "question": "`board` is list of strings of same length (letters). Return whether `word` exists as path moving up/down/left/right without reusing a cell.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "matrix",
+      "backtracking"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def exist(board, word):",
+      "starterCode": "def exist(board, word):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "board": [
+            "ABCE",
+            "SFCS",
+            "ADEE"
+          ],
+          "word": "ABCCED"
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "board": [
+            "ABCE",
+            "SFCS",
+            "ADEE"
+          ],
+          "word": "SEE"
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "board": [
+            "ABCE",
+            "SFCS",
+            "ADEE"
+          ],
+          "word": "ABCB"
+        },
+        "expectedOutput": false,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "board": [
+            "a"
+          ],
+          "word": "a"
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(m n * 3^L)",
+      "space": "O(L)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-027",
+    "title": "Number of Islands",
+    "question": "`grid` is list of strings `'1'` land `'0'` water. Return number of islands (4-dir connected land).",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "matrix",
+      "dfs",
+      "bfs"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def num_islands(grid):",
+      "starterCode": "def num_islands(grid):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "grid": [
+            "11110",
+            "11010",
+            "11000",
+            "00000"
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            "11000",
+            "11000",
+            "00100",
+            "00011"
+          ]
+        },
+        "expectedOutput": 3,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            "1"
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            "0"
+          ]
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(m n)",
+      "space": "O(m n)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-028",
+    "title": "Rotting Oranges",
+    "question": "`grid` is list of strings: `0` empty, `1` fresh, `2` rotten. Each minute rotten spreads to 4-adjacent fresh. Return minutes until no fresh, or `-1` if impossible.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "matrix",
+      "bfs"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def oranges_rotting(grid):",
+      "starterCode": "def oranges_rotting(grid):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "grid": [
+            "23",
+            "12"
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            "11",
+            "11",
+            "00"
+          ]
+        },
+        "expectedOutput": -1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            "0"
+          ]
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            "22",
+            "11",
+            "11"
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(m n)",
+      "space": "O(m n)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-029",
+    "title": "Course Schedule",
+    "question": "`prerequisites` is list of `[a,b]` meaning take `b` before `a`. Return whether all `num_courses` can be finished.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "graph",
+      "topological sort"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def can_finish(num_courses, prerequisites):",
+      "starterCode": "def can_finish(num_courses, prerequisites):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "num_courses": 2,
+          "prerequisites": [
+            [
+              1,
+              0
+            ]
+          ]
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "num_courses": 2,
+          "prerequisites": [
+            [
+              1,
+              0
+            ],
+            [
+              0,
+              1
+            ]
+          ]
+        },
+        "expectedOutput": false,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "num_courses": 1,
+          "prerequisites": []
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "num_courses": 3,
+          "prerequisites": [
+            [
+              1,
+              0
+            ],
+            [
+              2,
+              1
+            ]
+          ]
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(V+E)",
+      "space": "O(V+E)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-030",
+    "title": "Course Schedule II",
+    "question": "Return any valid order of course ids to finish all courses, or empty list if impossible.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "graph",
+      "topological sort"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def find_order(num_courses, prerequisites):",
+      "starterCode": "def find_order(num_courses, prerequisites):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "num_courses": 2,
+          "prerequisites": [
+            [
+              1,
+              0
+            ]
+          ]
+        },
+        "expectedOutput": [
+          0,
+          1
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "num_courses": 4,
+          "prerequisites": [
+            [
+              1,
+              0
+            ],
+            [
+              2,
+              0
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              3,
+              2
+            ]
+          ]
+        },
+        "expectedOutput": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "num_courses": 1,
+          "prerequisites": []
+        },
+        "expectedOutput": [
+          0
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "num_courses": 2,
+          "prerequisites": [
+            [
+              0,
+              1
+            ],
+            [
+              1,
+              0
+            ]
+          ]
+        },
+        "expectedOutput": [],
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(V+E)",
+      "space": "O(V+E)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-031",
+    "title": "Clone Graph",
+    "question": "Undirected graph with `n` nodes labeled `1..n`. Input `adj` is list of `n` lists: neighbors of node `i+1` are `adj[i]`. Return **adjacency list** of the clone (same structure, deep copy).",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "graph",
+      "hashing",
+      "dfs"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def clone_graph(adj):",
+      "starterCode": "def clone_graph(adj):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "adj": [
+            [
+              2,
+              4
+            ],
+            [
+              1,
+              3
+            ],
+            [
+              2,
+              4
+            ],
+            [
+              1,
+              3
+            ]
+          ]
+        },
+        "expectedOutput": [
+          [
+            2,
+            4
+          ],
+          [
+            1,
+            3
+          ],
+          [
+            2,
+            4
+          ],
+          [
+            1,
+            3
+          ]
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "adj": [
+            []
+          ]
+        },
+        "expectedOutput": [
+          []
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "adj": [
+            [
+              2
+            ],
+            [
+              1
+            ]
+          ]
+        },
+        "expectedOutput": [
+          [
+            2
+          ],
+          [
+            1
+          ]
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "adj": [
+            [
+              2,
+              3
+            ],
+            [
+              1,
+              3
+            ],
+            [
+              1,
+              2
+            ]
+          ]
+        },
+        "expectedOutput": [
+          [
+            2,
+            3
+          ],
+          [
+            1,
+            3
+          ],
+          [
+            1,
+            2
+          ]
+        ],
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(V+E)",
+      "space": "O(V+E)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-032",
+    "title": "Pacific Atlantic Water Flow",
+    "question": "`heights` is list of equal-length lists of ints. Water flows from cell to 4-neighbor if neighbor height <= current. Pacific touches top/left; Atlantic bottom/right. Return list of `[r,c]` that can reach both, sorted by row then column.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "matrix",
+      "dfs"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def pacific_atlantic(heights):",
+      "starterCode": "def pacific_atlantic(heights):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "heights": [
+            [
+              1,
+              2,
+              2,
+              3,
+              5
+            ],
+            [
+              3,
+              2,
+              3,
+              4,
+              4
+            ],
+            [
+              2,
+              4,
+              5,
+              3,
+              1
+            ],
+            [
+              6,
+              7,
+              1,
+              4,
+              5
+            ],
+            [
+              5,
+              1,
+              1,
+              2,
+              4
+            ]
+          ]
+        },
+        "expectedOutput": [
+          [
+            0,
+            4
+          ],
+          [
+            1,
+            3
+          ],
+          [
+            1,
+            4
+          ],
+          [
+            2,
+            2
+          ],
+          [
+            3,
+            0
+          ],
+          [
+            3,
+            1
+          ],
+          [
+            4,
+            0
+          ]
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "heights": [
+            [
+              1
+            ]
+          ]
+        },
+        "expectedOutput": [
+          [
+            0,
+            0
+          ]
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "heights": [
+            [
+              1,
+              1
+            ],
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "expectedOutput": [
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "heights": [
+            [
+              3,
+              3
+            ],
+            [
+              3,
+              3
+            ]
+          ]
+        },
+        "expectedOutput": [
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(m n)",
+      "space": "O(m n)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-033",
+    "title": "Cheapest Flights Within K Stops",
+    "question": "`flights` is list of `[from,to,price]`. Return cheapest price from `src` to `dst` with at most `k` stops, or `-1` if unreachable.",
+    "roundType": "DSA",
+    "difficulty": "hard",
+    "topics": [
+      "graph",
+      "dynamic programming"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def find_cheapest_price(n, flights, src, dst, k):",
+      "starterCode": "def find_cheapest_price(n, flights, src, dst, k):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "n": 4,
+          "flights": [
+            [
+              0,
+              1,
+              100
+            ],
+            [
+              1,
+              2,
+              100
+            ],
+            [
+              2,
+              0,
+              100
+            ],
+            [
+              1,
+              3,
+              600
+            ],
+            [
+              2,
+              3,
+              200
+            ]
+          ],
+          "src": 0,
+          "dst": 3,
+          "k": 1
+        },
+        "expectedOutput": 700,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 3,
+          "flights": [
+            [
+              0,
+              1,
+              100
+            ],
+            [
+              1,
+              2,
+              100
+            ],
+            [
+              0,
+              2,
+              500
+            ]
+          ],
+          "src": 0,
+          "dst": 2,
+          "k": 0
+        },
+        "expectedOutput": 500,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 3,
+          "flights": [
+            [
+              0,
+              1,
+              100
+            ],
+            [
+              1,
+              2,
+              100
+            ],
+            [
+              0,
+              2,
+              500
+            ]
+          ],
+          "src": 0,
+          "dst": 2,
+          "k": 1
+        },
+        "expectedOutput": 200,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 2,
+          "flights": [
+            [
+              1,
+              0,
+              5
+            ]
+          ],
+          "src": 0,
+          "dst": 1,
+          "k": 1
+        },
+        "expectedOutput": -1,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(E k)",
+      "space": "O(n k)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-034",
+    "title": "Network Delay Time",
+    "question": "`times` is list `[u,v,w]` directed edge delay. Signal starts at node `k`. Return time until all `n` nodes receive signal, or `-1` if impossible.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "graph",
+      "shortest path"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def network_delay_time(times, n, k):",
+      "starterCode": "def network_delay_time(times, n, k):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "times": [
+            [
+              2,
+              1,
+              1
+            ],
+            [
+              2,
+              3,
+              1
+            ],
+            [
+              3,
+              4,
+              1
+            ]
+          ],
+          "n": 4,
+          "k": 2
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "times": [
+            [
+              1,
+              2,
+              1
+            ]
+          ],
+          "n": 2,
+          "k": 1
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "times": [
+            [
+              1,
+              2,
+              1
+            ]
+          ],
+          "n": 2,
+          "k": 2
+        },
+        "expectedOutput": -1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "times": [
+            [
+              1,
+              2,
+              1
+            ],
+            [
+              2,
+              3,
+              2
+            ],
+            [
+              1,
+              3,
+              4
+            ]
+          ],
+          "n": 3,
+          "k": 1
+        },
+        "expectedOutput": 3,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(E log V)",
+      "space": "O(V+E)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-035",
+    "title": "Course Schedule IV",
+    "question": "For each query `[u,v]`, return whether `u` is prerequisite of `v` (direct or transitive). Return list of booleans in query order.",
+    "roundType": "DSA",
+    "difficulty": "hard",
+    "topics": [
+      "graph",
+      "floyd warshall"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def check_if_prerequisite(num_courses, prerequisites, queries):",
+      "starterCode": "def check_if_prerequisite(num_courses, prerequisites, queries):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "num_courses": 2,
+          "prerequisites": [
+            [
+              1,
+              0
+            ]
+          ],
+          "queries": [
+            [
+              0,
+              1
+            ],
+            [
+              1,
+              0
+            ]
+          ]
+        },
+        "expectedOutput": [
+          false,
+          true
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "num_courses": 2,
+          "prerequisites": [],
+          "queries": [
+            [
+              1,
+              0
+            ],
+            [
+              0,
+              1
+            ]
+          ]
+        },
+        "expectedOutput": [
+          false,
+          false
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "num_courses": 3,
+          "prerequisites": [
+            [
+              1,
+              2
+            ]
+          ],
+          "queries": [
+            [
+              1,
+              0
+            ]
+          ]
+        },
+        "expectedOutput": [
+          false
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "num_courses": 3,
+          "prerequisites": [
+            [
+              1,
+              0
+            ],
+            [
+              2,
+              0
+            ]
+          ],
+          "queries": [
+            [
+              2,
+              1
+            ]
+          ]
+        },
+        "expectedOutput": [
+          false
+        ],
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(n^3 + q)",
+      "space": "O(n^2)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-036",
+    "title": "Alien Dictionary",
+    "question": "`words` is sorted list in alien language lex order. Return any valid order of letters used, or empty string if invalid.",
+    "roundType": "DSA",
+    "difficulty": "hard",
+    "topics": [
+      "graph",
+      "topological sort"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def alien_order(words):",
+      "starterCode": "def alien_order(words):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "words": [
+            "wrt",
+            "wrf",
+            "er",
+            "ett",
+            "rftt"
+          ]
+        },
+        "expectedOutput": "wertf",
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "words": [
+            "z",
+            "x"
+          ]
+        },
+        "expectedOutput": "zx",
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "words": [
+            "z",
+            "x",
+            "z"
+          ]
+        },
+        "expectedOutput": "",
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "words": [
+            "ab",
+            "adc",
+            "ad"
+          ]
+        },
+        "expectedOutput": "",
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(C)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-037",
+    "title": "Critical Connections in a Network",
+    "question": "Return list of bridges `[u,v]` with `u < v`, sorted lexicographically by pair.",
+    "roundType": "DSA",
+    "difficulty": "hard",
+    "topics": [
+      "graph",
+      "tarjan"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def critical_connections(n, connections):",
+      "starterCode": "def critical_connections(n, connections):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "n": 4,
+          "connections": [
+            [
+              0,
+              1
+            ],
+            [
+              1,
+              2
+            ],
+            [
+              2,
+              0
+            ],
+            [
+              1,
+              3
+            ]
+          ]
+        },
+        "expectedOutput": [
+          [
+            1,
+            3
+          ]
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 2,
+          "connections": [
+            [
+              0,
+              1
+            ]
+          ]
+        },
+        "expectedOutput": [
+          [
+            0,
+            1
+          ]
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 3,
+          "connections": [
+            [
+              0,
+              1
+            ],
+            [
+              1,
+              2
+            ],
+            [
+              2,
+              0
+            ]
+          ]
+        },
+        "expectedOutput": [],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 5,
+          "connections": [
+            [
+              1,
+              0
+            ],
+            [
+              2,
+              0
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              4,
+              2
+            ],
+            [
+              4,
+              3
+            ]
+          ]
+        },
+        "expectedOutput": [
+          [
+            0,
+            1
+          ]
+        ],
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(V+E)",
+      "space": "O(V+E)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-038",
+    "title": "Number of Distinct Islands",
+    "question": "`grid` list of strings `1` land `0` water. Two islands are same shape if identical up to translation. Return count of distinct shapes.",
+    "roundType": "DSA",
+    "difficulty": "medium",
+    "topics": [
+      "matrix",
+      "dfs",
+      "hashing"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def num_distinct_islands(grid):",
+      "starterCode": "def num_distinct_islands(grid):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "grid": [
+            "11000",
+            "11000",
+            "00011",
+            "00011"
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            "11011",
+            "00000",
+            "11011"
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            "1"
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            "10",
+            "01"
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(m n)",
+      "space": "O(m n)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-039",
+    "title": "Longest Increasing Path in a Matrix",
+    "question": "`matrix` is list of equal-length lists of ints. Return longest strictly increasing path length in 4 directions.",
+    "roundType": "DSA",
+    "difficulty": "hard",
+    "topics": [
+      "matrix",
+      "dfs",
+      "dynamic programming"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def longest_increasing_path(matrix):",
+      "starterCode": "def longest_increasing_path(matrix):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "matrix": [
+            [
+              9,
+              9,
+              4
+            ],
+            [
+              6,
+              6,
+              8
+            ],
+            [
+              2,
+              1,
+              1
+            ]
+          ]
+        },
+        "expectedOutput": 4,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "matrix": [
+            [
+              3,
+              4,
+              5
+            ],
+            [
+              3,
+              2,
+              6
+            ],
+            [
+              2,
+              2,
+              1
+            ]
+          ]
+        },
+        "expectedOutput": 4,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "matrix": [
+            [
+              1
+            ]
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "matrix": [
+            [
+              7,
+              7
+            ],
+            [
+              7,
+              7
+            ]
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(m n)",
+      "space": "O(m n)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  },
+  {
+    "questionId": "striver-sde-sheet-bulk-040",
+    "title": "Word Ladder",
+    "question": "Return length of shortest transformation sequence from `begin_word` to `end_word` changing one letter at a time, each step must be in `word_list` (end must be in list). If impossible return 0.",
+    "roundType": "DSA",
+    "difficulty": "hard",
+    "topics": [
+      "graph",
+      "bfs"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def ladder_length(begin_word, end_word, word_list):",
+      "starterCode": "def ladder_length(begin_word, end_word, word_list):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "begin_word": "hit",
+          "end_word": "cog",
+          "word_list": [
+            "hot",
+            "dot",
+            "dog",
+            "lot",
+            "log",
+            "cog"
+          ]
+        },
+        "expectedOutput": 5,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "begin_word": "hit",
+          "end_word": "cog",
+          "word_list": [
+            "hot",
+            "dot",
+            "dog",
+            "lot",
+            "log"
+          ]
+        },
+        "expectedOutput": 0,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "begin_word": "a",
+          "end_word": "c",
+          "word_list": [
+            "a",
+            "b",
+            "c"
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "begin_word": "same",
+          "end_word": "same",
+          "word_list": [
+            "same"
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Meets expected time/space complexity for the intended approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
+    ],
+    "complexity": {
+      "time": "O(N * L^2)",
+      "space": "O(N)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
+  }
+]

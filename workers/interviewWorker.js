@@ -33,6 +33,8 @@ import {
   normalizedQuestionAttempts,
   resolvedQuestionScore,
 } from "../utils/interviewQuestionAttempts.js";
+import InterviewQuestion from "../models/InterviewQuestion.js";
+import { normalizeExecutionLanguage } from "../services/codeExecution/executeCode.js";
 
 await connectDB(config.MONGO_URI);
 await connectRedis().catch(() => {});
@@ -60,8 +62,9 @@ function syncStoredRoundIndexFromCurrentRound(sess) {
  * Same control flow as routes/interviewRoutes.js POST /submit-answer (heavy path).
  * Returns { httpStatus, body } for the HTTP layer to send after waitUntilFinished.
  */
-async function processEvaluateAnswerJob(sessionId, answer) {
+async function processEvaluateAnswerJob(sessionId, answer, options = {}) {
   const trimmedAnswer = typeof answer === "string" ? answer.trim() : "";
+  const codingLanguage = normalizeExecutionLanguage(options?.language);
 
   // 1) Fetch session
   const session = await getSession(sessionId);
@@ -200,13 +203,114 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
   // 4) MCP evaluateAnswer
   let evaluation;
   try {
+    const questionIdHint = String(questionObj?.questionId || "").trim();
+    const questionTextHint = String(currentQuestion || "").trim();
+    let questionMetadataDoc = null;
+    if (questionIdHint) {
+      questionMetadataDoc = await InterviewQuestion.findOne({ questionId: questionIdHint })
+        .select("questionId testCases dsaMetadata sqlMetadata evaluationStrategy roundType")
+        .lean();
+    }
+    if (!questionMetadataDoc && questionTextHint) {
+      questionMetadataDoc = await InterviewQuestion.findOne({ question: questionTextHint })
+        .select("questionId testCases dsaMetadata sqlMetadata evaluationStrategy roundType")
+        .lean();
+    }
+    const executionTestCases = Array.isArray(questionMetadataDoc?.testCases)
+      ? questionMetadataDoc.testCases
+      : [];
+    const functionSignature =
+      questionMetadataDoc?.dsaMetadata?.functionSignature ||
+      questionObj?.functionSignature ||
+      "";
+    const sqlMetadata = questionMetadataDoc?.sqlMetadata || null;
+
+    /** Slot metadata from generateQuestion can omit strategy or wrongly keep rubric_llm for bank DSA. */
+    const slotEvalStrategy =
+      typeof questionObj?.evaluationStrategy === "string" ? questionObj.evaluationStrategy.trim() : "";
+    const bankEvalStrategy =
+      typeof questionMetadataDoc?.evaluationStrategy === "string"
+        ? questionMetadataDoc.evaluationStrategy.trim()
+        : "";
+    const roundTypeLabel = String(currentRound?.type || "").toLowerCase();
+    const roundLooksLikeDsaCoding =
+      roundTypeLabel.includes("dsa") ||
+      roundTypeLabel.includes("coding") ||
+      roundTypeLabel.includes("algorithm") ||
+      roundTypeLabel.includes("data structure") ||
+      roundTypeLabel.includes("programming") ||
+      roundTypeLabel.includes("technical") ||
+      roundTypeLabel.includes("software") ||
+      roundTypeLabel.includes("developer") ||
+      roundTypeLabel.includes("leetcode");
+    /** Bank row is authoritative when session round title is generic ("Round 1", "Technical"). */
+    const bankRoundTypeIsDsa =
+      questionMetadataDoc &&
+      String(questionMetadataDoc.roundType || "").toUpperCase() === "DSA";
+    const bankRoundTypeLabel = String(questionMetadataDoc?.roundType || "").toUpperCase();
+    const isBankSqlTheoreticalRound = bankRoundTypeLabel === "SQL";
+
+    let effectiveEvaluationStrategy = "";
+
+    // SQL questions may carry rubric `testCases` for UI copy — never route those to sandbox code_execution.
+    if (
+      executionTestCases.length > 0 &&
+      !isBankSqlTheoreticalRound &&
+      bankEvalStrategy !== "sql_execution"
+    ) {
+      effectiveEvaluationStrategy = "code_execution";
+    } else if (bankEvalStrategy === "code_execution") {
+      effectiveEvaluationStrategy = "code_execution";
+    } else {
+      effectiveEvaluationStrategy = slotEvalStrategy || "";
+    }
+
+    if (
+      roundLooksLikeDsaCoding &&
+      slotEvalStrategy !== "sql_execution" &&
+      bankEvalStrategy !== "sql_execution" &&
+      (slotEvalStrategy === "rubric_llm" || !slotEvalStrategy) &&
+      (codingLanguage === "python" || codingLanguage === "cpp") &&
+      !/^\s*(with|select|insert|update|delete|create\s+table|alter\s+table)\b/i.test(trimmedAnswer)
+    ) {
+      // DSA/code round but no tests resolved (lookup miss or empty seed): still avoid essay-style LLM on code submits.
+      effectiveEvaluationStrategy = "code_execution";
+    }
+
+    if (bankRoundTypeIsDsa && bankEvalStrategy !== "sql_execution") {
+      console.log("[interviewWorker] forcing code_execution from bank roundType DSA", {
+        sessionId,
+        questionId: questionIdHint || questionMetadataDoc?.questionId || "",
+      });
+      effectiveEvaluationStrategy = "code_execution";
+    }
+
     evaluation = await evaluateAnswer({
       answer: trimmedAnswer,
       question: currentQuestion,
       companyContext,
       llmReasoning,
       expectedPoints: questionObj?.expectedPoints,
+      evaluationStrategy: effectiveEvaluationStrategy,
+      language: codingLanguage,
+      testCases: executionTestCases,
+      functionSignature,
+      metadata: {
+        testCases: executionTestCases,
+        functionSignature,
+        sqlMetadata,
+      },
     });
+    if (effectiveEvaluationStrategy === "code_execution") {
+      console.log("[interviewWorker] code-eval payload summary", {
+        sessionId,
+        questionId: questionIdHint || questionMetadataDoc?.questionId || "",
+        testcaseCount: executionTestCases.length,
+        functionSignature: functionSignature || "",
+        finalScore: evaluation?.score,
+        verdict: evaluation?.verdict,
+      });
+    }
   } catch (error) {
     console.warn("⚠️ evaluateAnswer failed, using fallback evaluation:", error?.message || error);
     evaluation = {
@@ -256,6 +360,11 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
   if (!currentRound.questions[currentQuestionIndex]) {
     currentRound.questions[currentQuestionIndex] = {
       question: currentQuestion,
+      questionId: currentQuestionEntry?.questionId,
+      evaluationStrategy: currentQuestionEntry?.evaluationStrategy,
+      supportedCodingLanguages: Array.isArray(currentQuestionEntry?.supportedCodingLanguages)
+        ? currentQuestionEntry.supportedCodingLanguages
+        : undefined,
       answer: "",
       score: null,
       feedback: "",
@@ -304,7 +413,19 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       .filter((value) => Number.isFinite(value))
       .slice(-2);
 
-    let { question, expectedPoints, expectedAnswerMode } = await generateQuestion({
+    const excludedQuestionIds = (Array.isArray(currentRound.questions) ? currentRound.questions : [])
+      .slice(0, nextQuestionIndex)
+      .map((slot) => String(slot?.questionId || "").trim())
+      .filter(Boolean);
+
+    let {
+      question,
+      expectedPoints,
+      expectedAnswerMode,
+      questionId,
+      evaluationStrategy,
+      supportedCodingLanguages,
+    } = await generateQuestion({
       userId: String(session.userId || ""),
       companyContext,
       roundType: currentRound.type,
@@ -324,11 +445,14 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       placementCluster: session.placementCluster,
       placementYear: session.placementYear,
       mergePlacementByType: session.mergePlacementByType === true,
+      excludedQuestionIds,
     });
     if (!question || !String(question).trim()) {
       question = `Let's go deeper — how would you refine or extend your approach for this ${currentRound.type || "technical"} question?`;
       expectedPoints = [];
       expectedAnswerMode = "conceptual";
+      questionId = "";
+      evaluationStrategy = "";
     }
 
     const nextExpectedPointsStored = (Array.isArray(expectedPoints) ? expectedPoints : []).map(
@@ -344,6 +468,13 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
     if (!currentRound.questions[nextQuestionIndex]) {
       currentRound.questions[nextQuestionIndex] = {
         question,
+        questionId: questionId || undefined,
+        supportedCodingLanguages: Array.isArray(supportedCodingLanguages)
+          ? supportedCodingLanguages
+          : undefined,
+        evaluationStrategy: evaluationStrategy || undefined,
+        sourceType: questionId ? "retrieved" : "generated",
+        previewRunCount: 0,
         answer: "",
         score: null,
         feedback: "",
@@ -352,6 +483,18 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       };
     } else {
       currentRound.questions[nextQuestionIndex].question = question;
+      currentRound.questions[nextQuestionIndex].questionId = questionId || undefined;
+      currentRound.questions[nextQuestionIndex].supportedCodingLanguages = Array.isArray(
+        supportedCodingLanguages
+      )
+        ? supportedCodingLanguages
+        : undefined;
+      currentRound.questions[nextQuestionIndex].evaluationStrategy =
+        evaluationStrategy || undefined;
+      currentRound.questions[nextQuestionIndex].sourceType = questionId
+        ? "retrieved"
+        : "generated";
+      currentRound.questions[nextQuestionIndex].previewRunCount = 0;
       currentRound.questions[nextQuestionIndex].answer = "";
       currentRound.questions[nextQuestionIndex].score = null;
       currentRound.questions[nextQuestionIndex].feedback = "";
@@ -528,10 +671,10 @@ const processor = async (job) => {
   });
 
   if (job.name === EVALUATE_ANSWER) {
-    const { sessionId, answer } = job.data || {};
+    const { sessionId, answer, language } = job.data || {};
     await markInterviewProcessing(sessionId);
     try {
-      const result = await processEvaluateAnswerJob(sessionId, answer);
+      const result = await processEvaluateAnswerJob(sessionId, answer, { language });
       return result;
     } finally {
       await clearInterviewProcessing(sessionId);

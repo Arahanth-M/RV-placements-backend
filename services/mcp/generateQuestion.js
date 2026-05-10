@@ -1,14 +1,44 @@
 import { callLLM } from "../llmClient.js";
 import { parseJSONResponse } from "../../utils/parseJSONResponse.js";
 import { addToSet, getJSON, getSetMembers, setJSON } from "../../src/utils/redisHelpers.js";
+import { retrieveQuestion } from "../questionRetrievalService.js";
 
 const MIN_POOL_SIZE = 5;
 const MAX_POOL_SIZE = 10;
 const QUESTION_POOL_TTL_SECONDS = 60 * 60;
 const USER_SEEN_TTL_SECONDS = 24 * 60 * 60;
+// Temporary switch: allow repeat questions for the same user when question bank is limited.
+const DISABLE_USER_SEEN_DEDUPE = true;
 
 const toSafeString = (value, fallback = "") => {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
+};
+
+const normalizeSupportedCodingLanguagesForSlot = (evaluationStrategy, dsaMetadata) => {
+  const strat = toSafeString(evaluationStrategy).toLowerCase();
+  if (strat !== "code_execution") return [];
+  const raw = Array.isArray(dsaMetadata?.supportedLanguages) ? dsaMetadata.supportedLanguages : [];
+  const out = new Set();
+  for (const item of raw) {
+    const s = String(item || "").toLowerCase().trim();
+    if (s === "python" || s === "py") out.add("python");
+    if (s === "cpp" || s === "c++" || s === "cxx" || s === "cplusplus") out.add("cpp");
+  }
+  out.add("python");
+  out.add("cpp");
+  return [...out];
+};
+
+/** LLM pool items often omit strategy; align with round type so workers use code_execution when appropriate. */
+const inferEvaluationStrategyForRound = (roundType, pickedStrategy) => {
+  const ps = toSafeString(pickedStrategy).toLowerCase();
+  if (ps === "code_execution" || ps === "sql_execution" || ps === "rubric_llm" || ps === "behavioral_llm") {
+    return ps === "sql_execution" ? "rubric_llm" : ps;
+  }
+  const rt = toSafeString(roundType).toLowerCase();
+  if (rt.includes("sql")) return "rubric_llm";
+  if (rt.includes("dsa") || rt.includes("coding")) return "code_execution";
+  return "rubric_llm";
 };
 
 const truncateText = (value, max = 350) => {
@@ -27,6 +57,11 @@ const normalizeDifficulty = (value) => {
 const normalizeCacheToken = (value, fallback = "general") => {
   const safe = toSafeString(value, fallback).toLowerCase();
   return safe.replace(/\s+/g, "_").replace(/[^a-z0-9_-]/g, "") || fallback;
+};
+
+const normalizeExclusions = (values = []) => {
+  if (!Array.isArray(values)) return [];
+  return values.map((value) => toSafeString(value)).filter(Boolean);
 };
 
 const normalizePlacementSliceToken = (
@@ -88,6 +123,40 @@ const buildQuestionPoolCacheKey = ({
 const buildSeenQuestionsKey = (userId) => {
   const normalizedUserId = normalizeCacheToken(userId, "anonymous");
   return `user:${normalizedUserId}:seen_questions`;
+};
+
+const normalizeQuestionTextKey = (value) => toSafeString(value).toLowerCase();
+
+const buildSeenTokenFromQuestionId = (questionId) => {
+  const safe = toSafeString(questionId);
+  return safe ? `id:${safe}` : "";
+};
+
+const buildSeenTokenFromQuestionText = (questionText) => {
+  const safe = normalizeQuestionTextKey(questionText);
+  return safe ? `text:${safe}` : "";
+};
+
+const parseSeenQuestionMembers = (members = []) => {
+  const seenIdSet = new Set();
+  const seenTextSet = new Set();
+  for (const member of Array.isArray(members) ? members : []) {
+    const safe = toSafeString(member);
+    if (!safe) continue;
+    if (safe.startsWith("id:")) {
+      const idValue = toSafeString(safe.slice(3));
+      if (idValue) seenIdSet.add(idValue);
+      continue;
+    }
+    if (safe.startsWith("text:")) {
+      const textValue = normalizeQuestionTextKey(safe.slice(5));
+      if (textValue) seenTextSet.add(textValue);
+      continue;
+    }
+    // Backward compatibility: historic members were plain normalized question text.
+    seenTextSet.add(normalizeQuestionTextKey(safe));
+  }
+  return { seenIdSet, seenTextSet };
 };
 
 const normalizeRubricImportance = (value) => {
@@ -182,6 +251,9 @@ const normalizePoolItem = (item) => {
         roundType: item.roundType,
         expectedAnswerMode: item.expectedAnswerMode,
       }),
+      evaluationStrategy: toSafeString(item.evaluationStrategy),
+      questionId: toSafeString(item.questionId),
+      dsaMetadata: item.dsaMetadata && typeof item.dsaMetadata === "object" ? item.dsaMetadata : undefined,
     };
   }
   const question = toSafeString(item);
@@ -485,6 +557,7 @@ const buildBasicFallbackQuestion = ({ roundType, roundAbout, difficulty }) => {
     question,
     expectedAnswerMode: inferAnswerModeFromRoundType(roundType),
     expectedPoints: buildFallbackRubric({ roundType, roundAbout }),
+    supportedCodingLanguages: [],
   };
 };
 
@@ -583,8 +656,56 @@ export const generateQuestion = async ({
   placementCluster,
   placementYear,
   mergePlacementByType,
+  excludedQuestionIds = [],
 }) => {
   try {
+    // Retrieval-first path: if curated question exists, use it.
+    const seenQuestionsKey = buildSeenQuestionsKey(userId);
+    const seenQuestionMembers = DISABLE_USER_SEEN_DEDUPE
+      ? []
+      : await getSetMembers(seenQuestionsKey);
+    const { seenIdSet, seenTextSet } = parseSeenQuestionMembers(seenQuestionMembers);
+    const retrievalExclusions = Array.from(
+      new Set([
+        ...normalizeExclusions(excludedQuestionIds),
+        ...Array.from(seenIdSet),
+      ])
+    );
+
+    const retrieved = await retrieveQuestion({
+      company: companyContext?.name || companyContext?.companyName || "",
+      roundType,
+      difficulty,
+      excludedQuestionIds: retrievalExclusions,
+    });
+    if (retrieved?.question) {
+      console.log("[generateQuestion] Retrieved curated question");
+      const retrievedToken =
+        buildSeenTokenFromQuestionId(retrieved.questionId) ||
+        buildSeenTokenFromQuestionText(retrieved.question);
+      if (retrievedToken && !DISABLE_USER_SEEN_DEDUPE) {
+        await addToSet(seenQuestionsKey, retrievedToken, USER_SEEN_TTL_SECONDS);
+      }
+      return {
+        question: retrieved.question,
+        expectedAnswerMode: normalizeExpectedAnswerMode(
+          retrieved.expectedAnswerMode,
+          inferAnswerModeFromRoundType(roundType)
+        ),
+        expectedPoints: normalizeExpectedPoints(retrieved.expectedPoints, {
+          roundType,
+          expectedAnswerMode: retrieved.expectedAnswerMode,
+        }),
+        questionId: retrieved.questionId,
+        evaluationStrategy: retrieved.evaluationStrategy,
+        supportedCodingLanguages: normalizeSupportedCodingLanguagesForSlot(
+          retrieved.evaluationStrategy,
+          retrieved.metadata?.dsaMetadata
+        ),
+      };
+    }
+    console.log("[generateQuestion] Fallback to LLM generation");
+
     const hasPreviousAnswer = Boolean(toSafeString(previousAnswer));
     const adaptiveFollowUp = getAdaptiveFollowUp({
       hasPreviousAnswer,
@@ -617,20 +738,17 @@ export const generateQuestion = async ({
       placementYear,
       mergePlacementByType,
     });
-    const seenQuestionsKey = buildSeenQuestionsKey(userId);
-
     let questionPool = normalizeQuestionPool(await getJSON(cacheKey));
-    const seenQuestionTexts = await getSetMembers(seenQuestionsKey);
-    const seenLookup = new Set(
-      seenQuestionTexts.map((q) => toSafeString(q).toLowerCase()).filter(Boolean)
-    );
+    const seenLookup = seenTextSet;
     if (questionPool.length > 0) {
       console.log("[generateQuestion] Cache hit: using Redis pool");
     } else {
       console.log("[generateQuestion] Cache miss: Redis pool not found");
     }
     console.log(`[generateQuestion] Pool size after fetch: ${questionPool.length}`);
-    console.log(`[generateQuestion] Seen questions count: ${seenLookup.size}`);
+    console.log(
+      `[generateQuestion] Seen questions count: ${seenLookup.size} (dedupeEnabled=${!DISABLE_USER_SEEN_DEDUPE})`
+    );
 
     const refillQuestionPool = async (currentPool, requestedCount = MIN_POOL_SIZE) => {
       try {
@@ -720,6 +838,10 @@ export const generateQuestion = async ({
               roundType,
               expectedAnswerMode: picked.expectedAnswerMode,
             }),
+            supportedCodingLanguages: normalizeSupportedCodingLanguagesForSlot(
+              toSafeString(picked?.evaluationStrategy),
+              picked?.dsaMetadata || {}
+            ),
           }
         : buildBasicFallbackQuestion({
             roundType,
@@ -729,9 +851,20 @@ export const generateQuestion = async ({
 
     if (picked && picked.question) {
       console.log("[generateQuestion] Recording selected question in seen set");
-      await addToSet(seenQuestionsKey, picked.question, USER_SEEN_TTL_SECONDS);
+      const seenToken = buildSeenTokenFromQuestionText(picked.question);
+      if (seenToken && !DISABLE_USER_SEEN_DEDUPE) {
+        await addToSet(seenQuestionsKey, seenToken, USER_SEEN_TTL_SECONDS);
+      }
     }
 
+    const inferredStrat = inferEvaluationStrategyForRound(roundType, picked?.evaluationStrategy);
+    const normalizedLangs = normalizeSupportedCodingLanguagesForSlot(
+      inferredStrat,
+      picked?.dsaMetadata || {}
+    );
+    const slotLangs = Array.isArray(selectedQuestion.supportedCodingLanguages)
+      ? selectedQuestion.supportedCodingLanguages
+      : [];
     return {
       question: selectedQuestion.question,
       expectedAnswerMode: normalizeExpectedAnswerMode(
@@ -742,6 +875,9 @@ export const generateQuestion = async ({
         roundType,
         expectedAnswerMode: selectedQuestion.expectedAnswerMode,
       }),
+      questionId: toSafeString(picked?.questionId),
+      evaluationStrategy: inferredStrat,
+      supportedCodingLanguages: slotLangs.length > 0 ? slotLangs : normalizedLangs,
     };
   } catch (error) {
     console.warn(

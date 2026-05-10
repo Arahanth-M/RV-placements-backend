@@ -43,6 +43,23 @@ const expectedPointSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const codeExecutionTraceSchema = new mongoose.Schema(
+  {
+    status: { type: String, trim: true },
+    passedCount: { type: Number },
+    failedCount: { type: Number },
+    totalCount: { type: Number },
+    visiblePassedCount: { type: Number },
+    visibleTotalCount: { type: Number },
+    hiddenPassedCount: { type: Number },
+    hiddenTotalCount: { type: Number },
+    executionTime: { type: Number },
+    weightedPassRate: { type: Number },
+    failedTests: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  },
+  { _id: false }
+);
+
 const evaluationTraceSchema = new mongoose.Schema(
   {
     scoringVersion: { type: String, trim: true },
@@ -65,6 +82,10 @@ const evaluationTraceSchema = new mongoose.Schema(
       of: Number,
       default: {},
     },
+    execution: {
+      type: codeExecutionTraceSchema,
+      default: undefined,
+    },
   },
   { _id: false }
 );
@@ -85,6 +106,15 @@ const roundAnswerAttemptSchema = new mongoose.Schema(
 const roundQuestionSchema = new mongoose.Schema(
   {
     question: { type: String, trim: true },
+    questionId: { type: String, trim: true },
+    /** For code_execution rounds: languages the sandbox may run (e.g. python, cpp). */
+    supportedCodingLanguages: { type: [String], default: undefined },
+    evaluationStrategy: { type: String, trim: true },
+    sourceType: {
+      type: String,
+      enum: ["retrieved", "generated"],
+    },
+    previewRunCount: { type: Number, default: 0, min: 0 },
     answer: { type: String, trim: true },
     score: { type: Number },
     feedback: { type: String, trim: true },

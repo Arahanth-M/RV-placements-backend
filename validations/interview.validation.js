@@ -31,14 +31,25 @@ export const interviewStartSchema = Joi.object({
 export const interviewSubmitAnswerSchema = Joi.object({
   sessionId: Joi.string().trim().min(1).max(128).required(),
   answer: Joi.string().required().max(500000),
+  language: Joi.string().trim().valid("python", "py", "cpp", "c++", "cxx", "cplusplus").optional(),
 }).unknown(true);
 
 export const interviewMoveRoundSchema = Joi.object({
   sessionId: Joi.string().trim().min(1).max(128).required(),
 }).unknown(true);
 
+export const interviewRunPreviewSchema = Joi.object({
+  sessionId: Joi.string().trim().min(1).max(128).required(),
+  code: Joi.string().required().max(500000),
+  language: Joi.string()
+    .trim()
+    .valid("python", "py", "sql", "cpp", "c++", "cxx", "cplusplus")
+    .required(),
+}).unknown(true);
+
 export default {
   interviewStartSchema,
   interviewSubmitAnswerSchema,
   interviewMoveRoundSchema,
+  interviewRunPreviewSchema,
 };
