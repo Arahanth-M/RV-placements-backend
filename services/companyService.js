@@ -41,6 +41,147 @@ export { COMPANY_DETAIL_VISIT_YEARS } from "../utils/placementYears.js";
 /** @deprecated Use {@link COMPANY_VISIT_DEFAULT_YEAR} from `placementYears.js`; kept for imports. */
 export const COMPANY_VISIT_YEAR = COMPANY_VISIT_DEFAULT_YEAR;
 
+/** Admin Companies "pending" tab / stats: only rows with explicit `status: "pending"` (matches DB intent). */
+const ADMIN_COMPANY_PENDING_QUEUE_MATCH = { status: "pending" };
+
+/** Shared `$addFields` for admin company list aggregations — coerces `year` so string years still match `$in`. */
+const ADMIN_COMPANY_LIST_VISIT_ADD_FIELDS = {
+  $addFields: {
+    companyIdForJoin: {
+      $convert: { input: "$companyId", to: "objectId", onError: null, onNull: null },
+    },
+    effectiveYear: {
+      $convert: {
+        input: { $ifNull: ["$year", COMPANY_VISIT_YEAR] },
+        to: "int",
+        onError: COMPANY_VISIT_YEAR,
+        onNull: COMPANY_VISIT_YEAR,
+      },
+    },
+  },
+};
+
+/**
+ * External writers (e.g. n8n) sometimes store the company **name** in `companyId` instead of an ObjectId.
+ * Allow those rows into the admin list when a `companies` name matches (case-insensitive trim).
+ */
+const ADMIN_COMPANY_LIST_RESOLVABLE_COMPANY_MATCH = {
+  $expr: {
+    $or: [
+      { $ne: ["$companyIdForJoin", null] },
+      {
+        $and: [
+          { $eq: ["$companyIdForJoin", null] },
+          { $eq: [{ $type: "$companyId" }, "string"] },
+          {
+            $gt: [{ $strLenCP: { $trim: { input: "$companyId" } } }, 0],
+          },
+        ],
+      },
+    ],
+  },
+};
+
+/**
+ * Join `company_visits` → `companies` by `_id`, or when `companyId` is a string:
+ * exact name (trim, case-insensitive), `nameKey`, or substring either way (min length 6) so
+ * `"Confluent India"` matches `"Confluent India Pvt Ltd"` or similar static rows.
+ */
+const ADMIN_COMPANY_LIST_LOOKUP_STATIC = {
+  $lookup: {
+    from: "companies",
+    let: {
+      oid: "$companyIdForJoin",
+      cidRaw: "$companyId",
+    },
+    pipeline: [
+      {
+        $match: {
+          $expr: {
+            $let: {
+              vars: {
+                cidNorm: {
+                  $toLower: {
+                    $trim: { input: { $toString: "$$cidRaw" } },
+                  },
+                },
+              },
+              in: {
+                $or: [
+                  {
+                    $and: [
+                      { $ne: ["$$oid", null] },
+                      { $eq: ["$_id", "$$oid"] },
+                    ],
+                  },
+                  {
+                    $and: [
+                      { $eq: ["$$oid", null] },
+                      { $eq: [{ $type: "$$cidRaw" }, "string"] },
+                      { $gt: [{ $strLenCP: "$$cidNorm" }, 0] },
+                      {
+                        $let: {
+                          vars: {
+                            nameNorm: {
+                              $toLower: {
+                                $trim: { input: { $ifNull: ["$name", ""] } },
+                              },
+                            },
+                            keyNorm: {
+                              $toLower: {
+                                $trim: { input: { $ifNull: ["$nameKey", ""] } },
+                              },
+                            },
+                          },
+                          in: {
+                            $or: [
+                              { $eq: ["$$nameNorm", "$$cidNorm"] },
+                              {
+                                $and: [
+                                  { $gt: [{ $strLenCP: "$$keyNorm" }, 0] },
+                                  { $eq: ["$$keyNorm", "$$cidNorm"] },
+                                ],
+                              },
+                              {
+                                $and: [
+                                  { $gte: [{ $strLenCP: "$$cidNorm" }, 6] },
+                                  {
+                                    $gte: [
+                                      { $indexOfCP: ["$$nameNorm", "$$cidNorm"] },
+                                      0,
+                                    ],
+                                  },
+                                ],
+                              },
+                              {
+                                $and: [
+                                  { $gte: [{ $strLenCP: "$$nameNorm" }, 6] },
+                                  {
+                                    $gte: [
+                                      { $indexOfCP: ["$$cidNorm", "$$nameNorm"] },
+                                      0,
+                                    ],
+                                  },
+                                ],
+                              },
+                            ],
+                          },
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+      { $limit: 1 },
+    ],
+    as: "s",
+  },
+};
+
 /**
  * @param {unknown} raw
  * @returns {number}
@@ -193,24 +334,97 @@ function toObjectId(m) {
 }
 
 /**
- * Match a visit row by company id even when external writers stored `companyId`
- * as a string instead of an ObjectId.
- * @param {string|import("mongoose").Types.ObjectId} companyId
- * @returns {Record<string, unknown>|null}
+ * True when a `company_visits` row belongs to this `companies` document (ObjectId `companyId`
+ * or human-readable name / nameKey / substring, aligned with admin list lookup).
+ * @param {Record<string, unknown>|null|undefined} visitDoc
+ * @param {Record<string, unknown>|null|undefined} staticDoc
  */
-function buildCompanyVisitCompanyExprMatch(companyId) {
-  const cid = toObjectId(companyId);
-  if (!cid) return null;
-  return {
-    $expr: {
-      $eq: [{ $toString: "$companyId" }, String(cid)],
-    },
-  };
+export function visitRowBelongsToCompanyStatic(visitDoc, staticDoc) {
+  if (!visitDoc || !staticDoc?._id) return false;
+  const sid = String(staticDoc._id);
+  const vid = visitDoc.companyId;
+  if (vid != null && String(vid) === sid) return true;
+  if (typeof vid !== "string") return false;
+  const raw = vid.trim();
+  if (!raw) return false;
+  const name = String(staticDoc.name ?? "").trim();
+  const key = String(staticDoc.nameKey ?? "").trim();
+  const r = raw.toLowerCase();
+  const n = name.toLowerCase();
+  const k = key.toLowerCase();
+  if (name && n === r) return true;
+  if (key && k === r) return true;
+  if (r.length >= 6 && n.length >= 6 && n.includes(r)) return true;
+  if (n.length >= 6 && r.length >= 6 && r.includes(n)) return true;
+  return false;
 }
 
 /**
- * Effective placement year for visit rows. External writers may omit `year`;
- * treat that as the default company visit year for admin/public reads.
+ * Match a visit row by static `companies._id` when `companyId` is an ObjectId **or** the same
+ * human-readable identity as `staticLean` (name / nameKey / substring), e.g. n8n storing `"Confluent India"`.
+ * @param {string|import("mongoose").Types.ObjectId} companyId
+ * @param {{ name?: string, nameKey?: string }|null|undefined} [staticLean]
+ * @returns {Record<string, unknown>|null}
+ */
+function buildCompanyVisitCompanyExprMatch(companyId, staticLean = null) {
+  const cid = toObjectId(companyId);
+  if (!cid) return null;
+  const oidEq = { $eq: [{ $toString: "$companyId" }, String(cid)] };
+  const lean = staticLean && typeof staticLean === "object" ? staticLean : null;
+  if (!lean) {
+    return { $expr: oidEq };
+  }
+
+  const name = String(lean.name ?? "").trim();
+  const nameKey = String(lean.nameKey ?? "").trim();
+  const nameL = name.toLowerCase();
+  const keyL = nameKey.toLowerCase();
+  /** @type {Record<string, unknown>[]} */
+  const branches = [oidEq];
+
+  if (name) {
+    branches.push({
+      $and: [
+        { $eq: [{ $type: "$companyId" }, "string"] },
+        { $eq: [{ $toLower: { $trim: { input: "$companyId" } } }, nameL] },
+      ],
+    });
+  }
+  if (nameKey) {
+    branches.push({
+      $and: [
+        { $eq: [{ $type: "$companyId" }, "string"] },
+        { $eq: [{ $toLower: { $trim: { input: "$companyId" } } }, keyL] },
+      ],
+    });
+  }
+
+  const visitNorm = { $toLower: { $trim: { input: "$companyId" } } };
+  if (nameL.length >= 6) {
+    branches.push({
+      $and: [
+        { $eq: [{ $type: "$companyId" }, "string"] },
+        { $gte: [{ $strLenCP: { $trim: { input: "$companyId" } } }, 6] },
+        { $gte: [{ $indexOfCP: [visitNorm, nameL] }, 0] },
+      ],
+    });
+  }
+  if (name.length >= 6) {
+    branches.push({
+      $and: [
+        { $eq: [{ $type: "$companyId" }, "string"] },
+        { $gte: [{ $strLenCP: visitNorm }, 6] },
+        { $gte: [{ $indexOfCP: [nameL, visitNorm] }, 0] },
+      ],
+    });
+  }
+
+  return branches.length === 1 ? { $expr: branches[0] } : { $expr: { $or: branches } };
+}
+
+/**
+ * Effective placement year for visit rows. External writers may omit `year` or store it as a string;
+ * coerce with the same rules as admin list `effectiveYear`.
  * @param {number} [placementYear]
  * @returns {Record<string, unknown>}
  */
@@ -218,7 +432,17 @@ function buildCompanyVisitYearExprMatch(placementYear = COMPANY_VISIT_YEAR) {
   const year = normalizeCompanyDetailYear(placementYear);
   return {
     $expr: {
-      $eq: [{ $ifNull: ["$year", COMPANY_VISIT_YEAR] }, year],
+      $eq: [
+        {
+          $convert: {
+            input: { $ifNull: ["$year", COMPANY_VISIT_YEAR] },
+            to: "int",
+            onError: COMPANY_VISIT_YEAR,
+            onNull: COMPANY_VISIT_YEAR,
+          },
+        },
+        year,
+      ],
     },
   };
 }
@@ -228,13 +452,15 @@ function buildCompanyVisitYearExprMatch(placementYear = COMPANY_VISIT_YEAR) {
  * and missing `year` from external writers like n8n.
  * @param {string|import("mongoose").Types.ObjectId} companyId
  * @param {number} [placementYear]
+ * @param {{ name?: string, nameKey?: string }|null|undefined} [staticLean]
  * @returns {Record<string, unknown>|null}
  */
 function buildCompanyVisitCompanyYearMatch(
   companyId,
-  placementYear = COMPANY_VISIT_YEAR
+  placementYear = COMPANY_VISIT_YEAR,
+  staticLean = null
 ) {
-  const companyMatch = buildCompanyVisitCompanyExprMatch(companyId);
+  const companyMatch = buildCompanyVisitCompanyExprMatch(companyId, staticLean);
   if (!companyMatch) return null;
   return {
     $and: [companyMatch, buildCompanyVisitYearExprMatch(placementYear)],
@@ -336,13 +562,14 @@ function buildPlacementSummerInternshipVisitByYearMap(allVisits) {
 async function resolveVisitAnchorDoc(cid, placementYear, hintVisitDoc = null) {
   const year = normalizeCompanyDetailYear(placementYear);
   if (hintVisitDoc && hintVisitDoc._id) {
-    const byHint = await CompanyVisit.findOne({
-      _id: hintVisitDoc._id,
-      companyId: cid,
-    })
-      .select("_id")
-      .lean();
-    if (byHint) return byHint;
+    const byHint = await CompanyVisit.findById(hintVisitDoc._id).select("_id companyId year").lean();
+    if (byHint && visitEffectiveMatchYear(byHint) === year) {
+      const staticLean = await CompanyStatic.findById(cid).select("name nameKey").lean();
+      const staticForBelong = { _id: cid, name: staticLean?.name, nameKey: staticLean?.nameKey };
+      if (visitRowBelongsToCompanyStatic(byHint, staticForBelong)) {
+        return { _id: byHint._id };
+      }
+    }
   }
   const match = buildCompanyVisitCompanyYearMatch(cid, year);
   if (!match) return null;
@@ -1714,12 +1941,18 @@ export async function listApprovedCompaniesLegacyMerged(
     const staticRow = row.c;
     if (!staticRow) continue;
     const allVisits = visitsByCompany.get(String(row._id)) ?? [];
-    const visitsForListing =
-      normalizedListingYear == null
-        ? [...allVisits].sort(sortVisitsForListing)
-        : allVisits
-            .filter((v) => (Number(v?.year) || 0) === normalizedListingYear)
-            .sort(sortVisitsForListing);
+    const visitsForListing = (() => {
+      if (normalizedListingYear == null) {
+        return [...allVisits].sort(sortVisitsForListing);
+      }
+      const matchedYearVisits = allVisits
+        .filter((v) => (Number(v?.year) || 0) === normalizedListingYear)
+        .sort(sortVisitsForListing);
+      // Keep company visible on the selected hub year even if its first approved visit
+      // is in another supported year (e.g. listing 2026 should still show 2027-only cards).
+      if (matchedYearVisits.length > 0) return matchedYearVisits;
+      return [...allVisits].sort(sortVisitsForListing);
+    })();
 
     /** One list row per company per cluster (avoid duplicate company cards within same cluster). */
     const visitsByCluster = new Map();
@@ -1946,11 +2179,12 @@ export async function getCompanyMergedForAdminById(
   const visitHintOid = toObjectId(companyVisitIdHint);
   let visit = null;
   if (visitHintOid) {
-    const hit = await CompanyVisit.findOne({
-      _id: visitHintOid,
-      companyId: _id,
-    }).lean();
-    if (hit && visitEffectiveMatchYear(hit) === year) {
+    const hit = await CompanyVisit.findById(visitHintOid).lean();
+    if (
+      hit &&
+      visitEffectiveMatchYear(hit) === year &&
+      visitRowBelongsToCompanyStatic(hit, staticRow)
+    ) {
       visit = visitWithPlainRoleCtc(hit);
     }
   }
@@ -1983,7 +2217,8 @@ export async function ensureAdminVisitForYear(
   const cid = toObjectId(companyId);
   if (!cid) return null;
   const year = normalizeCompanyDetailYear(placementYear);
-  const match = buildCompanyVisitCompanyYearMatch(cid, year);
+  const staticLean = await CompanyStatic.findById(cid).select("name nameKey").lean();
+  const match = buildCompanyVisitCompanyYearMatch(cid, year, staticLean);
   const existing = match
     ? await CompanyVisit.findOne(match).sort({ migratedAt: -1, _id: -1 })
     : null;
@@ -2017,33 +2252,24 @@ export async function listAdminPaginatedCompaniesFromSplit({
     String(placementYear).toLowerCase() === "all";
   const year = useAllYears ? null : normalizeCompanyDetailYear(placementYear);
   if (status) {
+    const statusNorm = String(status || "").trim().toLowerCase();
+    const statusFilter =
+      statusNorm === "pending"
+        ? ADMIN_COMPANY_PENDING_QUEUE_MATCH
+        : { status: String(status) };
     /** One admin row per `company_visits` document (same company + year can have FTE + PPO slots). */
     const pipeline = [
-      {
-        $addFields: {
-          companyIdForJoin: {
-            $convert: { input: "$companyId", to: "objectId", onError: null, onNull: null },
-          },
-          effectiveYear: { $ifNull: ["$year", COMPANY_VISIT_YEAR] },
-        },
-      },
+      ADMIN_COMPANY_LIST_VISIT_ADD_FIELDS,
       {
         $match: {
-          status: String(status),
-          companyIdForJoin: { $ne: null },
+          ...statusFilter,
+          ...ADMIN_COMPANY_LIST_RESOLVABLE_COMPANY_MATCH,
           effectiveYear:
             year == null ? { $in: [...COMPANY_DETAIL_VISIT_YEARS] } : year,
         },
       },
       { $sort: { migratedAt: -1, _id: -1 } },
-      {
-        $lookup: {
-          from: "companies",
-          localField: "companyIdForJoin",
-          foreignField: "_id",
-          as: "s",
-        },
-      },
+      ADMIN_COMPANY_LIST_LOOKUP_STATIC,
       { $unwind: { path: "$s", preserveNullAndEmptyArrays: false } },
       {
         $facet: {
@@ -2059,7 +2285,9 @@ export async function listAdminPaginatedCompaniesFromSplit({
     const pageCompanyIds = [
       ...new Map(
         page
-          .map((row) => toObjectId(row.companyIdForJoin))
+          .map((row) =>
+            toObjectId(row.companyIdForJoin ?? row.s?._id ?? row.s?.id)
+          )
           .filter(Boolean)
           .map((id) => [String(id), id])
       ).values(),
@@ -2119,6 +2347,45 @@ export async function listAdminPaginatedCompaniesFromSplit({
 }
 
 /**
+ * How many visit rows would {@link listAdminPaginatedCompaniesFromSplit} return (same joins/filters).
+ * Keeps dashboard `pendingCompanies` in sync with the admin Companies list (excludes orphan visits).
+ * @param {string} status — e.g. `"pending"` | `"approved"`
+ * @param {number|null|string} [placementYear] — `null` / `"all"` = all {@link COMPANY_DETAIL_VISIT_YEARS}
+ */
+export async function countAdminListableCompanyVisits(status, placementYear = null) {
+  const statusNorm = String(status || "").trim().toLowerCase();
+  const statusFilter =
+    statusNorm === "pending"
+      ? ADMIN_COMPANY_PENDING_QUEUE_MATCH
+      : { status: String(status) };
+  const useAllYears =
+    placementYear == null ||
+    placementYear === "" ||
+    String(placementYear).toLowerCase() === "all";
+  const year = useAllYears ? null : normalizeCompanyDetailYear(placementYear);
+  const yearMatch =
+    year == null
+      ? { effectiveYear: { $in: [...COMPANY_DETAIL_VISIT_YEARS] } }
+      : { effectiveYear: year };
+
+  const pipeline = [
+    ADMIN_COMPANY_LIST_VISIT_ADD_FIELDS,
+    {
+      $match: {
+        ...statusFilter,
+        ...ADMIN_COMPANY_LIST_RESOLVABLE_COMPANY_MATCH,
+        ...yearMatch,
+      },
+    },
+    ADMIN_COMPANY_LIST_LOOKUP_STATIC,
+    { $match: { "s.0": { $exists: true } } },
+    { $count: "n" },
+  ];
+  const agg = await CompanyVisit.aggregate(pipeline);
+  return agg[0]?.n ?? 0;
+}
+
+/**
  * Delete `company_visits` for this company then the `companies` row. Cache hooks run on models.
  * @param {string|import("mongoose").Types.ObjectId} companyId
  * @returns {Promise<{ ok: boolean }>}
@@ -2126,7 +2393,8 @@ export async function listAdminPaginatedCompaniesFromSplit({
 export async function deleteSplitCompany(companyId) {
   const cid = toObjectId(companyId);
   if (!cid) return { ok: false };
-  const visitMatch = buildCompanyVisitCompanyExprMatch(cid);
+  const staticLean = await CompanyStatic.findById(cid).select("name nameKey").lean();
+  const visitMatch = buildCompanyVisitCompanyExprMatch(cid, staticLean);
   if (!visitMatch) return { ok: false };
   await CompanyVisit.deleteMany(visitMatch);
   await CompanyStatic.deleteOne({ _id: cid });
@@ -2151,7 +2419,8 @@ export async function deleteCompanyVisitForYear(
   const { requireStatus } = options;
   const cid = toObjectId(companyId);
   if (!cid) return { ok: false, deletedVisit: false, deletedCompany: false };
-  const match = buildCompanyVisitCompanyYearMatch(cid, placementYear);
+  const staticForMatch = await CompanyStatic.findById(cid).select("name nameKey").lean();
+  const match = buildCompanyVisitCompanyYearMatch(cid, placementYear, staticForMatch);
   if (!match) return { ok: false, deletedVisit: false, deletedCompany: false };
 
   const yearNorm = normalizeCompanyDetailYear(placementYear);
@@ -2163,13 +2432,13 @@ export async function deleteCompanyVisitForYear(
     const doc = await CompanyVisit.findById(vid).select("_id companyId year status").lean();
     if (
       !doc?._id ||
-      String(doc.companyId) !== String(cid) ||
+      !visitRowBelongsToCompanyStatic(doc, staticForMatch) ||
       normalizeCompanyDetailYear(doc.year) !== yearNorm
     ) {
       return { ok: false, deletedVisit: false, deletedCompany: false };
     }
     if (requireStatus === "pending") {
-      if (doc.status === "approved") {
+      if (doc.status !== "pending") {
         return {
           ok: false,
           deletedVisit: false,
@@ -2201,7 +2470,7 @@ export async function deleteCompanyVisitForYear(
   } else {
     let filter = match;
     if (requireStatus === "pending") {
-      filter = { $and: [match, { $nor: [{ status: "approved" }] }] };
+      filter = { $and: [match, ADMIN_COMPANY_PENDING_QUEUE_MATCH] };
     } else if (requireStatus === "approved") {
       filter = { $and: [match, { status: "approved" }] };
     } else if (requireStatus != null) {
@@ -2222,7 +2491,7 @@ export async function deleteCompanyVisitForYear(
     return { ok: false, deletedVisit: false, deletedCompany: false };
   }
 
-  const anyYearMatch = buildCompanyVisitCompanyExprMatch(cid);
+  const anyYearMatch = buildCompanyVisitCompanyExprMatch(cid, staticForMatch);
   const remainingVisits = anyYearMatch
     ? await CompanyVisit.countDocuments(anyYearMatch)
     : 0;
@@ -2237,19 +2506,23 @@ export async function deleteCompanyVisitForYear(
 }
 
 /**
- * Latest pending visit row for (companyId, placementYear), if any.
+ * Latest visit row with `status: "pending"` for (companyId, placementYear), if any.
+ * @param {{ name?: string, nameKey?: string }|null|undefined} [staticLean] — pass `companies` row so `companyId` can be a name string (n8n).
  */
 export async function findOnePendingVisitForCompanyYear(
   companyId,
-  placementYear = COMPANY_VISIT_YEAR
+  placementYear = COMPANY_VISIT_YEAR,
+  staticLean = null
 ) {
   const cid = toObjectId(companyId);
   if (!cid) return null;
-  const match = buildCompanyVisitCompanyYearMatch(cid, placementYear);
+  const staticForMatch =
+    staticLean ??
+    (await CompanyStatic.findById(cid).select("name nameKey").lean());
+  const match = buildCompanyVisitCompanyYearMatch(cid, placementYear, staticForMatch);
   if (!match) return null;
-  /** Rows without `status` are treated like pending (legacy / external inserts). */
   return CompanyVisit.findOne({
-    $and: [match, { $nor: [{ status: "approved" }] }],
+    $and: [match, ADMIN_COMPANY_PENDING_QUEUE_MATCH],
   })
     .sort({ migratedAt: -1, _id: -1 })
     .lean();
@@ -3003,6 +3276,8 @@ export async function createCompanyWithVisit(data) {
     type: keyParts.type,
     cluster: keyParts.cluster,
     migratedAt: now,
+    /** New visits must be reviewable in admin pending list (rows without status were previously invisible). */
+    status: "pending",
   });
   if (visitDoc.roles !== undefined) {
     visitDoc.roles = sanitizeRolesArrayForPersist(visitDoc.roles);
@@ -3070,14 +3345,15 @@ export async function updateCompanyVisit(
  * - stores `year` on the row
  * - marks status as approved
  * - backfills all modeled `company_visits` fields when they are missing
- * @param {string|import("mongoose").Types.ObjectId} companyId
- * @param {number} [placementYear]
+ * @param {string|import("mongoose").Types.ObjectId} visitObjectId — `company_visits._id`
  * @param {Date} [approvedAt]
+ * @param {string|import("mongoose").Types.ObjectId|null} [fallbackCompanyStaticId] — when visit `companyId` is a non-ObjectId string (e.g. n8n), use this `companies._id` for `$set` + cache invalidation.
  * @returns {Promise<import("mongodb").UpdateResult>}
  */
 export async function approveAndNormalizeSingleCompanyVisitById(
   visitObjectId,
-  approvedAt = new Date()
+  approvedAt = new Date(),
+  fallbackCompanyStaticId = null
 ) {
   const oid = toObjectId(visitObjectId);
   if (!oid) {
@@ -3089,7 +3365,10 @@ export async function approveAndNormalizeSingleCompanyVisitById(
     return { acknowledged: true, modifiedCount: 0, upsertedCount: 0, matchedCount: 0 };
   }
 
-  const cid = toObjectId(existing.companyId);
+  let cid = toObjectId(existing.companyId);
+  if (!cid) {
+    cid = toObjectId(fallbackCompanyStaticId);
+  }
   if (!cid) {
     return { acknowledged: true, modifiedCount: 0, upsertedCount: 0, matchedCount: 0 };
   }

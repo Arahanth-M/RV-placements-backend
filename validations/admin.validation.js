@@ -1,4 +1,5 @@
 import Joi from "joi";
+import { PPO_BRANCH_CODES_ARRAY } from "../utils/ppoBranchCodes.js";
 
 const textBlock = Joi.string().max(50000);
 
@@ -42,14 +43,14 @@ export const adminCompanyStatsSchema = Joi.object({
         branchCode: Joi.string()
           .trim()
           .lowercase()
-          .valid("cd", "cy", "ise", "cse", "aiml", "bt")
+          .valid(...PPO_BRANCH_CODES_ARRAY)
           .required(),
         gotIn: nonNegIntField.required(),
         converted: nonNegIntField.required(),
         convertedNotApplicable: Joi.boolean().optional(),
       }).unknown(false)
     )
-    .max(6)
+    .max(PPO_BRANCH_CODES_ARRAY.length)
     .optional(),
   /** Dream / open-dream / off-campus placement got-in by branch (visit row; not PPO conversion). */
   placementGotInBranchStats: Joi.array()
@@ -58,12 +59,12 @@ export const adminCompanyStatsSchema = Joi.object({
         branchCode: Joi.string()
           .trim()
           .lowercase()
-          .valid("cd", "cy", "ise", "cse", "aiml", "bt")
+          .valid(...PPO_BRANCH_CODES_ARRAY)
           .required(),
         gotIn: nonNegIntField.required(),
       }).unknown(false)
     )
-    .max(6)
+    .max(PPO_BRANCH_CODES_ARRAY.length)
     .optional(),
 }).unknown(true);
 

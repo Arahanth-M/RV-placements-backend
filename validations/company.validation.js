@@ -1,4 +1,5 @@
 import Joi from "joi";
+import { PPO_BRANCH_CODES_ARRAY } from "../utils/ppoBranchCodes.js";
 
 const t = (max) => Joi.string().trim().max(max);
 
@@ -75,13 +76,13 @@ const optionalCompanyBody = {
         branchCode: Joi.string()
           .trim()
           .lowercase()
-          .valid("cd", "cy", "ise", "cse", "aiml", "bt")
+          .valid(...PPO_BRANCH_CODES_ARRAY)
           .required(),
         gotIn: Joi.number().integer().min(0).required(),
         converted: Joi.number().integer().min(0).required(),
       }).unknown(false)
     )
-    .max(6),
+    .max(PPO_BRANCH_CODES_ARRAY.length),
 };
 
 export const companyCreateSchema = Joi.object({
