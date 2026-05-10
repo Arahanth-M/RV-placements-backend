@@ -4,8 +4,10 @@ import Submission from "../models/Submission.js";
 import CompanyStatic from "../models/CompanyStatic.js";
 import CompanyVisit from "../models/CompanyVisit.js";
 import MissingCompany from "../models/MissingCompany.js";
-import { COMPANY_VISIT_YEAR } from "../services/companyService.js";
-
+import {
+  COMPANY_VISIT_YEAR,
+  countAdminListableCompanyVisits,
+} from "../services/companyService.js";
 function startOfDay(date = new Date()) {
   const next = new Date(date);
   next.setHours(0, 0, 0, 0);
@@ -215,7 +217,7 @@ export async function computeAdminStatsSnapshot() {
     Submission.countDocuments({ submittedAt: { $gte: todayStart } }),
     Submission.countDocuments({ status: "approved" }),
     Submission.countDocuments(),
-    CompanyVisit.countDocuments({ year: COMPANY_VISIT_YEAR, status: "pending" }),
+    countAdminListableCompanyVisits("pending"),
     MissingCompany.countDocuments(),
     User1.countDocuments({ lastLoginAt: { $gte: todayStart } }),
     MissingCompany.find({})

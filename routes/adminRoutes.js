@@ -35,6 +35,7 @@ import {
   deleteCompanyVisitForYear,
   findOnePendingVisitForCompanyYear,
   mergeToLegacyShape,
+  visitRowBelongsToCompanyStatic,
   normalizeRoleStipendFields,
   deleteSplitCompany,
   ensureAdminVisitForYear,
@@ -159,20 +160,17 @@ function projectAdminCompanyListRow(merged, status) {
     };
   }
   if (status === "pending") {
+    /** Same minimal shape as approved: OA / interview / must-do live under Submissions, not here. */
     return {
       _id: merged._id,
       name: merged.name,
       type: merged.type,
       offCampus: merged.offCampus,
-      count: merged.count,
       status: merged.status,
+      count: merged.count,
       createdAt: merged.createdAt,
       updatedAt: merged.updatedAt,
       submittedBy: merged.submittedBy,
-      interviewExperience: merged.internshipExperience ?? merged.interviewExperience,
-      interviewQuestions: merged.interviewQuestions,
-      onlineQuestions: merged.onlineQuestions,
-      Must_Do_Topics: merged.Must_Do_Topics,
       placementYear: merged.placementYear ?? null,
       companyVisitId: merged.companyVisitId ?? null,
     };
@@ -1256,6 +1254,27 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
         companyVisitIdHint
       );
       console.log("✅ Company updated successfully:", submission.companyId);
+
+      const afterPersist = await getCompanyMergedForAdminById(
+        String(submission.companyId),
+        placementYear,
+        placementListContext,
+        companyVisitIdHint
+      );
+      const visitIdAfter = afterPersist?.visit?._id;
+      if (visitIdAfter) {
+        const visitApprovedAt = new Date();
+        await approveAndNormalizeSingleCompanyVisitById(
+          visitIdAfter,
+          visitApprovedAt,
+          String(submission.companyId)
+        );
+      } else {
+        console.warn(
+          "⚠️ Submission approved but no company_visits row found to normalize/approve for company",
+          submission.companyId
+        );
+      }
     } catch (saveError) {
       console.error("❌ Error persisting company:", saveError);
       console.error("❌ Error details:", {
@@ -1390,13 +1409,13 @@ adminRouter.post("/companies/:id/approve", async (req, res) => {
       targetVisit = await CompanyVisit.findById(visitOid).lean();
       if (
         !targetVisit ||
-        String(targetVisit.companyId) !== String(staticRow._id) ||
+        !visitRowBelongsToCompanyStatic(targetVisit, staticRow) ||
         normalizeCompanyDetailYear(targetVisit.year) !== y
       ) {
         return res.status(404).json({ error: "Company visit not found for selected year" });
       }
     } else {
-      targetVisit = await findOnePendingVisitForCompanyYear(staticRow._id, y);
+      targetVisit = await findOnePendingVisitForCompanyYear(staticRow._id, y, staticRow);
       if (!targetVisit) {
         const loaded = await getCompanyMergedForAdminById(companyIdParam, y);
         if (loaded?.merged?.status === "approved") {
@@ -1418,9 +1437,23 @@ adminRouter.post("/companies/:id/approve", async (req, res) => {
         alreadyApproved: true,
       });
     }
+    if (targetVisit.status === "rejected") {
+      return res.status(400).json({
+        error: "Rejected visits cannot be approved from this action",
+      });
+    }
+    if (targetVisit.status !== "pending") {
+      return res.status(400).json({
+        error: "Only visits with status \"pending\" can be approved from this action",
+      });
+    }
 
     const approvedAt = new Date();
-    await approveAndNormalizeSingleCompanyVisitById(targetVisit._id, approvedAt);
+    await approveAndNormalizeSingleCompanyVisitById(
+      targetVisit._id,
+      approvedAt,
+      staticRow._id
+    );
 
     try {
       await invalidateAdminDashboardStatsCache();
@@ -1429,6 +1462,16 @@ adminRouter.post("/companies/:id/approve", async (req, res) => {
     }
 
     const refreshedVisit = await CompanyVisit.findById(targetVisit._id).lean();
+    if (refreshedVisit?.status !== "approved") {
+      console.error("❌ Company approval did not persist (visit status is not approved):", {
+        visitId: String(targetVisit._id),
+        status: refreshedVisit?.status,
+      });
+      return res.status(500).json({
+        error:
+          "Approval did not persist. The visit row may have an invalid companyId; check server logs.",
+      });
+    }
     const mergedOut = mergeToLegacyShape(staticRow, refreshedVisit);
     res.json({
       message: "Company approved successfully",
@@ -1457,7 +1500,7 @@ adminRouter.delete("/companies/:id/reject", async (req, res) => {
       return res.status(400).json({
         error:
           del.wrongStatus === true
-            ? "Selected visit is not pending — approved rows must use delete"
+            ? "Selected visit is not pending — only status \"pending\" can be rejected here; approved rows use delete"
             : "Pending company visit not found for selected year",
       });
     }

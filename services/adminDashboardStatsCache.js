@@ -1,7 +1,10 @@
 import User from "../models/User.js";
 import Submission from "../models/Submission.js";
 import CompanyVisit from "../models/CompanyVisit.js";
-import { COMPANY_VISIT_YEAR } from "./companyService.js";
+import {
+  COMPANY_VISIT_YEAR,
+  countAdminListableCompanyVisits,
+} from "./companyService.js";
 import { redisUrl } from "../src/utils/redisClient.js";
 import { getJSON, setJSON, deleteKey } from "../src/utils/redisHelpers.js";
 
@@ -35,7 +38,7 @@ export async function computeAdminDashboardStats() {
     Submission.countDocuments({ status: "pending" }),
     Submission.countDocuments({ status: "approved" }),
     CompanyVisit.countDocuments({ year: COMPANY_VISIT_YEAR, status: "approved" }),
-    CompanyVisit.countDocuments({ year: COMPANY_VISIT_YEAR, status: "pending" }),
+    countAdminListableCompanyVisits("pending"),
   ]);
 
   return {
