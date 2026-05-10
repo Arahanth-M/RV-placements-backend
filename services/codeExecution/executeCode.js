@@ -32,8 +32,20 @@ const IMAGE_PULL_TIMEOUT_MS = (() => {
   if (Number.isFinite(parsed) && parsed >= 5000) return parsed;
   return DEFAULT_IMAGE_PULL_TIMEOUT_MS;
 })();
-const DOCKER_MEMORY_LIMIT = "256m";
-const DOCKER_CPU_LIMIT = "0.5";
+/** Docker `--memory` (Python / default). C++ compile (cc1plus) often OOMs at 256m on prod. */
+const DOCKER_MEMORY_LIMIT =
+  (typeof process.env.EXECUTION_DOCKER_MEMORY === "string" && process.env.EXECUTION_DOCKER_MEMORY.trim()) ||
+  "512m";
+const DOCKER_MEMORY_LIMIT_CPP =
+  (typeof process.env.EXECUTION_DOCKER_MEMORY_CPP === "string" &&
+    process.env.EXECUTION_DOCKER_MEMORY_CPP.trim()) ||
+  "1024m";
+/** Docker `--cpus` (fractional CPUs allowed). */
+const DOCKER_CPU_LIMIT =
+  (typeof process.env.EXECUTION_DOCKER_CPUS === "string" && process.env.EXECUTION_DOCKER_CPUS.trim()) || "1";
+const DOCKER_CPU_LIMIT_CPP =
+  (typeof process.env.EXECUTION_DOCKER_CPUS_CPP === "string" && process.env.EXECUTION_DOCKER_CPUS_CPP.trim()) ||
+  DOCKER_CPU_LIMIT;
 const DOCKER_PIDS_LIMIT = "64";
 export const DOCKER_IMAGE_PYTHON = process.env.EXECUTION_PYTHON_IMAGE || "python:3.11";
 const DOCKER_IMAGE_CPP = process.env.EXECUTION_CPP_IMAGE || "gcc:13-bookworm";
@@ -716,15 +728,17 @@ export const runDockerExecution = async ({
   filesToCopy,
   dirsToCopy = [],
   envPairs = [],
+  memoryLimit = DOCKER_MEMORY_LIMIT,
+  cpuLimit = DOCKER_CPU_LIMIT,
 }) => {
   const createArgs = [
     "create",
     "--network",
     "none",
     "--memory",
-    DOCKER_MEMORY_LIMIT,
+    memoryLimit,
     "--cpus",
-    DOCKER_CPU_LIMIT,
+    cpuLimit,
     "--pids-limit",
     DOCKER_PIDS_LIMIT,
     ...envPairs.flatMap((pair) => ["-e", pair]),
@@ -737,8 +751,8 @@ export const runDockerExecution = async ({
   console.log("[executeCode] container start", {
     image: dockerImage,
     timeoutMs: EXECUTION_TIMEOUT_MS,
-    memory: DOCKER_MEMORY_LIMIT,
-    cpus: DOCKER_CPU_LIMIT,
+    memory: memoryLimit,
+    cpus: cpuLimit,
     pidsLimit: DOCKER_PIDS_LIMIT,
   });
 
@@ -951,6 +965,8 @@ export async function executeCode({
         containerCommand: ["/bin/sh", "-c", shellScript],
         filesToCopy: ["solution.cpp", "main.cpp", "testcases.json"],
         dirsToCopy: ["vendor"],
+        memoryLimit: DOCKER_MEMORY_LIMIT_CPP,
+        cpuLimit: DOCKER_CPU_LIMIT_CPP,
       });
     }
 
@@ -975,12 +991,19 @@ export async function executeCode({
             tail: merged.slice(-2500),
           });
         }
+        const oomLikely =
+          /Killed signal|cc1plus|fatal error:.*[Kk]illed/i.test(merged) &&
+          (/cc1plus|g\+\+/i.test(merged) || /compilation terminated/i.test(merged));
+        const baseErr = merged.slice(0, 4000) || "C++ compilation or linking failed before the runner printed JSON.";
+        const oomHint = oomLikely
+          ? " (Likely out-of-memory during compile: raise EXECUTION_DOCKER_MEMORY_CPP on the API host, e.g. 1536m or 2g.)"
+          : "";
         return normalizeExecutionResult({
           status: EXECUTION_COMPILATION_ERROR,
           results: [],
           executionTime: 0,
           memoryUsed: 0,
-          error: merged.slice(0, 4000) || "C++ compilation or linking failed before the runner printed JSON.",
+          error: `${baseErr}${oomHint}`,
         });
       }
       console.error("[executeCode] runtime error", {
