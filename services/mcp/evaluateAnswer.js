@@ -29,7 +29,10 @@ export const evaluateAnswer = async ({ evaluationStrategy, ...payload }) => {
       return evaluateBehavioralLLM(payload);
     case "rubric_llm":
     default:
-      return evaluateRubricLLM(payload);
+      return evaluateRubricLLM({
+        ...payload,
+        suppressLlm: Boolean(payload?.suppressLlm),
+      });
   }
 };
 

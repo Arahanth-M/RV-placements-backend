@@ -492,6 +492,8 @@ export const evaluateRubricLLM = async ({
   companyContext,
   llmReasoning,
   expectedPoints = [],
+  /** When true (e.g. DSA / coding rounds), skip all callLLM grading; deterministic + embeddings only. */
+  suppressLlm = false,
 }) => {
   const safeAnswer = toSafeString(answer);
   const safeQuestion = toSafeString(question);
@@ -577,13 +579,15 @@ export const evaluateRubricLLM = async ({
   let llmMissing = [];
   let llmSubscores = {};
 
-  const useLLMGrader = shouldUseLLMGrader({
-    rubricPointCount: rubricPoints.length,
-    wordCount,
-    relevance,
-    mustHaveCoverage: rubricSummary.mustHaveCoverage,
-    deterministicScore,
-  });
+  const useLLMGrader =
+    !suppressLlm &&
+    shouldUseLLMGrader({
+      rubricPointCount: rubricPoints.length,
+      wordCount,
+      relevance,
+      mustHaveCoverage: rubricSummary.mustHaveCoverage,
+      deterministicScore,
+    });
 
   if (useLLMGrader) {
     const cacheKey = makeLLMCacheKey({

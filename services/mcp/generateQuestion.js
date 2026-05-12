@@ -2,6 +2,10 @@ import { callLLM } from "../llmClient.js";
 import { parseJSONResponse } from "../../utils/parseJSONResponse.js";
 import { addToSet, getJSON, getSetMembers, setJSON } from "../../src/utils/redisHelpers.js";
 import { retrieveQuestion } from "../questionRetrievalService.js";
+import {
+  cloneSerializable,
+  roundTypeImpliesCodeExecutionInterview,
+} from "../interviewCodeGradingGuards.js";
 
 const MIN_POOL_SIZE = 5;
 const MAX_POOL_SIZE = 10;
@@ -23,21 +27,23 @@ const normalizeSupportedCodingLanguagesForSlot = (evaluationStrategy, dsaMetadat
     const s = String(item || "").toLowerCase().trim();
     if (s === "python" || s === "py") out.add("python");
     if (s === "cpp" || s === "c++" || s === "cxx" || s === "cplusplus") out.add("cpp");
+    if (s === "java") out.add("java");
   }
   out.add("python");
   out.add("cpp");
+  out.add("java");
   return [...out];
 };
 
 /** LLM pool items often omit strategy; align with round type so workers use code_execution when appropriate. */
-const inferEvaluationStrategyForRound = (roundType, pickedStrategy) => {
+export const inferEvaluationStrategyForRound = (roundType, pickedStrategy) => {
   const ps = toSafeString(pickedStrategy).toLowerCase();
   if (ps === "code_execution" || ps === "sql_execution" || ps === "rubric_llm" || ps === "behavioral_llm") {
     return ps === "sql_execution" ? "rubric_llm" : ps;
   }
   const rt = toSafeString(roundType).toLowerCase();
   if (rt.includes("sql")) return "rubric_llm";
-  if (rt.includes("dsa") || rt.includes("coding")) return "code_execution";
+  if (roundTypeImpliesCodeExecutionInterview(roundType)) return "code_execution";
   return "rubric_llm";
 };
 
@@ -253,12 +259,13 @@ const normalizePoolItem = (item) => {
       }),
       evaluationStrategy: toSafeString(item.evaluationStrategy),
       questionId: toSafeString(item.questionId),
+      url: toSafeString(item.url),
       dsaMetadata: item.dsaMetadata && typeof item.dsaMetadata === "object" ? item.dsaMetadata : undefined,
     };
   }
   const question = toSafeString(item);
   if (!question) return null;
-  return { question, expectedAnswerMode: "conceptual", expectedPoints: [] };
+  return { question, url: "", expectedAnswerMode: "conceptual", expectedPoints: [] };
 };
 
 const normalizeQuestionPool = (value) => {
@@ -555,6 +562,7 @@ const buildBasicFallbackQuestion = ({ roundType, roundAbout, difficulty }) => {
 
   return {
     question,
+    questionUrl: "",
     expectedAnswerMode: inferAnswerModeFromRoundType(roundType),
     expectedPoints: buildFallbackRubric({ roundType, roundAbout }),
     supportedCodingLanguages: [],
@@ -686,8 +694,46 @@ export const generateQuestion = async ({
       if (retrievedToken && !DISABLE_USER_SEEN_DEDUPE) {
         await addToSet(seenQuestionsKey, retrievedToken, USER_SEEN_TTL_SECONDS);
       }
+      let strat = inferEvaluationStrategyForRound(roundType, retrieved.evaluationStrategy);
+      const tests = Array.isArray(retrieved.testCases) ? retrieved.testCases : [];
+      const dsaMeta = retrieved.metadata?.dsaMetadata || {};
+      const sig = String(dsaMeta?.functionSignature || "").trim();
+      const bankStrat = toSafeString(retrieved.evaluationStrategy).toLowerCase();
+      if (
+        roundTypeImpliesCodeExecutionInterview(roundType) &&
+        bankStrat !== "sql_execution" &&
+        toSafeString(retrieved.questionId) &&
+        tests.length > 0 &&
+        sig
+      ) {
+        strat = "code_execution";
+      }
+      if (strat === "code_execution") {
+        if (!toSafeString(retrieved.questionId) || tests.length === 0 || !sig) {
+          console.error("[generateQuestion] Retrieved row failed code_execution validation", {
+            questionId: retrieved.questionId,
+            testCount: tests.length,
+            hasSignature: Boolean(sig),
+          });
+          return {
+            generationError: {
+              code: "CODE_GRADING_BANK_ROW_INVALID",
+              message:
+                "A bank coding question was selected but it is missing test cases or a function signature. Please try again or contact support.",
+            },
+            question: "",
+            questionUrl: "",
+            expectedAnswerMode: "code",
+            expectedPoints: [],
+            questionId: "",
+            evaluationStrategy: "code_execution",
+            supportedCodingLanguages: [],
+          };
+        }
+      }
       return {
         question: retrieved.question,
+        questionUrl: toSafeString(retrieved.metadata?.url),
         expectedAnswerMode: normalizeExpectedAnswerMode(
           retrieved.expectedAnswerMode,
           inferAnswerModeFromRoundType(roundType)
@@ -697,13 +743,38 @@ export const generateQuestion = async ({
           expectedAnswerMode: retrieved.expectedAnswerMode,
         }),
         questionId: retrieved.questionId,
-        evaluationStrategy: retrieved.evaluationStrategy,
+        evaluationStrategy: strat,
         supportedCodingLanguages: normalizeSupportedCodingLanguagesForSlot(
-          retrieved.evaluationStrategy,
+          strat,
           retrieved.metadata?.dsaMetadata
         ),
+        resolvedCodeTestCases:
+          strat === "code_execution" ? cloneSerializable(tests) || [] : undefined,
+        resolvedDsaMetadata:
+          strat === "code_execution" ? cloneSerializable(dsaMeta) || {} : undefined,
       };
     }
+
+    if (inferEvaluationStrategyForRound(roundType, "") === "code_execution") {
+      console.error("[generateQuestion] code_execution round but no validated bank question", {
+        roundType: toSafeString(roundType),
+      });
+      return {
+        generationError: {
+          code: "CODE_GRADING_BANK_UNAVAILABLE",
+          message:
+            "No coding question with test cases is available for this round right now. Please try again in a moment or contact support.",
+        },
+        question: "",
+        questionUrl: "",
+        expectedAnswerMode: "code",
+        expectedPoints: [],
+        questionId: "",
+        evaluationStrategy: "code_execution",
+        supportedCodingLanguages: [],
+      };
+    }
+
     console.log("[generateQuestion] Fallback to LLM generation");
 
     const hasPreviousAnswer = Boolean(toSafeString(previousAnswer));
@@ -858,6 +929,25 @@ export const generateQuestion = async ({
     }
 
     const inferredStrat = inferEvaluationStrategyForRound(roundType, picked?.evaluationStrategy);
+    if (inferredStrat === "code_execution") {
+      console.error("[generateQuestion] LLM pool produced code_execution strategy — blocked", {
+        roundType: toSafeString(roundType),
+      });
+      return {
+        generationError: {
+          code: "CODE_GRADING_BANK_UNAVAILABLE",
+          message:
+            "Coding rounds require a bank question with test cases. None is available. Please try again or contact support.",
+        },
+        question: "",
+        questionUrl: "",
+        expectedAnswerMode: "code",
+        expectedPoints: [],
+        questionId: "",
+        evaluationStrategy: "code_execution",
+        supportedCodingLanguages: [],
+      };
+    }
     const normalizedLangs = normalizeSupportedCodingLanguagesForSlot(
       inferredStrat,
       picked?.dsaMetadata || {}
@@ -867,6 +957,7 @@ export const generateQuestion = async ({
       : [];
     return {
       question: selectedQuestion.question,
+      questionUrl: toSafeString(picked?.url),
       expectedAnswerMode: normalizeExpectedAnswerMode(
         selectedQuestion.expectedAnswerMode,
         inferAnswerModeFromRoundType(roundType)
@@ -884,6 +975,22 @@ export const generateQuestion = async ({
       "[generateQuestion] Unexpected failure, returning basic fallback question:",
       error?.message || error
     );
+    if (inferEvaluationStrategyForRound(roundType, "") === "code_execution") {
+      return {
+        generationError: {
+          code: "CODE_GRADING_BANK_UNAVAILABLE",
+          message:
+            "Could not load a coding question for this round. Please try again or contact support.",
+        },
+        question: "",
+        questionUrl: "",
+        expectedAnswerMode: "code",
+        expectedPoints: [],
+        questionId: "",
+        evaluationStrategy: "code_execution",
+        supportedCodingLanguages: [],
+      };
+    }
     return buildBasicFallbackQuestion({
       roundType,
       roundAbout,

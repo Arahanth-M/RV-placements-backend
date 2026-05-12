@@ -1,0 +1,3175 @@
+[
+  {
+    "questionId": "leetcode-extra-e-001",
+    "title": "Climbing Stairs",
+    "url": "https://leetcode.com/problems/climbing-stairs/",
+    "question": "You are climbing a staircase with `n` steps. Each time you can climb `1` or `2` steps. Return how many distinct ways you can reach the top. (LeetCode-style.)",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "math",
+      "dynamic programming"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def climb_stairs(n):",
+      "starterCode": "def climb_stairs(n):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "n": 2
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 3
+        },
+        "expectedOutput": 3,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 2
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 3
+        },
+        "expectedOutput": 3,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 5
+        },
+        "expectedOutput": 8,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 10
+        },
+        "expectedOutput": 89,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 5
+        },
+        "expectedOutput": 8,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 10
+        },
+        "expectedOutput": 89,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/climbing-stairs/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-002",
+    "title": "Min Cost Climbing Stairs",
+    "url": "https://leetcode.com/problems/min-cost-climbing-stairs/",
+    "question": "Given integer array `cost` where `cost[i]` is the cost of step `i` on a staircase, pay the cost and climb one or two steps. Start from index `0` or `1`. Return the **minimum cost** to reach the top (position beyond the last index).",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "array",
+      "dynamic programming"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def min_cost_climbing_stairs(cost):",
+      "starterCode": "def min_cost_climbing_stairs(cost):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "cost": [
+            10,
+            15,
+            20
+          ]
+        },
+        "expectedOutput": 15,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "cost": [
+            1,
+            100,
+            1,
+            1,
+            1,
+            100,
+            1,
+            1,
+            100,
+            1
+          ]
+        },
+        "expectedOutput": 6,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "cost": [
+            10,
+            15,
+            20
+          ]
+        },
+        "expectedOutput": 15,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "cost": [
+            1,
+            100,
+            1,
+            1,
+            1,
+            100,
+            1,
+            1,
+            100,
+            1
+          ]
+        },
+        "expectedOutput": 6,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "cost": [
+            0,
+            2,
+            2,
+            1
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "cost": [
+            1,
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "cost": [
+            0,
+            2,
+            2,
+            1
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "cost": [
+            1,
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/min-cost-climbing-stairs/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-003",
+    "title": "N-th Tribonacci Number",
+    "url": "https://leetcode.com/problems/n-th-tribonacci-number/",
+    "question": "T(0)=0, T(1)=1, T(2)=1, and T(n)=T(n-1)+T(n-2)+T(n-3) for n>=3. Return T(n).",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "math",
+      "dynamic programming"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def tribonacci(n):",
+      "starterCode": "def tribonacci(n):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "n": 4
+        },
+        "expectedOutput": 4,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 25
+        },
+        "expectedOutput": 1389537,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 4
+        },
+        "expectedOutput": 4,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 25
+        },
+        "expectedOutput": 1389537,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 0
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 10
+        },
+        "expectedOutput": 149,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 0
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 10
+        },
+        "expectedOutput": 149,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/n-th-tribonacci-number/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-004",
+    "title": "Arranging Coins",
+    "url": "https://leetcode.com/problems/arranging-coins/",
+    "question": "You have `n` coins and build a staircase row `k` with exactly `k` coins. Return the **complete** number of rows you can build.",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "math",
+      "binary search"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def arrange_coins(n):",
+      "starterCode": "def arrange_coins(n):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "n": 5
+        },
+        "expectedOutput": 3,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 8
+        },
+        "expectedOutput": 4,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 5
+        },
+        "expectedOutput": 3,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 8
+        },
+        "expectedOutput": 4,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 1
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 10
+        },
+        "expectedOutput": 4,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 1
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 10
+        },
+        "expectedOutput": 4,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/arranging-coins/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-005",
+    "title": "Pascal's Triangle II",
+    "url": "https://leetcode.com/problems/pascals-triangle-ii/",
+    "question": "Given integer `row_index`, return the values in that row of Pascal's triangle (0-indexed).",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "array",
+      "dynamic programming"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def get_row(row_index):",
+      "starterCode": "def get_row(row_index):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "row_index": 3
+        },
+        "expectedOutput": [
+          1,
+          3,
+          3,
+          1
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "row_index": 0
+        },
+        "expectedOutput": [
+          1
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "row_index": 3
+        },
+        "expectedOutput": [
+          1,
+          3,
+          3,
+          1
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "row_index": 0
+        },
+        "expectedOutput": [
+          1
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "row_index": 1
+        },
+        "expectedOutput": [
+          1,
+          1
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "row_index": 4
+        },
+        "expectedOutput": [
+          1,
+          4,
+          6,
+          4,
+          1
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "row_index": 1
+        },
+        "expectedOutput": [
+          1,
+          1
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "row_index": 4
+        },
+        "expectedOutput": [
+          1,
+          4,
+          6,
+          4,
+          1
+        ],
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/pascals-triangle-ii/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-006",
+    "title": "Valid Perfect Square",
+    "url": "https://leetcode.com/problems/valid-perfect-square/",
+    "question": "Return `True` if integer `num` is a perfect square, else `False`.",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "math",
+      "binary search"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def is_perfect_square(num):",
+      "starterCode": "def is_perfect_square(num):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "num": 16
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "num": 14
+        },
+        "expectedOutput": false,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "num": 16
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "num": 14
+        },
+        "expectedOutput": false,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "num": 1
+        },
+        "expectedOutput": false,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "num": 121
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "num": 1
+        },
+        "expectedOutput": false,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "num": 121
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/valid-perfect-square/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-007",
+    "title": "Counting Bits",
+    "url": "https://leetcode.com/problems/counting-bits/",
+    "question": "For every `i` in `0..n`, count set bits in `i`. Return the list in order.",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "dynamic programming",
+      "bit manipulation"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def count_bits(n):",
+      "starterCode": "def count_bits(n):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "n": 2
+        },
+        "expectedOutput": [
+          0,
+          1,
+          1
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 5
+        },
+        "expectedOutput": [
+          0,
+          1,
+          1,
+          2,
+          1,
+          2
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 2
+        },
+        "expectedOutput": [
+          0,
+          1,
+          1
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 5
+        },
+        "expectedOutput": [
+          0,
+          1,
+          1,
+          2,
+          1,
+          2
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 0
+        },
+        "expectedOutput": [
+          0
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 1
+        },
+        "expectedOutput": [
+          0,
+          1
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 0
+        },
+        "expectedOutput": [
+          0
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 1
+        },
+        "expectedOutput": [
+          0,
+          1
+        ],
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/counting-bits/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-008",
+    "title": "Number of 1 Bits",
+    "url": "https://leetcode.com/problems/number-of-1-bits/",
+    "question": "Given unsigned 32-bit integer `n`, return Hamming weight (number of `1` bits).",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "bit manipulation"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def hamming_weight(n):",
+      "starterCode": "def hamming_weight(n):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "n": 11
+        },
+        "expectedOutput": 3,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 128
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 11
+        },
+        "expectedOutput": 3,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 128
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 0
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 4294967295
+        },
+        "expectedOutput": 32,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 0
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 4294967295
+        },
+        "expectedOutput": 32,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/number-of-1-bits/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-009",
+    "title": "Missing Number",
+    "url": "https://leetcode.com/problems/missing-number/",
+    "question": "Array `nums` contains `n` distinct numbers from `0..n`. Find the missing number.",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "array",
+      "bit manipulation"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def missing_number(nums):",
+      "starterCode": "def missing_number(nums):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "nums": [
+            3,
+            0,
+            1
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            0,
+            1
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            3,
+            0,
+            1
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            0,
+            1
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            9,
+            6,
+            4,
+            2,
+            3,
+            5,
+            7,
+            0,
+            1
+          ]
+        },
+        "expectedOutput": 8,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1
+          ]
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            9,
+            6,
+            4,
+            2,
+            3,
+            5,
+            7,
+            0,
+            1
+          ]
+        },
+        "expectedOutput": 8,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1
+          ]
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/missing-number/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-010",
+    "title": "Sqrt(x)",
+    "url": "https://leetcode.com/problems/sqrtx/",
+    "question": "Return integer square root of non-negative integer `x` (truncate).",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "math",
+      "binary search"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def my_sqrt(x):",
+      "starterCode": "def my_sqrt(x):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "x": 4
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "x": 8
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "x": 4
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "x": 8
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "x": 0
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "x": 2147395599
+        },
+        "expectedOutput": 46339,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "x": 0
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "x": 2147395599
+        },
+        "expectedOutput": 46339,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/sqrtx/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-011",
+    "title": "Excel Sheet Column Number",
+    "url": "https://leetcode.com/problems/excel-sheet-column-number/",
+    "question": "Convert Excel column title like `A`..`Z`, `AA`... to its column number.",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "math",
+      "string"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def title_to_number(column_title):",
+      "starterCode": "def title_to_number(column_title):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "column_title": "A"
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "column_title": "AB"
+        },
+        "expectedOutput": 28,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "column_title": "A"
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "column_title": "AB"
+        },
+        "expectedOutput": 28,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "column_title": "ZY"
+        },
+        "expectedOutput": 701,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "column_title": "AAA"
+        },
+        "expectedOutput": 703,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "column_title": "ZY"
+        },
+        "expectedOutput": 701,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "column_title": "AAA"
+        },
+        "expectedOutput": 703,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/excel-sheet-column-number/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-012",
+    "title": "Happy Number",
+    "url": "https://leetcode.com/problems/happy-number/",
+    "question": "Starting from `n`, repeatedly replace `n` by sum of squares of its digits. Return `True` if you reach `1`, else `False` if a cycle without `1` occurs.",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "hash table",
+      "math"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def is_happy(n):",
+      "starterCode": "def is_happy(n):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "n": 19
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 2
+        },
+        "expectedOutput": false,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 19
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 2
+        },
+        "expectedOutput": false,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 1
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 7
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 1
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 7
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/happy-number/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-013",
+    "title": "Valid Anagram",
+    "url": "https://leetcode.com/problems/valid-anagram/",
+    "question": "Return `True` if `t` is an anagram of `s` (same multiset of letters).",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "hash table",
+      "string",
+      "sorting"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def is_anagram(s, t):",
+      "starterCode": "def is_anagram(s, t):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "s": "anagram",
+          "t": "nagaram"
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "rat",
+          "t": "car"
+        },
+        "expectedOutput": false,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "anagram",
+          "t": "nagaram"
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "rat",
+          "t": "car"
+        },
+        "expectedOutput": false,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "",
+          "t": ""
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "a",
+          "t": "ab"
+        },
+        "expectedOutput": false,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "",
+          "t": ""
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "a",
+          "t": "ab"
+        },
+        "expectedOutput": false,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/valid-anagram/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-014",
+    "title": "Reverse String",
+    "url": "https://leetcode.com/problems/reverse-string/",
+    "question": "Return the reverse of string `s` (as a new string).",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "two pointers",
+      "string"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def reverse_string(s):",
+      "starterCode": "def reverse_string(s):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "s": "hello"
+        },
+        "expectedOutput": "olleh",
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "Hannah"
+        },
+        "expectedOutput": "hannaH",
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "hello"
+        },
+        "expectedOutput": "olleh",
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "Hannah"
+        },
+        "expectedOutput": "hannaH",
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "a"
+        },
+        "expectedOutput": "a",
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": ""
+        },
+        "expectedOutput": "",
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "a"
+        },
+        "expectedOutput": "a",
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": ""
+        },
+        "expectedOutput": "",
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/reverse-string/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-015",
+    "title": "Move Zeroes",
+    "url": "https://leetcode.com/problems/move-zeroes/",
+    "question": "Return a **new** array with the same elements where all `0` values are at the end, preserving order of non-zeros.",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "array",
+      "two pointers"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def move_zeroes(nums):",
+      "starterCode": "def move_zeroes(nums):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "nums": [
+            0,
+            1,
+            0,
+            3,
+            12
+          ]
+        },
+        "expectedOutput": [
+          1,
+          3,
+          12,
+          0,
+          0
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            0
+          ]
+        },
+        "expectedOutput": [
+          0
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            0,
+            1,
+            0,
+            3,
+            12
+          ]
+        },
+        "expectedOutput": [
+          1,
+          3,
+          12,
+          0,
+          0
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            0
+          ]
+        },
+        "expectedOutput": [
+          0
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            2,
+            3
+          ]
+        },
+        "expectedOutput": [
+          1,
+          2,
+          3
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            0,
+            0,
+            1
+          ]
+        },
+        "expectedOutput": [
+          1,
+          0,
+          0
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            2,
+            3
+          ]
+        },
+        "expectedOutput": [
+          1,
+          2,
+          3
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            0,
+            0,
+            1
+          ]
+        },
+        "expectedOutput": [
+          1,
+          0,
+          0
+        ],
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/move-zeroes/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-016",
+    "title": "Single Number",
+    "url": "https://leetcode.com/problems/single-number/",
+    "question": "Every element appears twice except one. Return that single element using O(1) extra memory.",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "array",
+      "bit manipulation"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def single_number(nums):",
+      "starterCode": "def single_number(nums):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "nums": [
+            2,
+            2,
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            4,
+            1,
+            2,
+            1,
+            2
+          ]
+        },
+        "expectedOutput": 4,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            2,
+            2,
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            4,
+            1,
+            2,
+            1,
+            2
+          ]
+        },
+        "expectedOutput": 4,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            0,
+            1,
+            0
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            0,
+            1,
+            0
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/single-number/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-017",
+    "title": "Majority Element",
+    "url": "https://leetcode.com/problems/majority-element/",
+    "question": "Majority element appears more than `floor(n/2)` times. Return it.",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "array",
+      "hash table"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def majority_element(nums):",
+      "starterCode": "def majority_element(nums):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "nums": [
+            3,
+            2,
+            3
+          ]
+        },
+        "expectedOutput": 3,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            2,
+            2,
+            1,
+            1,
+            1,
+            2,
+            2
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            3,
+            2,
+            3
+          ]
+        },
+        "expectedOutput": 3,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            2,
+            2,
+            1,
+            1,
+            1,
+            2,
+            2
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            6,
+            5,
+            5
+          ]
+        },
+        "expectedOutput": 5,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            6,
+            5,
+            5
+          ]
+        },
+        "expectedOutput": 5,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/majority-element/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-018",
+    "title": "Power of Two",
+    "url": "https://leetcode.com/problems/power-of-two/",
+    "question": "Return `True` if `n` is a power of two.",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "math",
+      "bit manipulation"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def is_power_of_two(n):",
+      "starterCode": "def is_power_of_two(n):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "n": 1
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 16
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 1
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 16
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 3
+        },
+        "expectedOutput": false,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 218
+        },
+        "expectedOutput": false,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 3
+        },
+        "expectedOutput": false,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 218
+        },
+        "expectedOutput": false,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/power-of-two/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-019",
+    "title": "Power of Three",
+    "url": "https://leetcode.com/problems/power-of-three/",
+    "question": "Return `True` if `n` is a power of three.",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "math",
+      "recursion"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def is_power_of_three(n):",
+      "starterCode": "def is_power_of_three(n):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "n": 27
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 0
+        },
+        "expectedOutput": false,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 27
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 0
+        },
+        "expectedOutput": false,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 9
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 45
+        },
+        "expectedOutput": false,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 9
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 45
+        },
+        "expectedOutput": false,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/power-of-three/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-020",
+    "title": "Power of Four",
+    "url": "https://leetcode.com/problems/power-of-four/",
+    "question": "Return `True` if `n` is a power of four.",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "math",
+      "bit manipulation"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def is_power_of_four(n):",
+      "starterCode": "def is_power_of_four(n):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "n": 16
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 5
+        },
+        "expectedOutput": false,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 16
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 5
+        },
+        "expectedOutput": false,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 1
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 64
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 1
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 64
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/power-of-four/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-021",
+    "title": "Sort Array By Parity",
+    "url": "https://leetcode.com/problems/sort-array-by-parity/",
+    "question": "Return an array with all even integers first, then odd integers (relative order within groups may change).",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "array",
+      "two pointers"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def sort_array_by_parity(nums):",
+      "starterCode": "def sort_array_by_parity(nums):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "nums": [
+            3,
+            1,
+            2,
+            4
+          ]
+        },
+        "expectedOutput": [
+          2,
+          4,
+          3,
+          1
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            0
+          ]
+        },
+        "expectedOutput": [
+          0
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            3,
+            1,
+            2,
+            4
+          ]
+        },
+        "expectedOutput": [
+          2,
+          4,
+          3,
+          1
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            0
+          ]
+        },
+        "expectedOutput": [
+          0
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            3,
+            5
+          ]
+        },
+        "expectedOutput": [
+          1,
+          3,
+          5
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            2,
+            4,
+            6
+          ]
+        },
+        "expectedOutput": [
+          2,
+          4,
+          6
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            3,
+            5
+          ]
+        },
+        "expectedOutput": [
+          1,
+          3,
+          5
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            2,
+            4,
+            6
+          ]
+        },
+        "expectedOutput": [
+          2,
+          4,
+          6
+        ],
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/sort-array-by-parity/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-022",
+    "title": "Squares of a Sorted Array",
+    "url": "https://leetcode.com/problems/squares-of-a-sorted-array/",
+    "question": "`nums` sorted non-decreasing (may include negatives). Return squares sorted non-decreasing.",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "array",
+      "two pointers"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def sorted_squares(nums):",
+      "starterCode": "def sorted_squares(nums):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "nums": [
+            -4,
+            -1,
+            0,
+            3,
+            10
+          ]
+        },
+        "expectedOutput": [
+          0,
+          1,
+          9,
+          16,
+          100
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            -7,
+            -3,
+            2,
+            3,
+            11
+          ]
+        },
+        "expectedOutput": [
+          4,
+          9,
+          9,
+          49,
+          121
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            -4,
+            -1,
+            0,
+            3,
+            10
+          ]
+        },
+        "expectedOutput": [
+          0,
+          1,
+          9,
+          16,
+          100
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            -7,
+            -3,
+            2,
+            3,
+            11
+          ]
+        },
+        "expectedOutput": [
+          4,
+          9,
+          9,
+          49,
+          121
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            -1
+          ]
+        },
+        "expectedOutput": [
+          1
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            2,
+            3
+          ]
+        },
+        "expectedOutput": [
+          1,
+          4,
+          9
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            -1
+          ]
+        },
+        "expectedOutput": [
+          1
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            2,
+            3
+          ]
+        },
+        "expectedOutput": [
+          1,
+          4,
+          9
+        ],
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/squares-of-a-sorted-array/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-023",
+    "title": "Duplicate Zeros",
+    "url": "https://leetcode.com/problems/duplicate-zeros/",
+    "question": "Given fixed-length array `arr`, duplicate each zero by shifting elements right; elements beyond length are dropped. Return the resulting array.",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "array",
+      "two pointers"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def duplicate_zeros(arr):",
+      "starterCode": "def duplicate_zeros(arr):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "arr": [
+            1,
+            0,
+            2,
+            3,
+            0,
+            4,
+            5,
+            0
+          ]
+        },
+        "expectedOutput": [
+          1,
+          0,
+          0,
+          2,
+          3,
+          0,
+          0,
+          4
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "arr": [
+            1,
+            2,
+            3
+          ]
+        },
+        "expectedOutput": [
+          1,
+          2,
+          3
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "arr": [
+            1,
+            0,
+            2,
+            3,
+            0,
+            4,
+            5,
+            0
+          ]
+        },
+        "expectedOutput": [
+          1,
+          0,
+          0,
+          2,
+          3,
+          0,
+          0,
+          4
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "arr": [
+            1,
+            2,
+            3
+          ]
+        },
+        "expectedOutput": [
+          1,
+          2,
+          3
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "arr": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "expectedOutput": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "arr": [
+            8,
+            4,
+            5,
+            0,
+            0,
+            0,
+            0,
+            7
+          ]
+        },
+        "expectedOutput": [
+          8,
+          4,
+          5,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "arr": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "expectedOutput": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "arr": [
+            8,
+            4,
+            5,
+            0,
+            0,
+            0,
+            0,
+            7
+          ]
+        },
+        "expectedOutput": [
+          8,
+          4,
+          5,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/duplicate-zeros/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-024",
+    "title": "Find Numbers with Even Number of Digits",
+    "url": "https://leetcode.com/problems/find-numbers-with-even-number-of-digits/",
+    "question": "Return count of nums whose **absolute value** has an even number of digits.",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "array",
+      "math"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def find_numbers(nums):",
+      "starterCode": "def find_numbers(nums):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "nums": [
+            12,
+            345,
+            2,
+            6,
+            7896
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            555,
+            901,
+            482,
+            1771
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            12,
+            345,
+            2,
+            6,
+            7896
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            555,
+            901,
+            482,
+            1771
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            1,
+            1
+          ]
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": []
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            1,
+            1
+          ]
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": []
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/find-numbers-with-even-number-of-digits/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  },
+  {
+    "questionId": "leetcode-extra-e-025",
+    "title": "Binary Gap",
+    "url": "https://leetcode.com/problems/binary-gap/",
+    "question": "Given positive integer `n`, return the longest distance between two consecutive `1` bits in the binary representation of `n`. If fewer than two `1` bits, return `0`.",
+    "roundType": "DSA",
+    "difficulty": "easy",
+    "topics": [
+      "bit manipulation"
+    ],
+    "subtopics": [],
+    "evaluationStrategy": "code_execution",
+    "dsaMetadata": {
+      "supportedLanguages": [
+        "python"
+      ],
+      "functionSignature": "def binary_gap(n):",
+      "starterCode": "def binary_gap(n):\n    pass\n"
+    },
+    "testCases": [
+      {
+        "input": {
+          "n": 22
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 5
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 22
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 5
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 6
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 8
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 6
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 8
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      }
+    ],
+    "rubric": [
+      {
+        "text": "Implements a correct algorithm for the stated constraints.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
+    ],
+    "complexity": {
+      "time": "varies",
+      "space": "varies"
+    },
+    "sourceMetadata": {
+      "source": "https://leetcode.com/problems/binary-gap/",
+      "verified": true,
+      "qualityScore": 0.93
+    }
+  }
+]

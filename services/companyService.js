@@ -1891,6 +1891,9 @@ async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
       placementSummerInternshipForListingYear;
     minimal.placementSummerStrictVisitForListingYear =
       placementSummerStrictVisitForListingYear;
+    minimal.placementListClusterKey = clusterKeyFromPlacementVisitClusterField(
+      primary?.cluster
+    );
     out.push(minimal);
   }
   return out;
@@ -1898,9 +1901,11 @@ async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
 
 /**
  * Small JSON for 2026 category tiles: counts per bucket + up to 5 logo rows each.
+ * @param {unknown} [placementYear]
+ * @param {unknown} [clusterRaw] — optional `cs` / `ec` / `me` (same as GET /api/companies?cluster=)
  * @returns {Promise<{ counts: object, logos: object }>}
  */
-export async function getCompanyCategoryPreviewLogos(placementYear = null) {
+export async function getCompanyCategoryPreviewLogos(placementYear = null, clusterRaw = null) {
   const rows = await listApprovedMinimalRowsForCategoryPreview(placementYear);
   const withCategory = rows.map((c) => {
     const base = attachPlacementCategoryToCompany(c);
@@ -1916,7 +1921,11 @@ export async function getCompanyCategoryPreviewLogos(placementYear = null) {
       placementSummerDetailYear: c.placementSummerDetailYear,
     };
   });
-  const ordered = sortCompaniesForCategoryPreview(withCategory);
+  let ordered = sortCompaniesForCategoryPreview(withCategory);
+  const requestedCluster = normalizePlacementClusterQuery(clusterRaw);
+  if (requestedCluster != null) {
+    ordered = ordered.filter((c) => c.placementListClusterKey === requestedCluster);
+  }
   return buildCategoryPreviewResponse(ordered, 5);
 }
 

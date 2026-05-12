@@ -57,12 +57,18 @@ export function isQuestionRetryPendingSlot(slot) {
 /** Numeric score for a question slot: prefers root `score`, else best score among `attempts`. */
 export function resolvedQuestionScore(question) {
   if (!question || typeof question !== "object") return null;
-  const root = Number(question.score);
-  let best = Number.isFinite(root) ? root : null;
+  const rootRaw = question.score;
+  let best = null;
+  if (rootRaw != null && rootRaw !== "" && Number.isFinite(Number(rootRaw))) {
+    best = Number(rootRaw);
+  }
   const attempts = Array.isArray(question.attempts) ? question.attempts : [];
   for (const t of attempts) {
-    const n = Number(t?.score);
-    if (Number.isFinite(n)) best = best == null ? n : Math.max(best, n);
+    const raw = t?.score;
+    if (raw == null || raw === "") continue;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) continue;
+    best = best == null ? n : Math.max(best, n);
   }
   return best;
 }
@@ -85,4 +91,60 @@ export function questionSlotHasInterviewPayload(question) {
   return (
     resolvedQuestionAnswer(question).length > 0 || resolvedQuestionScore(question) != null
   );
+}
+
+/** Latest grading verdict from attempts or root trace (lowercase), or empty string. */
+export function resolvedQuestionVerdict(question) {
+  if (!question || typeof question !== "object") return "";
+  const attempts = normalizedQuestionAttempts(question);
+  for (let i = attempts.length - 1; i >= 0; i--) {
+    const v = attempts[i]?.evaluationTrace?.verdict;
+    if (typeof v === "string" && v.trim()) return v.trim().toLowerCase();
+  }
+  const root = question.evaluationTrace?.verdict;
+  if (typeof root === "string" && root.trim()) return root.trim().toLowerCase();
+  return "";
+}
+
+/**
+ * Deterministic DSA / code-execution round breakdown (no LLM).
+ * Buckets: correct | partial (incl. incorrect / submitted but not fully correct) | not answered.
+ */
+export function computeDsaRoundQuestionBuckets(questions) {
+  const list = Array.isArray(questions) ? questions : [];
+  let answeredCorrectly = 0;
+  let partiallyAnswered = 0;
+  let notAnswered = 0;
+
+  for (const q of list) {
+    const verdict = resolvedQuestionVerdict(q);
+    const score = resolvedQuestionScore(q);
+    const answered = resolvedQuestionAnswer(q).length > 0;
+    const hasFiniteScore = score != null && Number.isFinite(Number(score));
+
+    if (verdict === "correct") {
+      answeredCorrectly += 1;
+      continue;
+    }
+    if (verdict === "partial" || verdict === "incorrect") {
+      partiallyAnswered += 1;
+      continue;
+    }
+    if (hasFiniteScore && Number(score) >= 9.5) {
+      answeredCorrectly += 1;
+      continue;
+    }
+    if (answered || hasFiniteScore) {
+      partiallyAnswered += 1;
+      continue;
+    }
+    notAnswered += 1;
+  }
+
+  return {
+    totalQuestions: list.length,
+    answeredCorrectly,
+    partiallyAnswered,
+    notAnswered,
+  };
 }

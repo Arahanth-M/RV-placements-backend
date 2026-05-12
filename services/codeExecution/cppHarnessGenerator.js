@@ -3,6 +3,8 @@
  * and runs JSON testcases with the same output shape as services/codeExecution/executeCode.js (Python runner).
  */
 
+import { USER_DEBUG_OUTPUT_MAX_BYTES } from "./executionUtils.js";
+
 const toSafeString = (value, fallback = "") =>
   typeof value === "string" && value.trim() ? value.trim() : fallback;
 
@@ -367,6 +369,7 @@ export const generateCppMainSource = ({ functionSignature, testCases }) => {
     "#include <iostream>",
     "#include <exception>",
     "#include <stdexcept>",
+    "#include <sstream>",
   ];
   return `${includes.join("\n")}
 
@@ -375,6 +378,24 @@ using json = nlohmann::json;
 static const char* EXECUTION_SUCCESS = "EXECUTION_SUCCESS";
 static const char* EXECUTION_RUNTIME_ERROR = "EXECUTION_RUNTIME_ERROR";
 static const char* EXECUTION_ERROR = "EXECUTION_ERROR";
+
+static const size_t USER_DEBUG_CAP = ${USER_DEBUG_OUTPUT_MAX_BYTES};
+static std::string user_debug_glob;
+static size_t user_debug_tot = 0;
+
+static void append_user_dbg(const std::string& chunk) {
+  for (unsigned char c : chunk) {
+    if (user_debug_tot >= USER_DEBUG_CAP) return;
+    user_debug_glob.push_back(static_cast<char>(c));
+    user_debug_tot++;
+  }
+}
+
+struct ScopedRdbuf {
+  std::streambuf* prev;
+  explicit ScopedRdbuf(std::streambuf* next) : prev(std::cout.rdbuf(next)) {}
+  ~ScopedRdbuf() { std::cout.rdbuf(prev); }
+};
 
 ${forwardDecl}
 
@@ -397,6 +418,7 @@ int main() {
     err["memoryUsed"] = 0;
     err["results"] = json::array();
     err["error"] = "Failed to open testcases.json";
+    err["userDebugOutput"] = "";
     std::cout << err.dump() << "\\n";
     return 0;
   }
@@ -406,8 +428,11 @@ int main() {
   json results = json::array();
   int passed = 0;
   int64_t start_total = now_ms();
+  static std::ofstream dev_null("/dev/null");
 
+  int case_index = 0;
   for (const auto& tc : tests) {
+    case_index += 1;
     json inp = tc.at("input");
     json expected = tc.at("expectedOutput");
     bool is_hidden = tc.value("isHidden", false);
@@ -418,19 +443,51 @@ int main() {
     row["weight"] = weight;
     row["input"] = inp;
     row["expectedOutput"] = expected;
+    std::ostringstream cap;
     try {
-      json actual_json = json(${invokeInner});
-      bool ok = (actual_json == expected);
-      if (ok) passed += 1;
-      row["passed"] = ok;
-      row["actualOutput"] = actual_json;
-      row["error"] = "";
-      row["executionTime"] = static_cast<int>(now_ms() - case_start);
+      {
+        std::streambuf* alt = nullptr;
+        if (is_hidden) {
+          if (dev_null.is_open()) {
+            alt = dev_null.rdbuf();
+          } else {
+            alt = cap.rdbuf();
+          }
+        } else {
+          alt = cap.rdbuf();
+        }
+        ScopedRdbuf _cout_guard(alt);
+        json actual_json = json(${invokeInner});
+        bool ok = (actual_json == expected);
+        if (ok) passed += 1;
+        row["passed"] = ok;
+        row["actualOutput"] = actual_json;
+        row["error"] = "";
+        row["executionTime"] = static_cast<int>(now_ms() - case_start);
+      }
+      if (!is_hidden) {
+        std::string sp = cap.str();
+        if (!sp.empty()) {
+          append_user_dbg("\\n--- visible case ");
+          append_user_dbg(std::to_string(case_index));
+          append_user_dbg(" ---\\n");
+          append_user_dbg(sp);
+        }
+      }
     } catch (const std::exception& ex) {
       row["passed"] = false;
       row["actualOutput"] = nullptr;
       row["error"] = std::string(ex.what());
       row["executionTime"] = static_cast<int>(now_ms() - case_start);
+      if (!is_hidden) {
+        std::string sp = cap.str();
+        if (!sp.empty()) {
+          append_user_dbg("\\n--- visible case ");
+          append_user_dbg(std::to_string(case_index));
+          append_user_dbg(" ---\\n");
+          append_user_dbg(sp);
+        }
+      }
     }
     results.push_back(row);
   }
@@ -445,6 +502,7 @@ int main() {
   out["executionTime"] = static_cast<int>(now_ms() - start_total);
   out["memoryUsed"] = 0;
   out["results"] = results;
+  out["userDebugOutput"] = user_debug_glob;
   std::cout << out.dump() << "\\n";
   return 0;
 }

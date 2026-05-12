@@ -28,9 +28,19 @@ logoRouter.get("/", async (req, res) => {
     return res.status(400).json({ error: "Domain is required" });
   }
 
-  if (logoCache.has(domain)) {
-    const cachedLogo = logoCache.get(domain);
-    console.log(`[logo] cache hit: ${domain}`);
+  const rawSize = req.query?.size;
+  let size = 128;
+  if (rawSize != null && rawSize !== "") {
+    const n = Number.parseInt(String(rawSize), 10);
+    if (Number.isFinite(n)) {
+      size = Math.min(800, Math.max(32, Math.trunc(n)));
+    }
+  }
+  const cacheKey = `${domain}:${size}`;
+
+  if (logoCache.has(cacheKey)) {
+    const cachedLogo = logoCache.get(cacheKey);
+    console.log(`[logo] cache hit: ${cacheKey}`);
     res.type(cachedLogo.contentType);
     res.set("Cache-Control", `public, max-age=${ONE_DAY_SECONDS}`);
     return res.send(cachedLogo.body);
@@ -40,7 +50,7 @@ logoRouter.get("/", async (req, res) => {
     // Route all logo.dev access through the backend so the frontend never calls it directly.
     const logoUrl = `https://img.logo.dev/${domain}?token=${encodeURIComponent(
       LOGO_DEV_PUBLIC_TOKEN
-    )}`;
+    )}&size=${encodeURIComponent(String(size))}`;
     const response = await fetch(logoUrl, {
       headers: {
         Accept: "image/*",
@@ -53,12 +63,12 @@ logoRouter.get("/", async (req, res) => {
 
     const contentType = response.headers.get("content-type") || "image/png";
     const body = Buffer.from(await response.arrayBuffer());
-    logoCache.set(domain, { body, contentType });
+    logoCache.set(cacheKey, { body, contentType });
 
     // Cache the image bytes in memory so repeated company-card/logo-grid renders avoid external fetches.
     res.type(contentType);
     res.set("Cache-Control", `public, max-age=${ONE_DAY_SECONDS}`);
-    console.log(`[logo] cache miss: ${domain}`);
+    console.log(`[logo] cache miss: ${cacheKey}`);
     return res.send(body);
   } catch (error) {
     console.error("[logo] failed to resolve logo:", error);

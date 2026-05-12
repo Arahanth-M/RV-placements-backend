@@ -6,6 +6,7 @@ import {
   EXECUTION_SUCCESS,
   EXECUTION_TIMEOUT,
 } from "../codeExecution/executionTypes.js";
+import { buildMisconfiguredCodeGradingEvaluation } from "../interviewCodeGradingGuards.js";
 
 const clamp01 = (value) => {
   const numeric = Number(value);
@@ -24,6 +25,14 @@ const extractExecutableCode = (answer = "", language = "python") => {
     const cppFenced = [...raw.matchAll(/```(?:cpp|cxx|c\+\+)\s*([\s\S]*?)```/gi)];
     if (cppFenced.length > 0) {
       const best = toSafeString(cppFenced[cppFenced.length - 1]?.[1] || "");
+      if (best) return best;
+    }
+  }
+
+  if (language === "java") {
+    const javaFenced = [...raw.matchAll(/```(?:java)\s*([\s\S]*?)```/gi)];
+    if (javaFenced.length > 0) {
+      const best = toSafeString(javaFenced[javaFenced.length - 1]?.[1] || "");
       if (best) return best;
     }
   }
@@ -51,6 +60,16 @@ const extractExecutableCode = (answer = "", language = "python") => {
     }
   }
 
+  if (language === "java") {
+    const javaStartIdx = lines.findIndex((line) =>
+      /^\s*(package\s+|import\s+java\.|public\s+class\s+|class\s+\w+)/.test(line)
+    );
+    if (javaStartIdx >= 0) {
+      const extracted = toSafeString(lines.slice(javaStartIdx).join("\n"));
+      if (extracted) return extracted;
+    }
+  }
+
   const pyStartIdx = lines.findIndex((line) =>
     /^\s*(def\s+\w+\s*\(|class\s+\w+|from\s+\w+|import\s+\w+|if\s+__name__\s*==)/.test(line)
   );
@@ -72,6 +91,19 @@ export const evaluateCodeExecution = async (payload) => {
     : Array.isArray(payload?.metadata?.testCases)
     ? payload.metadata.testCases
     : [];
+  if (!Array.isArray(testCases) || testCases.length === 0) {
+    return buildMisconfiguredCodeGradingEvaluation({
+      reason: "missing_testcases",
+      questionId: String(payload?.metadata?.questionId || "").trim(),
+    });
+  }
+  const fs = String(payload?.functionSignature || payload?.metadata?.functionSignature || "").trim();
+  if (!fs) {
+    return buildMisconfiguredCodeGradingEvaluation({
+      reason: "missing_function_signature",
+      questionId: String(payload?.metadata?.questionId || "").trim(),
+    });
+  }
   const language = normalizeExecutionLanguage(payload?.language);
   const executableCode = extractExecutableCode(
     typeof payload?.answer === "string" ? payload.answer : "",
@@ -214,6 +246,8 @@ export const evaluateCodeExecution = async (payload) => {
         executionTime: Number(executionResult?.executionTime) || 0,
         weightedPassRate,
         failedTests,
+        userDebugOutput:
+          typeof executionResult?.userDebugOutput === "string" ? executionResult.userDebugOutput : "",
       },
     },
   };

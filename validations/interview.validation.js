@@ -31,7 +31,10 @@ export const interviewStartSchema = Joi.object({
 export const interviewSubmitAnswerSchema = Joi.object({
   sessionId: Joi.string().trim().min(1).max(128).required(),
   answer: Joi.string().required().max(500000),
-  language: Joi.string().trim().valid("python", "py", "cpp", "c++", "cxx", "cplusplus").optional(),
+  language: Joi.string()
+    .trim()
+    .valid("python", "py", "cpp", "c++", "cxx", "cplusplus", "java")
+    .optional(),
 }).unknown(true);
 
 export const interviewMoveRoundSchema = Joi.object({
@@ -43,7 +46,7 @@ export const interviewRunPreviewSchema = Joi.object({
   code: Joi.string().required().max(500000),
   language: Joi.string()
     .trim()
-    .valid("python", "py", "sql", "cpp", "c++", "cxx", "cplusplus")
+    .valid("python", "py", "sql", "cpp", "c++", "cxx", "cplusplus", "java")
     .required(),
 }).unknown(true);
 

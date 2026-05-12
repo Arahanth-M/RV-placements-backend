@@ -10,6 +10,9 @@ import {
 import { getCompanyContext } from "./mcp/getCompanyContext.js";
 import { generateQuestion, normalizeExpectedPoints } from "./mcp/generateQuestion.js";
 import { generateRoundFeedback as generateRoundFeedbackMCP } from "./mcp/generateRoundFeedback.js";
+import { generateRoundFeedbackLLM } from "./mcp/generateRoundFeedbackLLM.js";
+import { roundTypeImpliesCodeExecutionInterview } from "./interviewCodeGradingGuards.js";
+import { computeDsaRoundQuestionBuckets } from "../utils/interviewQuestionAttempts.js";
 import { INTERVIEW_STATES } from "./interviewStateMachine.js";
 
 const updateOptions = {
@@ -260,14 +263,7 @@ export const startRound = async (sessionId) => {
   // 3) Call MCP generateQuestion with companyContext + round context
   const companyData = (await resolveInterviewMergedCompanyForSession(session)) ?? null;
   const companyContext = await getCompanyContext(companyData || {});
-  const {
-    question,
-    expectedPoints,
-    expectedAnswerMode,
-    questionId,
-    evaluationStrategy,
-    supportedCodingLanguages,
-  } = await generateQuestion({
+  const gen = await generateQuestion({
     userId: String(session.userId || ""),
     companyContext,
     roundType: currentRound.type,
@@ -282,12 +278,29 @@ export const startRound = async (sessionId) => {
     placementCluster: session.placementCluster,
     placementYear: session.placementYear,
     mergePlacementByType: session.mergePlacementByType === true,
-    });
+  });
+
+  if (gen?.generationError) {
+    throw new Error(gen.generationError.message || "Could not start this interview round.");
+  }
+
+  const {
+    question,
+    questionUrl,
+    expectedPoints,
+    expectedAnswerMode,
+    questionId,
+    evaluationStrategy,
+    supportedCodingLanguages,
+    resolvedCodeTestCases,
+    resolvedDsaMetadata,
+  } = gen;
 
   // 4) Store first question in round.questions
   currentRound.questions = [
     {
       question,
+      questionUrl: toSafeString(questionUrl),
       questionId: toSafeString(questionId) || undefined,
       supportedCodingLanguages: Array.isArray(supportedCodingLanguages)
         ? supportedCodingLanguages
@@ -303,6 +316,12 @@ export const startRound = async (sessionId) => {
         roundType: currentRound.type,
         expectedAnswerMode,
       }),
+      ...(Array.isArray(resolvedCodeTestCases) && resolvedCodeTestCases.length > 0
+        ? { resolvedCodeTestCases }
+        : {}),
+      ...(resolvedDsaMetadata && typeof resolvedDsaMetadata === "object"
+        ? { resolvedDsaMetadata }
+        : {}),
     },
   ];
 
@@ -322,6 +341,7 @@ export const startRound = async (sessionId) => {
 
   return {
     question,
+    questionUrl: toSafeString(questionUrl),
     roundNumber,
     roundType: currentRound.type,
     difficulty: currentRound.difficulty,
@@ -350,6 +370,35 @@ export const generateRoundFeedback = async (sessionId, roundNumber) => {
   }
 
   const questions = Array.isArray(round.questions) ? round.questions : [];
+  const isDsaStyleRound = roundTypeImpliesCodeExecutionInterview(round.type);
+
+  // DSA / code-execution rounds: deterministic counts only — no LLM, no strengths/weaknesses lists.
+  if (isDsaStyleRound) {
+    const dsaRoundStats = computeDsaRoundQuestionBuckets(questions);
+    const { totalQuestions, answeredCorrectly, partiallyAnswered, notAnswered } = dsaRoundStats;
+    const summary = `This round had ${totalQuestions} question${
+      totalQuestions === 1 ? "" : "s"
+    }. You answered ${answeredCorrectly} correctly, ${partiallyAnswered} partially, and ${notAnswered} with no submission.`;
+
+    round.feedback = {
+      summary,
+      strengths: [],
+      weaknesses: [],
+      improvementTips: [],
+      dsaRoundStats,
+    };
+    session.markModified("rounds");
+    await session.save();
+
+    return {
+      summary: round.feedback.summary,
+      strengths: round.feedback.strengths,
+      weaknesses: round.feedback.weaknesses,
+      improvementTips: round.feedback.improvementTips,
+      dsaRoundStats: round.feedback.dsaRoundStats,
+    };
+  }
+
   const answered = questions.filter(
     (item) => typeof item?.answer === "string" && item.answer.trim().length > 0
   );
@@ -357,47 +406,34 @@ export const generateRoundFeedback = async (sessionId, roundNumber) => {
     .map((item) => Number(item?.score))
     .filter((score) => Number.isFinite(score));
 
-  // 2) Aggregate average score + raw strengths/weakness signals
   const averageScore =
     scores.length > 0
       ? Math.round((scores.reduce((sum, score) => sum + score, 0) / scores.length) * 10) / 10
       : 0;
 
-  const strengths = [];
-  const weaknesses = [];
-
-  if (averageScore >= 8) {
-    strengths.push("Consistently strong answers in this round.");
-  } else if (averageScore >= 6) {
-    strengths.push("Decent baseline performance in this round.");
-    weaknesses.push("Answers can be sharper and more structured.");
-  } else {
-    weaknesses.push("Needs significant improvement in core concepts for this round.");
-  }
-
-  if (answered.length < questions.length) {
-    weaknesses.push("Not all round questions were fully answered.");
-  }
-
-  // Fetch company context for MCP round feedback tool input.
   const companyData = (await resolveInterviewMergedCompanyForSession(session)) ?? null;
   const companyContext = await getCompanyContext(companyData || {});
 
-  // 3) Call MCP generateRoundFeedback (new tool)
-  const feedback = await generateRoundFeedbackMCP({
-    roundData: {
-      ...(typeof round.toObject === "function" ? round.toObject() : round),
-      aggregate: {
-        averageScore,
-        strengths,
-        weaknesses,
-        scores,
-      },
+  const roundPayload = {
+    ...(typeof round.toObject === "function" ? round.toObject() : round),
+    aggregate: {
+      averageScore,
+      scores,
     },
+  };
+
+  let feedback = await generateRoundFeedbackLLM({
+    roundData: roundPayload,
     companyContext,
   });
 
-  // 4) Store feedback inside round.feedback
+  if (!feedback) {
+    feedback = await generateRoundFeedbackMCP({
+      roundData: roundPayload,
+      companyContext,
+    });
+  }
+
   round.feedback = {
     summary: feedback.summary,
     strengths: Array.isArray(feedback.strengths) ? feedback.strengths : [],
@@ -409,7 +445,6 @@ export const generateRoundFeedback = async (sessionId, roundNumber) => {
   session.markModified("rounds");
   await session.save();
 
-  // 5) Return structured feedback
   return {
     summary: round.feedback.summary,
     strengths: round.feedback.strengths,

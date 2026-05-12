@@ -4,9 +4,11 @@
  * Data sources (JSON in-repo; no network fetch):
  *   - scripts/data/dsa-interview-seeds.json (base set)
  *   - scripts/data/striver-sde-sheet/bulk-part-01.json … bulk-part-05.json (100 SDE-sheet rows)
+ *   - scripts/data/dsa-interview-seeds-leetcode-extra-100.json (25 easy + 50 medium + 25 hard, LeetCode URLs)
  *
  * Company tags: READ-ONLY query against CompanyStatic (collection "companies").
- * Tags are assigned by round-robin over distinct company names; no writes to companies.
+ * Only the first 10 company documents (by ascending _id) are used for tags; no writes to companies.
+ * Tags are assigned by round-robin over those names; no writes to companies.
  *
  * Writes: ONLY interviewquestions (InterviewQuestion model) via upsert on questionId.
  *
@@ -35,13 +37,22 @@ const SEED_FILES = [
   ...[1, 2, 3, 4, 5].map((n) =>
     path.join(__dirname, "data", "striver-sde-sheet", `bulk-part-0${n}.json`)
   ),
+  path.join(__dirname, "data", "dsa-interview-seeds-leetcode-extra-100.json"),
 ];
 
 const TAGS_PER_QUESTION = 3;
 const DRY_RUN = process.argv.includes("--dry-run");
 
+function resolveQuestionUrl(row) {
+  const direct = typeof row?.url === "string" ? row.url.trim() : "";
+  if (direct) return direct;
+  const src = typeof row?.sourceMetadata?.source === "string" ? row.sourceMetadata.source.trim() : "";
+  if (/^https?:\/\//i.test(src)) return src;
+  return "";
+}
+
 /**
- * Spread tags across the full company list (read-only names). Uses several modular
+ * Spread tags across the first-10-companies name list (read-only). Uses several modular
  * strides so different companies co-occur and the set rotates through the DB list.
  * @param {string[]} names distinct non-empty company display names
  * @param {number} index question index in merged seed array
@@ -71,8 +82,18 @@ async function loadSeedRows() {
   return chunks.flat();
 }
 
-async function readCompanyDisplayNames() {
-  const rows = await CompanyStatic.find({}, { name: 1, _id: 0 }).lean();
+const FIRST_COMPANY_TAG_COUNT = 10;
+
+/**
+ * First N companies in the `companies` collection by stable insertion order (_id ascending).
+ * Read-only; no writes to companies.
+ */
+async function readFirstCompanyDisplayNames(limit = FIRST_COMPANY_TAG_COUNT) {
+  const cap = Math.max(1, Math.min(Number(limit) || FIRST_COMPANY_TAG_COUNT, 500));
+  const rows = await CompanyStatic.find({}, { name: 1, _id: 1 })
+    .sort({ _id: 1 })
+    .limit(cap)
+    .lean();
   const names = rows
     .map((r) => (typeof r?.name === "string" ? r.name.trim() : ""))
     .filter(Boolean);
@@ -83,15 +104,15 @@ async function main() {
   const uri = config.MONGO_URI;
   await connectDB(uri);
 
-  const [seedRows, companyNames] = await Promise.all([loadSeedRows(), readCompanyDisplayNames()]);
+  const [seedRows, companyNames] = await Promise.all([loadSeedRows(), readFirstCompanyDisplayNames()]);
 
   if (companyNames.length === 0) {
     console.warn(
-      "[seedDsaInterviewQuestions] No company names found in companies collection; companyTags will be empty."
+      "[seedDsaInterviewQuestions] No company names found in first companies rows; companyTags will be empty."
     );
   } else {
     console.log(
-      `[seedDsaInterviewQuestions] Loaded ${companyNames.length} distinct company name(s) for tagging (read-only).`
+      `[seedDsaInterviewQuestions] Loaded ${companyNames.length} company name(s) from first ${FIRST_COMPANY_TAG_COUNT} companies by _id (read-only).`
     );
   }
 
@@ -113,7 +134,7 @@ async function main() {
     seenIds.add(qid);
 
     const companyTags = pickCompanyTags(companyNames, i);
-    const doc = { ...row, companyTags };
+    const doc = { ...row, companyTags, url: resolveQuestionUrl(row) };
 
     try {
       const model = new InterviewQuestion(doc);

@@ -107,7 +107,9 @@ const roundQuestionSchema = new mongoose.Schema(
   {
     question: { type: String, trim: true },
     questionId: { type: String, trim: true },
-    /** For code_execution rounds: languages the sandbox may run (e.g. python, cpp). */
+    /** Canonical reference link (e.g. LeetCode problem URL). */
+    questionUrl: { type: String, trim: true, default: "" },
+    /** For code_execution rounds: languages the sandbox may run (e.g. python, cpp, java). */
     supportedCodingLanguages: { type: [String], default: undefined },
     evaluationStrategy: { type: String, trim: true },
     sourceType: {
@@ -131,6 +133,19 @@ const roundQuestionSchema = new mongoose.Schema(
       type: [expectedPointSchema],
       default: [],
     },
+    /** Snapshot from bank at question creation — grading prefers this over a second DB lookup. */
+    resolvedCodeTestCases: { type: [mongoose.Schema.Types.Mixed], default: undefined },
+    resolvedDsaMetadata: { type: mongoose.Schema.Types.Mixed, default: undefined },
+  },
+  { _id: false }
+);
+
+const roundDsaStatsSchema = new mongoose.Schema(
+  {
+    totalQuestions: { type: Number, default: 0 },
+    answeredCorrectly: { type: Number, default: 0 },
+    partiallyAnswered: { type: Number, default: 0 },
+    notAnswered: { type: Number, default: 0 },
   },
   { _id: false }
 );
@@ -141,6 +156,10 @@ const roundFeedbackSchema = new mongoose.Schema(
     strengths: { type: [String], default: [] },
     weaknesses: { type: [String], default: [] },
     improvementTips: { type: [String], default: [] },
+    /** Populated for DSA / code-execution rounds only — deterministic counts, no LLM. */
+    dsaRoundStats: { type: roundDsaStatsSchema, default: undefined },
+    /** Average score for the round (merged by worker after feedback generation). */
+    score: { type: Number },
   },
   { _id: false }
 );

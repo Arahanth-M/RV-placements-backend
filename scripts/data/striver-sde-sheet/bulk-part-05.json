@@ -84,6 +84,115 @@
       {
         "input": {
           "arr": [
+            1,
+            3,
+            4,
+            8
+          ],
+          "queries": [
+            [
+              0,
+              1
+            ],
+            [
+              1,
+              2
+            ],
+            [
+              0,
+              3
+            ],
+            [
+              3,
+              3
+            ]
+          ]
+        },
+        "expectedOutput": [
+          2,
+          7,
+          14,
+          8
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "arr": [
+            4,
+            8,
+            2,
+            10
+          ],
+          "queries": [
+            [
+              2,
+              3
+            ],
+            [
+              0,
+              2
+            ]
+          ]
+        },
+        "expectedOutput": [
+          8,
+          14
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "arr": [
+            5
+          ],
+          "queries": [
+            [
+              0,
+              0
+            ]
+          ]
+        },
+        "expectedOutput": [
+          5
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "arr": [
+            1,
+            2
+          ],
+          "queries": [
+            [
+              0,
+              0
+            ],
+            [
+              1,
+              1
+            ],
+            [
+              0,
+              1
+            ]
+          ]
+        },
+        "expectedOutput": [
+          1,
+          2,
+          3
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "arr": [
             5
           ],
           "queries": [
@@ -201,6 +310,55 @@
       },
       {
         "input": {
+          "s": "abc",
+          "shifts": [
+            3,
+            5,
+            9
+          ]
+        },
+        "expectedOutput": "rpl",
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "aaa",
+          "shifts": [
+            1,
+            2,
+            3
+          ]
+        },
+        "expectedOutput": "gfd",
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "z",
+          "shifts": [
+            1
+          ]
+        },
+        "expectedOutput": "a",
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "ab",
+          "shifts": [
+            0,
+            0
+          ]
+        },
+        "expectedOutput": "ab",
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
           "s": "z",
           "shifts": [
             1
@@ -286,6 +444,42 @@
       },
       {
         "input": {
+          "s": "PAYPALISHIRING",
+          "num_rows": 3
+        },
+        "expectedOutput": "PAHNAPLSIIGYIR",
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "PAYPALISHIRING",
+          "num_rows": 4
+        },
+        "expectedOutput": "PINALSIGYAHRPI",
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "A",
+          "num_rows": 1
+        },
+        "expectedOutput": "A",
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "AB",
+          "num_rows": 1
+        },
+        "expectedOutput": "AB",
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
           "s": "A",
           "num_rows": 1
         },
@@ -360,6 +554,38 @@
         },
         "expectedOutput": 1,
         "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 3
+        },
+        "expectedOutput": 5,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 1
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 2
+        },
+        "expectedOutput": 2,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "n": 4
+        },
+        "expectedOutput": 11,
+        "isHidden": true,
         "weight": 1
       },
       {
@@ -472,6 +698,86 @@
         },
         "expectedOutput": 18,
         "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "points": [
+            [
+              0,
+              0
+            ],
+            [
+              2,
+              2
+            ],
+            [
+              3,
+              10
+            ],
+            [
+              5,
+              2
+            ],
+            [
+              7,
+              0
+            ]
+          ]
+        },
+        "expectedOutput": 20,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "points": [
+            [
+              3,
+              12
+            ],
+            [
+              -2,
+              5
+            ],
+            [
+              -4,
+              1
+            ]
+          ]
+        },
+        "expectedOutput": 18,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "points": [
+            [
+              0,
+              0
+            ]
+          ]
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "points": [
+            [
+              0,
+              0
+            ],
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": true,
         "weight": 1
       },
       {
@@ -615,6 +921,96 @@
         "input": {
           "grid": [
             [
+              0,
+              2
+            ],
+            [
+              1,
+              3
+            ]
+          ]
+        },
+        "expectedOutput": 3,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            [
+              0,
+              1,
+              2,
+              3,
+              4
+            ],
+            [
+              24,
+              23,
+              22,
+              21,
+              5
+            ],
+            [
+              12,
+              13,
+              14,
+              15,
+              16
+            ],
+            [
+              11,
+              17,
+              18,
+              19,
+              20
+            ],
+            [
+              10,
+              9,
+              8,
+              7,
+              6
+            ]
+          ]
+        },
+        "expectedOutput": 16,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            [
+              0
+            ]
+          ]
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            [
+              3,
+              2
+            ],
+            [
+              0,
+              1
+            ]
+          ]
+        },
+        "expectedOutput": 3,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            [
               0
             ]
           ]
@@ -734,6 +1130,74 @@
             [
               1
             ],
+            [
+              2
+            ],
+            [
+              3
+            ],
+            []
+          ]
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "rooms": [
+            [
+              1,
+              3
+            ],
+            [
+              3,
+              0,
+              1
+            ],
+            [
+              2
+            ],
+            [
+              0
+            ]
+          ]
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "rooms": [
+            [
+              1
+            ],
+            []
+          ]
+        },
+        "expectedOutput": false,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "rooms": [
+            [
+              0
+            ]
+          ]
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "rooms": [
+            [
+              1
+            ],
             []
           ]
         },
@@ -832,6 +1296,68 @@
           0
         ],
         "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "loveleetcode",
+          "c": "e"
+        },
+        "expectedOutput": [
+          3,
+          2,
+          1,
+          0,
+          1,
+          0,
+          0,
+          1,
+          2,
+          2,
+          1,
+          0
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "aaab",
+          "c": "b"
+        },
+        "expectedOutput": [
+          3,
+          2,
+          1,
+          0
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "a",
+          "c": "a"
+        },
+        "expectedOutput": [
+          0
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "ababa",
+          "c": "b"
+        },
+        "expectedOutput": [
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "isHidden": true,
         "weight": 1
       },
       {
@@ -950,6 +1476,71 @@
         "input": {
           "grid": [
             [
+              0,
+              1
+            ],
+            [
+              1,
+              0
+            ]
+          ]
+        },
+        "expectedOutput": -1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              1,
+              0
+            ],
+            [
+              1,
+              1,
+              0
+            ]
+          ]
+        },
+        "expectedOutput": 4,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            [
+              0
+            ]
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            [
+              1
+            ]
+          ]
+        },
+        "expectedOutput": -1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            [
               0
             ]
           ]
@@ -1039,6 +1630,63 @@
         },
         "expectedOutput": 2,
         "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "start": "AACCGGTT",
+          "end": "AACCGGTA",
+          "bank": [
+            "AACCGGTA"
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "start": "AACCGGTT",
+          "end": "AAACGGTA",
+          "bank": [
+            "AACCGGTA",
+            "AACCGCTA",
+            "AAACGGTA"
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "start": "AAAAACCC",
+          "end": "AACCCCCC",
+          "bank": [
+            "AAAACCCC",
+            "AAACCCCC",
+            "AACCCCCC"
+          ]
+        },
+        "expectedOutput": 3,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "start": "AAAAAAAA",
+          "end": "CCCCCCCC",
+          "bank": [
+            "AAAAAAAA",
+            "AAAAAAAC",
+            "AAAACCAA",
+            "AACCCCCC",
+            "ACCCCCCC",
+            "CCCCCCCC"
+          ]
+        },
+        "expectedOutput": -1,
+        "isHidden": true,
         "weight": 1
       },
       {
@@ -1146,6 +1794,59 @@
       {
         "input": {
           "deadends": [
+            "0201",
+            "0101",
+            "0102",
+            "1212",
+            "2002"
+          ],
+          "target": "0202"
+        },
+        "expectedOutput": 6,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "deadends": [
+            "8888"
+          ],
+          "target": "0009"
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "deadends": [
+            "8887",
+            "8889",
+            "8878",
+            "8898",
+            "8788",
+            "8988",
+            "7888",
+            "9888"
+          ],
+          "target": "8888"
+        },
+        "expectedOutput": -1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "deadends": [],
+          "target": "0000"
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "deadends": [
             "8887",
             "8889",
             "8878",
@@ -1236,6 +1937,51 @@
         },
         "expectedOutput": -1,
         "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            "23",
+            "12"
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            "11",
+            "11",
+            "00"
+          ]
+        },
+        "expectedOutput": -1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            "0"
+          ]
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            "22",
+            "11",
+            "11"
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": true,
         "weight": 1
       },
       {
@@ -1366,6 +2112,96 @@
           "heights": [
             [
               1,
+              2,
+              2,
+              3,
+              5
+            ],
+            [
+              3,
+              2,
+              3,
+              4,
+              4
+            ],
+            [
+              2,
+              4,
+              5,
+              3,
+              1
+            ],
+            [
+              6,
+              7,
+              1,
+              4,
+              5
+            ],
+            [
+              5,
+              1,
+              1,
+              2,
+              4
+            ]
+          ]
+        },
+        "expectedOutput": 7,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "heights": [
+            [
+              1
+            ]
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "heights": [
+            [
+              1,
+              1
+            ],
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "expectedOutput": 4,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "heights": [
+            [
+              2,
+              2
+            ],
+            [
+              2,
+              2
+            ]
+          ]
+        },
+        "expectedOutput": 4,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "heights": [
+            [
+              1,
               1
             ],
             [
@@ -1474,6 +2310,72 @@
         },
         "expectedOutput": 9,
         "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "parent": [
+            -1,
+            0,
+            0,
+            2,
+            2
+          ],
+          "values": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        "expectedOutput": 12,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "parent": [
+            -1,
+            0
+          ],
+          "values": [
+            -10,
+            9
+          ]
+        },
+        "expectedOutput": 9,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "parent": [
+            -1
+          ],
+          "values": [
+            5
+          ]
+        },
+        "expectedOutput": 5,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "parent": [
+            -1,
+            0,
+            1
+          ],
+          "values": [
+            1,
+            -2,
+            3
+          ]
+        },
+        "expectedOutput": 3,
+        "isHidden": true,
         "weight": 1
       },
       {
@@ -1620,6 +2522,114 @@
             ],
             [
               2,
+              3
+            ]
+          ]
+        },
+        "expectedOutput": [
+          2,
+          3
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "edges": [
+            [
+              1,
+              2
+            ],
+            [
+              2,
+              3
+            ],
+            [
+              3,
+              4
+            ],
+            [
+              1,
+              4
+            ],
+            [
+              1,
+              5
+            ]
+          ]
+        },
+        "expectedOutput": [
+          1,
+          4
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "edges": [
+            [
+              1,
+              2
+            ],
+            [
+              1,
+              3
+            ],
+            [
+              2,
+              4
+            ],
+            [
+              3,
+              4
+            ]
+          ]
+        },
+        "expectedOutput": [
+          3,
+          4
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "edges": [
+            [
+              1,
+              2
+            ],
+            [
+              2,
+              3
+            ],
+            [
+              3,
+              1
+            ]
+          ]
+        },
+        "expectedOutput": [
+          3,
+          1
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "edges": [
+            [
+              1,
+              2
+            ],
+            [
+              1,
+              3
+            ],
+            [
+              2,
               4
             ],
             [
@@ -1735,6 +2745,70 @@
       {
         "input": {
           "tokens": [
+            "2",
+            "1",
+            "+",
+            "3",
+            "*"
+          ]
+        },
+        "expectedOutput": 9,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "tokens": [
+            "4",
+            "13",
+            "5",
+            "/",
+            "+"
+          ]
+        },
+        "expectedOutput": 6,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "tokens": [
+            "10",
+            "6",
+            "9",
+            "3",
+            "+",
+            "-11",
+            "*",
+            "/",
+            "*",
+            "17",
+            "+",
+            "5",
+            "+"
+          ]
+        },
+        "expectedOutput": 22,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "tokens": [
+            "18",
+            "6",
+            "-",
+            "7",
+            "*"
+          ]
+        },
+        "expectedOutput": 84,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "tokens": [
             "10",
             "6",
             "9",
@@ -1831,6 +2905,38 @@
       },
       {
         "input": {
+          "path": "/home/"
+        },
+        "expectedOutput": "/home",
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "path": "/../"
+        },
+        "expectedOutput": "/",
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "path": "/home//foo/"
+        },
+        "expectedOutput": "/home/foo",
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "path": "/a/./b/../../c/"
+        },
+        "expectedOutput": "/c",
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
           "path": "/home//foo/"
         },
         "expectedOutput": "/home/foo",
@@ -1904,6 +3010,38 @@
         },
         "expectedOutput": "One Million",
         "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "num": 123
+        },
+        "expectedOutput": "One Hundred Twenty Three",
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "num": 1000000
+        },
+        "expectedOutput": "One Million",
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "num": 0
+        },
+        "expectedOutput": "Zero",
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "num": 508
+        },
+        "expectedOutput": "Five Hundred Eight",
+        "isHidden": true,
         "weight": 1
       },
       {
@@ -1996,6 +3134,53 @@
       {
         "input": {
           "values": [
+            1,
+            2,
+            3
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "values": [
+            6,
+            10,
+            2,
+            6,
+            5
+          ]
+        },
+        "expectedOutput": 6,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "values": [
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "values": [
+            1,
+            2
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "values": [
             1
           ]
         },
@@ -2081,6 +3266,50 @@
         },
         "expectedOutput": 0,
         "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            "12",
+            "21"
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            "1111",
+            "1111",
+            "1111"
+          ]
+        },
+        "expectedOutput": 0,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            "1"
+          ]
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "grid": [
+            "13",
+            "22"
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
         "weight": 1
       },
       {
