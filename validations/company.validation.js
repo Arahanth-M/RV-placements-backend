@@ -1,4 +1,5 @@
 import Joi from "joi";
+import { COMPANY_VISIT_CLUSTER_CANONICAL } from "../utils/companyVisitClusterCanonical.js";
 import { PPO_BRANCH_CODES_ARRAY } from "../utils/ppoBranchCodes.js";
 
 const t = (max) => Joi.string().trim().max(max);
@@ -56,11 +57,7 @@ const optionalCompanyBody = {
   submittedBy: submittedBySchema,
   logo: t(2048),
   domain: t(255),
-  cluster: Joi.string().valid(
-    "Computer Science and Engineering",
-    "Electronics and Communication",
-    "Mechanical Engineering"
-  ),
+  cluster: Joi.string().valid(...COMPANY_VISIT_CLUSTER_CANONICAL),
   helpfulCount: Joi.number().integer().min(0),
   helpfulUsers: Joi.array().items(t(320)).max(10000),
   totalStudentsApplied: Joi.number().integer().min(0),

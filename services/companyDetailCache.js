@@ -12,13 +12,13 @@ const DETAIL_CACHE_YEAR_SUFFIXES = COMPANY_DETAIL_VISIT_YEARS.map(String);
 const DETAIL_CONTEXT_SLUGS = ["_", "summer_internship", "dream", "open_dream"];
 
 /** Cluster segment for GET /companies/:id cache keys (`placementCluster` query). */
-const DETAIL_CLUSTER_SLUGS = ["_", "cs", "ec", "me"];
+const DETAIL_CLUSTER_SLUGS = ["_", "cs", "ec", "me", "chem"];
 
 /**
  * Bump when cached GET /companies/:id payload shape changes so stale Redis rows are not reused.
  * @see placementDetailHeadlineType, placementContext merge selection, date_of_visit coalesce, placementCluster
  */
-export const COMPANY_DETAIL_CACHE_SCHEMA = "v13";
+export const COMPANY_DETAIL_CACHE_SCHEMA = "v15";
 
 /**
  * @param {unknown} raw — req.query.placementContext or equivalent

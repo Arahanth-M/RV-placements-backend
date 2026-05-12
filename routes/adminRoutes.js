@@ -2151,7 +2151,7 @@ adminRouter.put(
   async (req, res) => {
   try {
     const y = adminVisitYearFromQuery(req);
-    const { eligibility, business_model, type, offCampus, date_of_visit } =
+    const { eligibility, business_model, type, offCampus, date_of_visit, cluster } =
       req.body || {};
 
     const updateData = {};
@@ -2161,6 +2161,9 @@ adminRouter.put(
     if (offCampus !== undefined) updateData.offCampus = Boolean(offCampus);
     if (date_of_visit !== undefined) {
       updateData.date_of_visit = sanitizeText(date_of_visit);
+    }
+    if (cluster !== undefined) {
+      updateData.cluster = sanitizeText(cluster);
     }
 
     const staticRow = await CompanyStatic.findById(req.params.id).lean();

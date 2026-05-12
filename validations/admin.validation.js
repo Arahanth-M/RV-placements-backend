@@ -1,4 +1,5 @@
 import Joi from "joi";
+import { COMPANY_VISIT_CLUSTER_CANONICAL } from "../utils/companyVisitClusterCanonical.js";
 import { PPO_BRANCH_CODES_ARRAY } from "../utils/ppoBranchCodes.js";
 
 const textBlock = Joi.string().max(50000);
@@ -83,6 +84,11 @@ export const adminCompanyGeneralSchema = Joi.object({
   offCampus: Joi.boolean().optional(),
   /** Placement-year visit row (`company_visits`), not static `companies`. */
   date_of_visit: Joi.string().max(120).allow("").optional(),
+  /** Hub routing; empty clears to default CSE slot (legacy). */
+  cluster: Joi.string()
+    .valid(...COMPANY_VISIT_CLUSTER_CANONICAL)
+    .allow("")
+    .optional(),
 }).unknown(true);
 
 export const adminMissingCompanyStatusSchema = Joi.object({

@@ -27,6 +27,7 @@ import {
 import {
   COMPANY_DETAIL_VISIT_YEARS,
   COMPANY_VISIT_DEFAULT_YEAR,
+  matchApprovedVisitYearInDetailYearsExpr,
 } from "../utils/placementYears.js";
 import {
   clusterKeyFromPlacementVisitClusterField,
@@ -690,8 +691,8 @@ async function fetchApprovedVisitsForDetailYearsByCompany(companyIds) {
   if (!companyIds.length) return map;
   const visits = await CompanyVisit.find({
     companyId: { $in: companyIds },
-    year: { $in: [...COMPANY_DETAIL_VISIT_YEARS] },
     status: "approved",
+    ...matchApprovedVisitYearInDetailYearsExpr(),
   }).lean();
   for (const v of visits) {
     const plain = visitWithPlainRoleCtc(v);
@@ -1677,12 +1678,32 @@ export async function findApprovedVisitForCompanyDetail(
   yearRaw,
   placementContextRaw = null,
   companyVisitIdHint = null,
-  placementClusterRaw = null
+  placementClusterRaw = null,
+  staticRowForVisitHint = null
 ) {
+  const clusterFilter = normalizePlacementClusterQuery(placementClusterRaw);
+  const hint = toObjectId(companyVisitIdHint);
+
+  // Resolve exact card row first. Many legacy visits store `companyId` as a **name string**, so
+  // ObjectId equality would wrongly reject the hint and we'd fall back to `migratedAt` order.
+  if (hint && staticRowForVisitHint) {
+    const hintedRaw = await CompanyVisit.findOne({
+      _id: hint,
+      status: "approved",
+    }).lean();
+    if (
+      hintedRaw &&
+      visitRowBelongsToCompanyStatic(hintedRaw, staticRowForVisitHint) &&
+      (!clusterFilter ||
+        clusterKeyFromPlacementVisitClusterField(hintedRaw?.cluster) === clusterFilter)
+    ) {
+      return visitWithPlainRoleCtc(hintedRaw);
+    }
+  }
+
   let candidates = await fetchApprovedVisitsForCompanyDetailYear(companyId, yearRaw);
   if (!candidates.length) return null;
 
-  const clusterFilter = normalizePlacementClusterQuery(placementClusterRaw);
   if (clusterFilter) {
     const scoped = candidates.filter(
       (v) =>
@@ -1693,10 +1714,30 @@ export async function findApprovedVisitForCompanyDetail(
     candidates = scoped;
   }
 
-  const hint = toObjectId(companyVisitIdHint);
   if (hint) {
     const exact = candidates.find((v) => String(v?._id) === String(hint));
     if (exact) return exact;
+    // No static row: same cross-year behaviour using ObjectId `companyId` only (integrations / tests).
+    if (!staticRowForVisitHint) {
+      const hintedRaw = await CompanyVisit.findOne({
+        _id: hint,
+        status: "approved",
+      }).lean();
+      if (hintedRaw) {
+        const cid = toObjectId(companyId);
+        const vid = toObjectId(hintedRaw.companyId);
+        const sameCompany = cid && vid && String(vid) === String(cid);
+        if (sameCompany) {
+          const plain = visitWithPlainRoleCtc(hintedRaw);
+          if (
+            !clusterFilter ||
+            clusterKeyFromPlacementVisitClusterField(plain?.cluster) === clusterFilter
+          ) {
+            return plain;
+          }
+        }
+      }
+    }
   }
   const ctx = normalizePlacementContextParam(placementContextRaw);
   return pickVisitCandidateForPlacementContext(candidates, ctx);
@@ -1795,7 +1836,8 @@ export async function getCompanyDetailLegacyMergedById(
     placementYear,
     placementContextRaw,
     companyVisitIdHint,
-    placementClusterRaw
+    placementClusterRaw,
+    staticRow
   );
   if (visitApproved) {
     const visitForMerge = withClusterMustDoTopics(visitApproved, mustDoTopicVisits);
@@ -1808,7 +1850,8 @@ export async function getCompanyDetailLegacyMergedById(
     const headline = getCompanyDetailHeadlineTypeFromVisits(
       scopedApprovedVisits,
       visitPlain,
-      placementYear
+      placementYear,
+      ctx
     );
     if (headline) merged.placementDetailHeadlineType = headline;
     merged.placementDreamTierVisitMissingForYear =
@@ -1864,6 +1907,8 @@ export async function getCompanyDetailLegacyMergedById(
  * One row per approved company that has any visit in {@link COMPANY_DETAIL_VISIT_YEARS}.
  * `placementYear` picks which visit merges into the card when that year exists; otherwise
  * the other year is used (so 2027-only companies still appear when `?year=2026`).
+ * Rows for the listing year are merged with other cycles in the same hub cluster so PPO/dream
+ * flags and `?cluster=` buckets stay consistent (e.g. 2026 + 2027 CSE visits both under `cs`).
  * @returns {Promise<Record<string, unknown>[]>}
  */
 export async function listApprovedCompaniesLegacyMerged(
@@ -1872,8 +1917,8 @@ export async function listApprovedCompaniesLegacyMerged(
   const pipeline = [
     {
       $match: {
-        year: { $in: [...COMPANY_DETAIL_VISIT_YEARS] },
         status: "approved",
+        ...matchApprovedVisitYearInDetailYearsExpr(),
       },
     },
     { $group: { _id: "$companyId" } },
@@ -1932,10 +1977,9 @@ export async function listApprovedCompaniesLegacyMerged(
     return "";
   };
 
-  const normalizeClusterKey = (raw) =>
-    String(raw || "")
-      .trim()
-      .toLowerCase();
+  /** Hub bucket key (cs|ec|me|chem|…) — matches GET /api/companies ?cluster= and detail routing. */
+  const listingHubClusterKey = (visit) =>
+    clusterKeyFromPlacementVisitClusterField(clusterFromVisit(visit));
 
   for (const row of rows) {
     const staticRow = row.c;
@@ -1950,14 +1994,23 @@ export async function listApprovedCompaniesLegacyMerged(
         .sort(sortVisitsForListing);
       // Keep company visible on the selected hub year even if its first approved visit
       // is in another supported year (e.g. listing 2026 should still show 2027-only cards).
-      if (matchedYearVisits.length > 0) return matchedYearVisits;
-      return [...allVisits].sort(sortVisitsForListing);
+      if (matchedYearVisits.length === 0) {
+        return [...allVisits].sort(sortVisitsForListing);
+      }
+      const matchedIds = new Set(
+        matchedYearVisits.map((v) => (v?._id != null ? String(v._id) : "")).filter(Boolean)
+      );
+      const rest = allVisits.filter((v) => {
+        const id = v?._id != null ? String(v._id) : "";
+        return id && !matchedIds.has(id);
+      });
+      return [...matchedYearVisits, ...rest].sort(sortVisitsForListing);
     })();
 
     /** One list row per company per cluster (avoid duplicate company cards within same cluster). */
     const visitsByCluster = new Map();
     for (const visit of visitsForListing) {
-      const clusterKey = normalizeClusterKey(clusterFromVisit(visit));
+      const clusterKey = listingHubClusterKey(visit);
       if (!visitsByCluster.has(clusterKey)) visitsByCluster.set(clusterKey, []);
       visitsByCluster.get(clusterKey).push(visit);
     }
@@ -1966,9 +2019,9 @@ export async function listApprovedCompaniesLegacyMerged(
       const visit = [...clusterVisits].sort(sortVisitsForListing)[0];
       if (!visit) continue;
 
-      const clusterKey = normalizeClusterKey(clusterFromVisit(visit));
+      const clusterKey = listingHubClusterKey(visit);
       const clusterScopedVisits = allVisits.filter(
-        (v) => normalizeClusterKey(clusterFromVisit(v)) === clusterKey
+        (v) => listingHubClusterKey(v) === clusterKey
       );
       const scopedVisits = clusterScopedVisits.length > 0 ? clusterScopedVisits : [visit];
 
@@ -2032,8 +2085,8 @@ async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
   const pipeline = [
     {
       $match: {
-        year: { $in: [...COMPANY_DETAIL_VISIT_YEARS] },
         status: "approved",
+        ...matchApprovedVisitYearInDetailYearsExpr(),
       },
     },
     { $group: { _id: "$companyId" } },
