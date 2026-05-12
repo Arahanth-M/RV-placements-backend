@@ -435,16 +435,25 @@ export function getListPlacementCategoryMetaFromVisits(
  * @param {Record<string, unknown>[]|undefined} visits — approved visits for this company (2026/2027)
  * @param {Record<string, unknown>|null|undefined} visitForYear — visit row for `placementYear`, plain `roles[].ctc`
  * @param {unknown} placementYearRaw
+ * @param {unknown} [placementListContextRaw] — when `summer_internship`, never substitute Dream hybrid headlines for the visit `type` string.
  * @returns {string|undefined}
  */
 export function getCompanyDetailHeadlineTypeFromVisits(
   visits,
   visitForYear,
-  placementYearRaw
+  placementYearRaw,
+  placementListContextRaw
 ) {
   if (!visitForYear || typeof visitForYear !== "object") return undefined;
   const raw =
     typeof visitForYear.type === "string" ? visitForYear.type.trim() : "";
+  const ctx =
+    typeof placementListContextRaw === "string"
+      ? placementListContextRaw.trim().toLowerCase().replace(/-/g, "_")
+      : "";
+  if (ctx === "summer_internship") {
+    return raw || undefined;
+  }
   const pref = normalizePlacementDetailYear(placementYearRaw);
   if (pref === undefined) return raw || undefined;
 
