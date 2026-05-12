@@ -9,13 +9,18 @@ import {
   parseFlexibleInterviewSignature,
   parseDesignClassNameFromSignature,
 } from "./cppHarnessGenerator.js";
+import { generateJavaMainSource } from "./javaHarnessGenerator.js";
 import {
   EXECUTION_COMPILATION_ERROR,
   EXECUTION_ERROR,
   EXECUTION_RUNTIME_ERROR,
   EXECUTION_TIMEOUT,
 } from "./executionTypes.js";
-import { normalizeExecutionResult, sanitizeInput } from "./executionUtils.js";
+import {
+  normalizeExecutionResult,
+  sanitizeInput,
+  USER_DEBUG_OUTPUT_MAX_BYTES,
+} from "./executionUtils.js";
 
 const toSafeString = (value, fallback = "") =>
   typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -49,6 +54,7 @@ const DOCKER_CPU_LIMIT_CPP =
 const DOCKER_PIDS_LIMIT = "64";
 export const DOCKER_IMAGE_PYTHON = process.env.EXECUTION_PYTHON_IMAGE || "python:3.11";
 const DOCKER_IMAGE_CPP = process.env.EXECUTION_CPP_IMAGE || "gcc:13-bookworm";
+const DOCKER_IMAGE_JAVA = process.env.EXECUTION_JAVA_IMAGE || "eclipse-temurin:17-jdk";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** Cached presence of runtime images after successful inspect or pull. */
@@ -62,6 +68,7 @@ export const normalizeExecutionLanguage = (language) => {
   const safe = raw.toLowerCase();
   if (safe === "py" || safe === "python") return "python";
   if (safe === "cpp" || safe === "c++" || safe === "cxx" || safe === "cplusplus") return "cpp";
+  if (safe === "java") return "java";
   return "python";
 };
 
@@ -95,6 +102,7 @@ import time
 import traceback
 import builtins
 import io
+import contextlib
 
 EXECUTION_SUCCESS = "EXECUTION_SUCCESS"
 EXECUTION_RUNTIME_ERROR = "EXECUTION_RUNTIME_ERROR"
@@ -104,9 +112,6 @@ EXECUTION_ERROR = "EXECUTION_ERROR"
 def load_json(path):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
-
-def safe_print(payload):
-    print(json.dumps(payload, ensure_ascii=False), flush=True)
 
 def main():
     config = load_json("testcases.json")
@@ -120,6 +125,34 @@ def main():
         raise RuntimeError("Interactive input() is not supported in preview. Please define only the required function.")
     builtins.input = _blocked_input
     sys.stdin = io.StringIO("")
+
+    USER_DEBUG_MAX = ${USER_DEBUG_OUTPUT_MAX_BYTES}
+    _user_dbg_parts = []
+    _user_dbg_bytes = [0]
+
+    def _user_dbg_add(text):
+        if not text:
+            return
+        raw = text.encode("utf-8", errors="replace")
+        if _user_dbg_bytes[0] >= USER_DEBUG_MAX:
+            return
+        room = USER_DEBUG_MAX - _user_dbg_bytes[0]
+        chunk = raw[:room].decode("utf-8", errors="replace")
+        _user_dbg_parts.append(chunk)
+        _user_dbg_bytes[0] += len(chunk.encode("utf-8", errors="replace"))
+
+    def _user_dbg_take():
+        return "".join(_user_dbg_parts)
+
+    def safe_print(payload):
+        print(json.dumps(payload, ensure_ascii=False), flush=True)
+
+    def _emit(payload):
+        if isinstance(payload, dict):
+            payload = {**payload, "userDebugOutput": _user_dbg_take()}
+        safe_print(payload)
+
+    _any_hidden_in_job = any(bool(tc.get("isHidden")) for tc in testcases)
 
     def _rows_for_global_error(err_msg):
         rows = []
@@ -139,11 +172,17 @@ def main():
     try:
         spec = importlib.util.spec_from_file_location("solution", os.path.join(os.getcwd(), "solution.py"))
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        _imp_buf = io.StringIO()
+        with contextlib.redirect_stdout(_imp_buf):
+            spec.loader.exec_module(module)
+        if not _any_hidden_in_job:
+            _imp_spool = _imp_buf.getvalue()
+            if _imp_spool:
+                _user_dbg_add("\\n--- (module import) ---\\n" + _imp_spool)
     except SyntaxError as e:
         err = f"SyntaxError: {str(e)}"
         rows = _rows_for_global_error(err)
-        safe_print({
+        _emit({
             "status": EXECUTION_COMPILATION_ERROR,
             "passedCount": 0,
             "failedCount": len(rows),
@@ -157,7 +196,7 @@ def main():
     except Exception as e:
         err = f"ImportError: {str(e)}"
         rows = _rows_for_global_error(err)
-        safe_print({
+        _emit({
             "status": EXECUTION_COMPILATION_ERROR,
             "passedCount": 0,
             "failedCount": len(rows),
@@ -301,7 +340,7 @@ def main():
                     "error": err,
                     "executionTime": 0,
                 })
-            safe_print({
+            _emit({
                 "status": EXECUTION_ERROR,
                 "passedCount": 0,
                 "failedCount": len(rows),
@@ -332,7 +371,7 @@ def main():
                     "error": err,
                     "executionTime": 0,
                 })
-            safe_print({
+            _emit({
                 "status": EXECUTION_ERROR,
                 "passedCount": 0,
                 "failedCount": len(rows),
@@ -357,7 +396,7 @@ def main():
                     "error": err,
                     "executionTime": 0,
                 })
-            safe_print({
+            _emit({
                 "status": EXECUTION_ERROR,
                 "passedCount": 0,
                 "failedCount": len(rows),
@@ -371,7 +410,7 @@ def main():
 
         results = []
         passed = 0
-        for tc in testcases:
+        for _case_idx, tc in enumerate(testcases):
             case_start = time.perf_counter()
             inp = tc.get("input")
             expected = tc.get("expectedOutput")
@@ -380,13 +419,19 @@ def main():
             norm = _normalize_design_streams(inp)
             commands, arguments, skip_ctor_sentinel = norm
             try:
-                actual = _run_design_command_sequence(
-                    Cls_design,
-                    design_class_name,
-                    commands,
-                    arguments,
-                    skip_ctor_sentinel,
-                )
+                _cap = io.StringIO()
+                with contextlib.redirect_stdout(_cap):
+                    actual = _run_design_command_sequence(
+                        Cls_design,
+                        design_class_name,
+                        commands,
+                        arguments,
+                        skip_ctor_sentinel,
+                    )
+                if not is_hidden:
+                    _sp = _cap.getvalue()
+                    if _sp:
+                        _user_dbg_add("\\n--- visible case " + str(_case_idx + 1) + " ---\\n" + _sp)
                 ok = actual == expected
                 if ok:
                     passed += 1
@@ -401,6 +446,13 @@ def main():
                     "executionTime": int((time.perf_counter() - case_start) * 1000),
                 })
             except Exception as e:
+                if not is_hidden:
+                    try:
+                        _sp = _cap.getvalue()
+                    except Exception:
+                        _sp = ""
+                    if _sp:
+                        _user_dbg_add("\\n--- visible case " + str(_case_idx + 1) + " ---\\n" + _sp)
                 results.append({
                     "passed": False,
                     "isHidden": is_hidden,
@@ -415,7 +467,7 @@ def main():
         total = len(results)
         failed = max(0, total - passed)
         status = EXECUTION_SUCCESS if failed == 0 else EXECUTION_RUNTIME_ERROR
-        safe_print({
+        _emit({
             "status": status,
             "passedCount": passed,
             "failedCount": failed,
@@ -509,7 +561,7 @@ def main():
             "or use class Solution with that method name (or common LeetCode camelCase / aliases, e.g. merge_intervals -> merge)."
         )
         rows = _rows_for_global_error(hint)
-        safe_print({
+        _emit({
             "status": EXECUTION_ERROR,
             "passedCount": 0,
             "failedCount": len(rows),
@@ -524,21 +576,27 @@ def main():
     results = []
     passed = 0
 
-    for tc in testcases:
+    for _case_idx, tc in enumerate(testcases):
         case_start = time.perf_counter()
         inp = tc.get("input")
         expected = tc.get("expectedOutput")
         is_hidden = bool(tc.get("isHidden", False))
         weight = tc.get("weight", 1)
         try:
-            if isinstance(inp, dict):
-                actual = target(**inp)
-            elif isinstance(inp, list):
-                actual = target(*inp)
-            elif inp is None:
-                actual = target()
-            else:
-                actual = target(inp)
+            _cap = io.StringIO()
+            with contextlib.redirect_stdout(_cap):
+                if isinstance(inp, dict):
+                    actual = target(**inp)
+                elif isinstance(inp, list):
+                    actual = target(*inp)
+                elif inp is None:
+                    actual = target()
+                else:
+                    actual = target(inp)
+            if not is_hidden:
+                _sp = _cap.getvalue()
+                if _sp:
+                    _user_dbg_add("\\n--- visible case " + str(_case_idx + 1) + " ---\\n" + _sp)
             ok = actual == expected
             if ok:
                 passed += 1
@@ -553,6 +611,13 @@ def main():
                 "executionTime": int((time.perf_counter() - case_start) * 1000),
             })
         except Exception as e:
+            if not is_hidden:
+                try:
+                    _sp = _cap.getvalue()
+                except Exception:
+                    _sp = ""
+                if _sp:
+                    _user_dbg_add("\\n--- visible case " + str(_case_idx + 1) + " ---\\n" + _sp)
             results.append({
                 "passed": False,
                 "isHidden": is_hidden,
@@ -567,7 +632,7 @@ def main():
     total = len(results)
     failed = max(0, total - passed)
     status = EXECUTION_SUCCESS if failed == 0 else EXECUTION_RUNTIME_ERROR
-    safe_print({
+    _emit({
         "status": status,
         "passedCount": passed,
         "failedCount": failed,
@@ -872,6 +937,17 @@ export async function executeCode({
     });
   }
 
+  if (canonicalLang === "java" && parseDesignClassNameFromSignature(safeFunctionSignature)) {
+    return normalizeExecutionResult({
+      status: EXECUTION_ERROR,
+      results: [],
+      executionTime: 0,
+      memoryUsed: 0,
+      error:
+        "This question uses a multi-method class API (signature like class Name { … }). Java execution is not wired for that format yet — use Python for design-style problems, or a single-method DSA signature.",
+    });
+  }
+
   if (
     canonicalLang === "cpp" &&
     /\bdef\s+\w+\s*\(/.test(safeCode) &&
@@ -891,7 +967,8 @@ export async function executeCode({
     canonicalLang === "python" &&
     (/^\s*#\s*include\b/m.test(safeCode) ||
       /\bstd::/.test(safeCode) ||
-      /\bvector\s*</.test(safeCode))
+      /\bvector\s*</.test(safeCode) ||
+      /\bpublic\s+class\s+Solution\b/.test(safeCode))
   ) {
     return normalizeExecutionResult({
       status: EXECUTION_COMPILATION_ERROR,
@@ -899,17 +976,46 @@ export async function executeCode({
       executionTime: 0,
       memoryUsed: 0,
       error:
-        "Language is Python but the submission looks like C++ (e.g. `#include` or `std::`). Switch the language to C++, or paste a Python solution using the `def ...` signature from the prompt.",
+        "Language is Python but the submission looks like C++ or Java (e.g. `#include`, `std::`, or `public class Solution`). Switch the language, or paste a Python solution using the `def ...` signature from the prompt.",
     });
   }
 
-  if (canonicalLang !== "python" && canonicalLang !== "cpp") {
+  if (
+    canonicalLang === "java" &&
+    /\bdef\s+\w+\s*\(/.test(safeCode) &&
+    !/\bpublic\s+class\b/.test(safeCode)
+  ) {
+    return normalizeExecutionResult({
+      status: EXECUTION_COMPILATION_ERROR,
+      results: [],
+      executionTime: 0,
+      memoryUsed: 0,
+      error:
+        "Language is Java but the submission looks like Python (e.g. `def ...`). Switch the language to Python, or submit a `public class Solution` whose method matches the Grader contract.",
+    });
+  }
+
+  if (
+    canonicalLang === "java" &&
+    (/^\s*#\s*include\b/m.test(safeCode) || /\bstd::/.test(safeCode) || /\bvector\s*</.test(safeCode))
+  ) {
+    return normalizeExecutionResult({
+      status: EXECUTION_COMPILATION_ERROR,
+      results: [],
+      executionTime: 0,
+      memoryUsed: 0,
+      error:
+        "Language is Java but the submission looks like C++. Switch the language to C++, or replace the editor with Java that matches the Grader contract.",
+    });
+  }
+
+  if (canonicalLang !== "python" && canonicalLang !== "cpp" && canonicalLang !== "java") {
     return normalizeExecutionResult({
       status: EXECUTION_ERROR,
       results: [],
       executionTime: 0,
       memoryUsed: 0,
-      error: "Unsupported language. Use python or cpp.",
+      error: "Unsupported language. Use python, cpp, or java.",
     });
   }
 
@@ -943,7 +1049,7 @@ export async function executeCode({
         filesToCopy: ["solution.py", "runner.py", "testcases.json"],
         envPairs: ["PYTHONDONTWRITEBYTECODE=1", "PYTHONUNBUFFERED=1"],
       });
-    } else {
+    } else if (canonicalLang === "cpp") {
       await ensureDockerImage(DOCKER_IMAGE_CPP);
       const vendorPath = path.join(__dirname, "vendor", "nlohmann", "json.hpp");
       await fs.access(vendorPath).catch(() => {
@@ -965,6 +1071,29 @@ export async function executeCode({
         containerCommand: ["/bin/sh", "-c", shellScript],
         filesToCopy: ["solution.cpp", "main.cpp", "testcases.json"],
         dirsToCopy: ["vendor"],
+        memoryLimit: DOCKER_MEMORY_LIMIT_CPP,
+        cpuLimit: DOCKER_CPU_LIMIT_CPP,
+      });
+    } else {
+      await ensureDockerImage(DOCKER_IMAGE_JAVA);
+      const gsonJarPath = path.join(__dirname, "vendor", "gson", "gson-2.10.1.jar");
+      await fs.access(gsonJarPath).catch(() => {
+        throw new Error("Missing services/codeExecution/vendor/gson/gson-2.10.1.jar for Java execution.");
+      });
+      await fs.copyFile(gsonJarPath, path.join(tempDir, "gson.jar"));
+      const mainJava = generateJavaMainSource({
+        functionSignature: safeFunctionSignature,
+        testCases: normalizedCases,
+      });
+      await fs.writeFile(path.join(tempDir, "Main.java"), mainJava, "utf8");
+      await fs.writeFile(path.join(tempDir, "Solution.java"), `${safeCode}\n`, "utf8");
+      const shellScript =
+        "javac -encoding UTF-8 -cp /workspace/gson.jar:. Main.java Solution.java && java -cp /workspace/gson.jar:. Main";
+      dockerResult = await runDockerExecution({
+        tempDir,
+        dockerImage: DOCKER_IMAGE_JAVA,
+        containerCommand: ["/bin/sh", "-c", shellScript],
+        filesToCopy: ["Main.java", "Solution.java", "testcases.json", "gson.jar"],
         memoryLimit: DOCKER_MEMORY_LIMIT_CPP,
         cpuLimit: DOCKER_CPU_LIMIT_CPP,
       });
@@ -1004,6 +1133,24 @@ export async function executeCode({
           executionTime: 0,
           memoryUsed: 0,
           error: `${baseErr}${oomHint}`,
+        });
+      }
+      if (canonicalLang === "java" && !dockerResult.timedOut && dockerResult.code !== 0) {
+        if (merged) {
+          console.error("[executeCode] java no JSON output (javac or early crash)", {
+            exitCode: dockerResult.code,
+            signal: dockerResult.signal,
+            tail: merged.slice(-2500),
+          });
+        }
+        const baseErr =
+          merged.slice(0, 4000) || "Java compilation or startup failed before the runner printed JSON.";
+        return normalizeExecutionResult({
+          status: EXECUTION_COMPILATION_ERROR,
+          results: [],
+          executionTime: 0,
+          memoryUsed: 0,
+          error: baseErr,
         });
       }
       console.error("[executeCode] runtime error", {

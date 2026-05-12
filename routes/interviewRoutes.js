@@ -67,6 +67,9 @@ router.use(authorize(["student", "admin", "spc"]));
 const getAuthenticatedUserId = (req) => String(req.user?.userId || "").trim();
 const isSessionOwner = (session, userId) => String(session?.userId || "") === userId;
 
+/** DSA rounds never show or plan more than three questions (legacy sessions may still store a higher count). */
+const isDsaInterviewRoundType = (t) => String(t || "").trim().toUpperCase() === "DSA";
+
 const toClientStatus = (state) =>
   state === INTERVIEW_STATES.INTERVIEW_COMPLETE ? "completed" : "in_progress";
 
@@ -78,6 +81,18 @@ const toRelevanceLabel = (value) => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return null;
   return numeric >= 0.62 ? "relevant" : "irrelevant";
+};
+
+/** Bank `complexity: { time, space }` → safe client payload or null. */
+const extractQuestionComplexityForClient = (raw) => {
+  if (!raw || typeof raw !== "object") return null;
+  const time = raw.time != null ? String(raw.time).trim() : "";
+  const space = raw.space != null ? String(raw.space).trim() : "";
+  if (!time && !space) return null;
+  return {
+    ...(time ? { time } : {}),
+    ...(space ? { space } : {}),
+  };
 };
 
 const buildLastCodeExecutionSummary = (evaluationTrace) => {
@@ -94,6 +109,7 @@ const buildLastCodeExecutionSummary = (evaluationTrace) => {
     visiblePassedCount: Number(ex.visiblePassedCount) || 0,
     hiddenTotalCount: Number(ex.hiddenTotalCount) || 0,
     hiddenPassedCount: Number(ex.hiddenPassedCount) || 0,
+    userDebugOutput: typeof ex.userDebugOutput === "string" ? ex.userDebugOutput : "",
   };
 };
 
@@ -113,20 +129,21 @@ const resolveSupportedCodingLanguages = (
     const s = new Set();
     for (const item of raw) {
       const v = normalizeExecutionLanguage(String(item || ""));
-      if (v === "python" || v === "cpp") s.add(v);
+      if (v === "python" || v === "cpp" || v === "java") s.add(v);
     }
     let out = [...s];
     if (out.length === 0 && isCodeExec) {
-      return ["python", "cpp"];
+      return ["python", "cpp", "java"];
     }
     if (isCodeExec) {
       if (!out.includes("python")) out.unshift("python");
       if (!out.includes("cpp")) out.push("cpp");
+      if (!out.includes("java")) out.push("java");
     }
     return out.length > 0 ? out : ["python"];
   }
   if (isCodeExec) {
-    return ["python", "cpp"];
+    return ["python", "cpp", "java"];
   }
   return ["python"];
 };
@@ -290,7 +307,9 @@ async function resolveInterviewQuestionDoc({
 }) {
   const safeQuestionId = toSafeString(questionId);
   const safeQuestionText = toSafeString(questionText);
-  const projection = includeFullDoc ? "" : "questionId testCases sqlMetadata dsaMetadata";
+  const projection = includeFullDoc
+    ? ""
+    : "questionId url testCases sqlMetadata dsaMetadata topics subtopics companyTags complexity";
   const applyProjection = (query) => (projection ? query.select(projection) : query);
 
   if (safeQuestionId) {
@@ -342,7 +361,9 @@ async function resolveInterviewQuestionDoc({
       : {};
 
   const candidateDocs = await InterviewQuestion.find(familyFilter)
-    .select(includeFullDoc ? "" : "question testCases sqlMetadata dsaMetadata")
+    .select(
+      includeFullDoc ? "" : "question url testCases sqlMetadata dsaMetadata topics subtopics companyTags complexity"
+    )
     .limit(PREVIEW_QUESTION_LOOKUP_CANDIDATE_LIMIT)
     .lean();
 
@@ -501,6 +522,7 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
     const refreshedSession = await getSession(session._id);
     const responsePayload = {
       question: roundStart.question,
+      questionUrl: String(roundStart.questionUrl || "").trim(),
       status: toClientStatus(refreshedSession?.state),
       currentRound: refreshedSession?.currentRound || 1,
       currentQuestionIndex: refreshedSession?.currentQuestionIndex ?? 0,
@@ -982,6 +1004,8 @@ router.post("/run-preview", validateRequest(interviewRunPreviewSchema), async (r
         failedCount: Number(executionPayload?.failedCount) || 0,
         totalCount: Number(executionPayload?.totalCount) || 0,
         executionTime: Number(executionPayload?.executionTime) || 0,
+        userDebugOutput:
+          typeof executionPayload?.userDebugOutput === "string" ? executionPayload.userDebugOutput : "",
         results: Array.isArray(executionPayload?.results)
           ? executionPayload.results.map((item) => ({
               passed: item?.passed === true,
@@ -1113,6 +1137,9 @@ router.get("/interview-status/:sessionId", async (req, res) => {
             weight: Number(testcase?.weight) || 1,
           }))
       : [];
+    const questionUrl =
+      String(slotNow?.questionUrl || "").trim() ||
+      String(previewQuestionDoc?.url || "").trim();
     const previewRunCount = Number(slotNow?.previewRunCount) || 0;
     const previewRunsRemaining = Math.max(0, PREVIEW_RUN_LIMIT_PER_QUESTION - previewRunCount);
     const previewSqlContext = null;
@@ -1178,15 +1205,21 @@ router.get("/interview-status/:sessionId", async (req, res) => {
         questionCount = Math.max(slots, 3);
       }
       questionCount = Math.min(5, Math.max(3, questionCount));
+      if (isDsaInterviewRoundType(r.type)) {
+        questionCount = Math.min(3, questionCount);
+      }
       return { roundNumber, questionCount };
     });
 
-    const questionsPlannedThisRound =
+    const questionsPlannedThisRoundRaw =
       typeof currentRoundDoc?.questionCount === "number" &&
       Number.isFinite(currentRoundDoc.questionCount)
         ? Math.min(5, Math.max(3, Math.round(currentRoundDoc.questionCount)))
         : roundsQuestionSummary[currentRoundIndex]?.questionCount ??
           Math.max(Array.isArray(currentRoundDoc?.questions) ? currentRoundDoc.questions.length : 0, 3);
+    const questionsPlannedThisRound = isDsaInterviewRoundType(currentRoundDoc?.type)
+      ? Math.min(3, questionsPlannedThisRoundRaw)
+      : questionsPlannedThisRoundRaw;
 
     const currentQuestionNumberWithinRound = currentQuestionIndex + 1;
 
@@ -1216,6 +1249,7 @@ router.get("/interview-status/:sessionId", async (req, res) => {
       status: toClientStatus(session.state),
       currentRound: session.currentRound,
       currentQuestion: effectiveCurrentQuestion,
+      questionUrl,
       currentQuestionIndex: session.currentQuestionIndex,
       lastScore: exposePrevFeedback ? prevQuestion?.score ?? null : null,
       lastFeedback: exposePrevFeedback ? prevQuestion?.feedback ?? null : null,
@@ -1246,6 +1280,12 @@ router.get("/interview-status/:sessionId", async (req, res) => {
       codingFunctionSignature: previewQuestionDoc?.dsaMetadata?.functionSignature || "",
       codingStarterCode: previewQuestionDoc?.dsaMetadata?.starterCode || "",
       codingQuestionId: activeQuestionId || "",
+      questionTopics: Array.isArray(previewQuestionDoc?.topics) ? previewQuestionDoc.topics : [],
+      questionSubtopics: Array.isArray(previewQuestionDoc?.subtopics) ? previewQuestionDoc.subtopics : [],
+      questionCompanyTags: Array.isArray(previewQuestionDoc?.companyTags)
+        ? previewQuestionDoc.companyTags
+        : [],
+      questionComplexity: extractQuestionComplexityForClient(previewQuestionDoc?.complexity),
       previewSqlContext,
       isProcessing,
       tips: selectedTips,
@@ -1412,6 +1452,7 @@ router.post("/move-to-next-round", validateRequest(interviewMoveRoundSchema), as
 
     return res.json({
       question: roundStart.question,
+      questionUrl: String(roundStart.questionUrl || "").trim(),
       status: "in_progress",
       interviewStatus: toClientInterviewStatus(session.state),
       roundStatus: session.roundStatus,

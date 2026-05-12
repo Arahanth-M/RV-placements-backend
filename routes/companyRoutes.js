@@ -110,7 +110,8 @@ companyRouter.get("/", async (req, res) => {
 companyRouter.get("/preview-logos", async (req, res) => {
   try {
     const selectedYear = req.query?.year;
-    const payload = await getCompanyCategoryPreviewLogos(selectedYear);
+    const cluster = normalizePlacementClusterQuery(req.query?.cluster);
+    const payload = await getCompanyCategoryPreviewLogos(selectedYear, cluster);
     return res.json(payload);
   } catch (e) {
     console.error("❌ Error fetching preview logos:", e?.message);

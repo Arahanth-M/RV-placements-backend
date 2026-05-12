@@ -105,6 +105,8 @@ const interviewQuestionSchema = new mongoose.Schema(
     questionId: { type: String, required: true, trim: true, unique: true },
     title: { type: String, required: true, trim: true },
     question: { type: String, required: true, trim: true },
+    /** Optional canonical link (e.g. LeetCode problem page). Distinct from sourceMetadata.source labels. */
+    url: { type: String, trim: true, default: "" },
 
     // Classification
     companyTags: { type: [String], default: [] },
@@ -158,8 +160,8 @@ interviewQuestionSchema.path("testCases").validate(function validateTestCases(va
   if (!Array.isArray(value) || value.length === 0) return false;
   const visible = value.filter((tc) => tc && tc.isHidden !== true);
   const hidden = value.filter((tc) => tc && tc.isHidden === true);
-  return visible.length >= 1 && hidden.length >= 1;
-}, "code_execution requires testCases: at least one visible (isHidden: false) and one hidden (isHidden: true).");
+  return visible.length >= 4 && hidden.length >= 4;
+}, "code_execution requires testCases: at least four visible (isHidden: false) and four hidden (isHidden: true).");
 
 interviewQuestionSchema.index({ companyTags: 1 });
 interviewQuestionSchema.index({ roundType: 1 });

@@ -3,6 +3,27 @@ import { EXECUTION_ERROR, EXECUTION_SUCCESS } from "./executionTypes.js";
 const toSafeString = (value, fallback = "") =>
   typeof value === "string" && value.trim() ? value.trim() : fallback;
 
+/** Max UTF-8 bytes for user print capture (visible testcases only); enforced server-side. */
+export const USER_DEBUG_OUTPUT_MAX_BYTES = (() => {
+  const n = Number(process.env.EXECUTION_USER_DEBUG_MAX_BYTES);
+  if (Number.isFinite(n) && n >= 1024 && n <= 512 * 1024) return Math.floor(n);
+  return 32 * 1024;
+})();
+
+export const truncateUserDebugOutput = (raw) => {
+  const s = typeof raw === "string" ? raw : "";
+  if (!s) return "";
+  const enc = new TextEncoder();
+  const dec = new TextDecoder();
+  const buf = enc.encode(s);
+  if (buf.length <= USER_DEBUG_OUTPUT_MAX_BYTES) return s;
+  const cut = buf.slice(0, USER_DEBUG_OUTPUT_MAX_BYTES);
+  let out = dec.decode(cut);
+  if (!out.endsWith("\n")) out += "\n… [truncated]";
+  else out += "… [truncated]";
+  return out;
+};
+
 /** Treat only real truthy hidden flags as hidden (avoids string "false" counting as hidden). */
 export const normalizeIsHidden = (value) => {
   if (value === true || value === 1) return true;
@@ -71,6 +92,7 @@ export const normalizeExecutionResult = (payload = {}) => {
     : [];
 
   const summary = calculateExecutionSummary(normalizedRows);
+  const userDebugRaw = typeof payload.userDebugOutput === "string" ? payload.userDebugOutput : "";
   return {
     status:
       toSafeString(payload.status) ||
@@ -85,6 +107,7 @@ export const normalizeExecutionResult = (payload = {}) => {
     memoryUsed: Number(payload.memoryUsed) || 0,
     results: normalizedRows,
     error: toSafeString(payload.error),
+    userDebugOutput: truncateUserDebugOutput(userDebugRaw),
   };
 };
 
@@ -93,4 +116,6 @@ export default {
   sanitizeInput,
   calculateExecutionSummary,
   normalizeIsHidden,
+  truncateUserDebugOutput,
+  USER_DEBUG_OUTPUT_MAX_BYTES,
 };

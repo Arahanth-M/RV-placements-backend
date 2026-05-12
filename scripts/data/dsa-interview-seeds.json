@@ -5,26 +5,178 @@
     "question": "Given an integer array `nums` and an integer `target`, return indices of the two numbers such that they add up to `target`. You may assume exactly one solution exists, and you cannot use the same element twice. Return the answer as a list of two indices in any order.",
     "roundType": "DSA",
     "difficulty": "medium",
-    "topics": ["arrays", "hashing"],
-    "subtopics": ["two pointers"],
+    "topics": [
+      "arrays",
+      "hashing"
+    ],
+    "subtopics": [
+      "two pointers"
+    ],
     "evaluationStrategy": "code_execution",
     "dsaMetadata": {
-      "supportedLanguages": ["python"],
+      "supportedLanguages": [
+        "python"
+      ],
       "functionSignature": "def two_sum(nums, target):",
       "starterCode": "def two_sum(nums, target):\n    pass\n"
     },
     "testCases": [
-      { "input": { "nums": [2, 7, 11, 15], "target": 9 }, "expectedOutput": [0, 1], "isHidden": false, "weight": 1 },
-      { "input": { "nums": [3, 2, 4], "target": 6 }, "expectedOutput": [1, 2], "isHidden": false, "weight": 1 },
-      { "input": { "nums": [3, 3], "target": 6 }, "expectedOutput": [0, 1], "isHidden": true, "weight": 1 },
-      { "input": { "nums": [-1, -2, -3, -4, -5], "target": -8 }, "expectedOutput": [2, 4], "isHidden": true, "weight": 1 }
+      {
+        "input": {
+          "nums": [
+            2,
+            7,
+            11,
+            15
+          ],
+          "target": 9
+        },
+        "expectedOutput": [
+          0,
+          1
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            3,
+            2,
+            4
+          ],
+          "target": 6
+        },
+        "expectedOutput": [
+          1,
+          2
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            2,
+            7,
+            11,
+            15
+          ],
+          "target": 9
+        },
+        "expectedOutput": [
+          0,
+          1
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            3,
+            2,
+            4
+          ],
+          "target": 6
+        },
+        "expectedOutput": [
+          1,
+          2
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            3,
+            3
+          ],
+          "target": 6
+        },
+        "expectedOutput": [
+          0,
+          1
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            -1,
+            -2,
+            -3,
+            -4,
+            -5
+          ],
+          "target": -8
+        },
+        "expectedOutput": [
+          2,
+          4
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            3,
+            3
+          ],
+          "target": 6
+        },
+        "expectedOutput": [
+          0,
+          1
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            -1,
+            -2,
+            -3,
+            -4,
+            -5
+          ],
+          "target": -8
+        },
+        "expectedOutput": [
+          2,
+          4
+        ],
+        "isHidden": true,
+        "weight": 1
+      }
     ],
     "rubric": [
-      { "text": "Uses a correct strategy (hash map or sorted two-pointer with index handling).", "category": "correctness", "importance": "mustHave", "expectedAnswerMode": "code" },
-      { "text": "Runs in O(n) time for the hash-map approach.", "category": "complexity", "importance": "goodToHave", "expectedAnswerMode": "conceptual" }
+      {
+        "text": "Uses a correct strategy (hash map or sorted two-pointer with index handling).",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      },
+      {
+        "text": "Runs in O(n) time for the hash-map approach.",
+        "category": "complexity",
+        "importance": "goodToHave",
+        "expectedAnswerMode": "conceptual"
+      }
     ],
-    "complexity": { "time": "O(n)", "space": "O(n)" },
-    "sourceMetadata": { "source": "striver_sde_sheet", "verified": false, "qualityScore": 0.9 }
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(n)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.9
+    }
   },
   {
     "questionId": "curated-dsa-best-time-stock",
@@ -32,25 +184,142 @@
     "question": "You are given an array `prices` where `prices[i]` is the price of a stock on day `i`. You may complete at most one transaction (buy one day, sell on a later day). Return the maximum profit you can achieve, or `0` if no profit is possible.",
     "roundType": "DSA",
     "difficulty": "medium",
-    "topics": ["arrays", "greedy"],
+    "topics": [
+      "arrays",
+      "greedy"
+    ],
     "subtopics": [],
     "evaluationStrategy": "code_execution",
     "dsaMetadata": {
-      "supportedLanguages": ["python"],
+      "supportedLanguages": [
+        "python"
+      ],
       "functionSignature": "def max_profit(prices):",
       "starterCode": "def max_profit(prices):\n    pass\n"
     },
     "testCases": [
-      { "input": { "prices": [7, 1, 5, 3, 6, 4] }, "expectedOutput": 5, "isHidden": false, "weight": 1 },
-      { "input": { "prices": [7, 6, 4, 3, 1] }, "expectedOutput": 0, "isHidden": false, "weight": 1 },
-      { "input": { "prices": [1, 2] }, "expectedOutput": 1, "isHidden": true, "weight": 1 },
-      { "input": { "prices": [2, 4, 1] }, "expectedOutput": 2, "isHidden": true, "weight": 1 }
+      {
+        "input": {
+          "prices": [
+            7,
+            1,
+            5,
+            3,
+            6,
+            4
+          ]
+        },
+        "expectedOutput": 5,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "prices": [
+            7,
+            6,
+            4,
+            3,
+            1
+          ]
+        },
+        "expectedOutput": 0,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "prices": [
+            7,
+            1,
+            5,
+            3,
+            6,
+            4
+          ]
+        },
+        "expectedOutput": 5,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "prices": [
+            7,
+            6,
+            4,
+            3,
+            1
+          ]
+        },
+        "expectedOutput": 0,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "prices": [
+            1,
+            2
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "prices": [
+            2,
+            4,
+            1
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "prices": [
+            1,
+            2
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "prices": [
+            2,
+            4,
+            1
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": true,
+        "weight": 1
+      }
     ],
     "rubric": [
-      { "text": "Correctly tracks minimum price seen so far while scanning.", "category": "correctness", "importance": "mustHave", "expectedAnswerMode": "code" }
+      {
+        "text": "Correctly tracks minimum price seen so far while scanning.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
     ],
-    "complexity": { "time": "O(n)", "space": "O(1)" },
-    "sourceMetadata": { "source": "striver_sde_sheet", "verified": false, "qualityScore": 0.88 }
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.88
+    }
   },
   {
     "questionId": "curated-dsa-contains-duplicate",
@@ -58,25 +327,148 @@
     "question": "Given an integer array `nums`, return `True` if any value appears at least twice in the array, otherwise return `False`.",
     "roundType": "DSA",
     "difficulty": "medium",
-    "topics": ["arrays", "hashing"],
+    "topics": [
+      "arrays",
+      "hashing"
+    ],
     "subtopics": [],
     "evaluationStrategy": "code_execution",
     "dsaMetadata": {
-      "supportedLanguages": ["python"],
+      "supportedLanguages": [
+        "python"
+      ],
       "functionSignature": "def contains_duplicate(nums):",
       "starterCode": "def contains_duplicate(nums):\n    pass\n"
     },
     "testCases": [
-      { "input": { "nums": [1, 2, 3, 1] }, "expectedOutput": true, "isHidden": false, "weight": 1 },
-      { "input": { "nums": [1, 2, 3, 4] }, "expectedOutput": false, "isHidden": false, "weight": 1 },
-      { "input": { "nums": [1, 1, 1, 3, 3, 4, 3, 2, 4, 2] }, "expectedOutput": true, "isHidden": true, "weight": 1 },
-      { "input": { "nums": [0] }, "expectedOutput": false, "isHidden": true, "weight": 1 }
+      {
+        "input": {
+          "nums": [
+            1,
+            2,
+            3,
+            1
+          ]
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        "expectedOutput": false,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            2,
+            3,
+            1
+          ]
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        "expectedOutput": false,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            1,
+            1,
+            3,
+            3,
+            4,
+            3,
+            2,
+            4,
+            2
+          ]
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            0
+          ]
+        },
+        "expectedOutput": false,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            1,
+            1,
+            3,
+            3,
+            4,
+            3,
+            2,
+            4,
+            2
+          ]
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            0
+          ]
+        },
+        "expectedOutput": false,
+        "isHidden": true,
+        "weight": 1
+      }
     ],
     "rubric": [
-      { "text": "Detects duplicates using set or sorting with adjacent scan.", "category": "correctness", "importance": "mustHave", "expectedAnswerMode": "code" }
+      {
+        "text": "Detects duplicates using set or sorting with adjacent scan.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
     ],
-    "complexity": { "time": "O(n)", "space": "O(n)" },
-    "sourceMetadata": { "source": "striver_sde_sheet", "verified": false, "qualityScore": 0.85 }
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(n)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.85
+    }
   },
   {
     "questionId": "curated-dsa-maximum-subarray",
@@ -84,25 +476,144 @@
     "question": "Given an integer array `nums`, find the contiguous subarray (containing at least one number) which has the largest sum and return that sum.",
     "roundType": "DSA",
     "difficulty": "medium",
-    "topics": ["arrays", "dynamic programming"],
-    "subtopics": ["kadane"],
+    "topics": [
+      "arrays",
+      "dynamic programming"
+    ],
+    "subtopics": [
+      "kadane"
+    ],
     "evaluationStrategy": "code_execution",
     "dsaMetadata": {
-      "supportedLanguages": ["python"],
+      "supportedLanguages": [
+        "python"
+      ],
       "functionSignature": "def max_sub_array(nums):",
       "starterCode": "def max_sub_array(nums):\n    pass\n"
     },
     "testCases": [
-      { "input": { "nums": [-2, 1, -3, 4, -1, 2, 1, -5, 4] }, "expectedOutput": 6, "isHidden": false, "weight": 1 },
-      { "input": { "nums": [1] }, "expectedOutput": 1, "isHidden": false, "weight": 1 },
-      { "input": { "nums": [5, 4, -1, 7, 8] }, "expectedOutput": 23, "isHidden": true, "weight": 1 },
-      { "input": { "nums": [-1] }, "expectedOutput": -1, "isHidden": true, "weight": 1 }
+      {
+        "input": {
+          "nums": [
+            -2,
+            1,
+            -3,
+            4,
+            -1,
+            2,
+            1,
+            -5,
+            4
+          ]
+        },
+        "expectedOutput": 6,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            -2,
+            1,
+            -3,
+            4,
+            -1,
+            2,
+            1,
+            -5,
+            4
+          ]
+        },
+        "expectedOutput": 6,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            5,
+            4,
+            -1,
+            7,
+            8
+          ]
+        },
+        "expectedOutput": 23,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            -1
+          ]
+        },
+        "expectedOutput": -1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            5,
+            4,
+            -1,
+            7,
+            8
+          ]
+        },
+        "expectedOutput": 23,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            -1
+          ]
+        },
+        "expectedOutput": -1,
+        "isHidden": true,
+        "weight": 1
+      }
     ],
     "rubric": [
-      { "text": "Implements Kadane or equivalent linear scan with running sum reset.", "category": "correctness", "importance": "mustHave", "expectedAnswerMode": "code" }
+      {
+        "text": "Implements Kadane or equivalent linear scan with running sum reset.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
     ],
-    "complexity": { "time": "O(n)", "space": "O(1)" },
-    "sourceMetadata": { "source": "striver_sde_sheet", "verified": false, "qualityScore": 0.9 }
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.9
+    }
   },
   {
     "questionId": "curated-dsa-product-except-self",
@@ -110,25 +621,170 @@
     "question": "Given an integer array `nums`, return an array `answer` such that `answer[i]` is equal to the product of all elements of `nums` except `nums[i]`. You must solve it without using division, in O(n) time. Assume all products fit in 32-bit integer range.",
     "roundType": "DSA",
     "difficulty": "hard",
-    "topics": ["arrays", "prefix sum"],
+    "topics": [
+      "arrays",
+      "prefix sum"
+    ],
     "subtopics": [],
     "evaluationStrategy": "code_execution",
     "dsaMetadata": {
-      "supportedLanguages": ["python"],
+      "supportedLanguages": [
+        "python"
+      ],
       "functionSignature": "def product_except_self(nums):",
       "starterCode": "def product_except_self(nums):\n    pass\n"
     },
     "testCases": [
-      { "input": { "nums": [1, 2, 3, 4] }, "expectedOutput": [24, 12, 8, 6], "isHidden": false, "weight": 1 },
-      { "input": { "nums": [-1, 1, 0, -3, 3] }, "expectedOutput": [0, 0, 9, 0, 0], "isHidden": false, "weight": 1 },
-      { "input": { "nums": [2, 3] }, "expectedOutput": [3, 2], "isHidden": true, "weight": 1 },
-      { "input": { "nums": [1, 0] }, "expectedOutput": [0, 1], "isHidden": true, "weight": 1 }
+      {
+        "input": {
+          "nums": [
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        "expectedOutput": [
+          24,
+          12,
+          8,
+          6
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            -1,
+            1,
+            0,
+            -3,
+            3
+          ]
+        },
+        "expectedOutput": [
+          0,
+          0,
+          9,
+          0,
+          0
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        "expectedOutput": [
+          24,
+          12,
+          8,
+          6
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            -1,
+            1,
+            0,
+            -3,
+            3
+          ]
+        },
+        "expectedOutput": [
+          0,
+          0,
+          9,
+          0,
+          0
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            2,
+            3
+          ]
+        },
+        "expectedOutput": [
+          3,
+          2
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            0
+          ]
+        },
+        "expectedOutput": [
+          0,
+          1
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            2,
+            3
+          ]
+        },
+        "expectedOutput": [
+          3,
+          2
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            0
+          ]
+        },
+        "expectedOutput": [
+          0,
+          1
+        ],
+        "isHidden": true,
+        "weight": 1
+      }
     ],
     "rubric": [
-      { "text": "Uses prefix and suffix products without division.", "category": "correctness", "importance": "mustHave", "expectedAnswerMode": "code" }
+      {
+        "text": "Uses prefix and suffix products without division.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
     ],
-    "complexity": { "time": "O(n)", "space": "O(1)" },
-    "sourceMetadata": { "source": "striver_sde_sheet", "verified": false, "qualityScore": 0.88 }
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.88
+    }
   },
   {
     "questionId": "curated-dsa-merge-intervals",
@@ -136,25 +792,248 @@
     "question": "Given a list of intervals `intervals` where each interval is `[start, end]`, merge all overlapping intervals and return a list of non-overlapping merged intervals sorted by start time.\n\nImplement **`merge_intervals(intervals)`** at module level (see starter code), or use **`class Solution`** with a method named **`merge_intervals`**, **`merge`**, or **`mergeIntervals`** — the grader matches these names to your code.",
     "roundType": "DSA",
     "difficulty": "medium",
-    "topics": ["arrays", "sorting"],
-    "subtopics": ["intervals"],
+    "topics": [
+      "arrays",
+      "sorting"
+    ],
+    "subtopics": [
+      "intervals"
+    ],
     "evaluationStrategy": "code_execution",
     "dsaMetadata": {
-      "supportedLanguages": ["python"],
+      "supportedLanguages": [
+        "python"
+      ],
       "functionSignature": "def merge_intervals(intervals):",
       "starterCode": "def merge_intervals(intervals):\n    pass\n"
     },
     "testCases": [
-      { "input": { "intervals": [[1, 3], [2, 6], [8, 10], [15, 18]] }, "expectedOutput": [[1, 6], [8, 10], [15, 18]], "isHidden": false, "weight": 1 },
-      { "input": { "intervals": [[1, 4], [4, 5]] }, "expectedOutput": [[1, 5]], "isHidden": false, "weight": 1 },
-      { "input": { "intervals": [[1, 4], [0, 4]] }, "expectedOutput": [[0, 4]], "isHidden": true, "weight": 1 },
-      { "input": { "intervals": [[1, 4], [2, 3]] }, "expectedOutput": [[1, 4]], "isHidden": true, "weight": 1 }
+      {
+        "input": {
+          "intervals": [
+            [
+              1,
+              3
+            ],
+            [
+              2,
+              6
+            ],
+            [
+              8,
+              10
+            ],
+            [
+              15,
+              18
+            ]
+          ]
+        },
+        "expectedOutput": [
+          [
+            1,
+            6
+          ],
+          [
+            8,
+            10
+          ],
+          [
+            15,
+            18
+          ]
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "intervals": [
+            [
+              1,
+              4
+            ],
+            [
+              4,
+              5
+            ]
+          ]
+        },
+        "expectedOutput": [
+          [
+            1,
+            5
+          ]
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "intervals": [
+            [
+              1,
+              3
+            ],
+            [
+              2,
+              6
+            ],
+            [
+              8,
+              10
+            ],
+            [
+              15,
+              18
+            ]
+          ]
+        },
+        "expectedOutput": [
+          [
+            1,
+            6
+          ],
+          [
+            8,
+            10
+          ],
+          [
+            15,
+            18
+          ]
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "intervals": [
+            [
+              1,
+              4
+            ],
+            [
+              4,
+              5
+            ]
+          ]
+        },
+        "expectedOutput": [
+          [
+            1,
+            5
+          ]
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "intervals": [
+            [
+              1,
+              4
+            ],
+            [
+              0,
+              4
+            ]
+          ]
+        },
+        "expectedOutput": [
+          [
+            0,
+            4
+          ]
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "intervals": [
+            [
+              1,
+              4
+            ],
+            [
+              2,
+              3
+            ]
+          ]
+        },
+        "expectedOutput": [
+          [
+            1,
+            4
+          ]
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "intervals": [
+            [
+              1,
+              4
+            ],
+            [
+              0,
+              4
+            ]
+          ]
+        },
+        "expectedOutput": [
+          [
+            0,
+            4
+          ]
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "intervals": [
+            [
+              1,
+              4
+            ],
+            [
+              2,
+              3
+            ]
+          ]
+        },
+        "expectedOutput": [
+          [
+            1,
+            4
+          ]
+        ],
+        "isHidden": true,
+        "weight": 1
+      }
     ],
     "rubric": [
-      { "text": "Sorts by start then merges overlapping ranges.", "category": "correctness", "importance": "mustHave", "expectedAnswerMode": "code" }
+      {
+        "text": "Sorts by start then merges overlapping ranges.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
     ],
-    "complexity": { "time": "O(n log n)", "space": "O(1)" },
-    "sourceMetadata": { "source": "striver_sde_sheet", "verified": false, "qualityScore": 0.87 }
+    "complexity": {
+      "time": "O(n log n)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.87
+    }
   },
   {
     "questionId": "curated-dsa-valid-parentheses",
@@ -162,25 +1041,102 @@
     "question": "Given a string `s` containing only characters `'('`, `')'`, `'{'`, `'}'`, `'['` and `']'`, determine if the input string is valid. A string is valid if brackets are closed in the correct order.",
     "roundType": "DSA",
     "difficulty": "medium",
-    "topics": ["string", "stack"],
+    "topics": [
+      "string",
+      "stack"
+    ],
     "subtopics": [],
     "evaluationStrategy": "code_execution",
     "dsaMetadata": {
-      "supportedLanguages": ["python"],
+      "supportedLanguages": [
+        "python"
+      ],
       "functionSignature": "def is_valid(s):",
       "starterCode": "def is_valid(s):\n    pass\n"
     },
     "testCases": [
-      { "input": { "s": "()" }, "expectedOutput": true, "isHidden": false, "weight": 1 },
-      { "input": { "s": "()[]{}" }, "expectedOutput": true, "isHidden": false, "weight": 1 },
-      { "input": { "s": "(]" }, "expectedOutput": false, "isHidden": true, "weight": 1 },
-      { "input": { "s": "([{}])" }, "expectedOutput": true, "isHidden": true, "weight": 1 }
+      {
+        "input": {
+          "s": "()"
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "()[]{}"
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "()"
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "()[]{}"
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "(]"
+        },
+        "expectedOutput": false,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "([{}])"
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "(]"
+        },
+        "expectedOutput": false,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "([{}])"
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      }
     ],
     "rubric": [
-      { "text": "Uses a stack with matching bracket pairs.", "category": "correctness", "importance": "mustHave", "expectedAnswerMode": "code" }
+      {
+        "text": "Uses a stack with matching bracket pairs.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
     ],
-    "complexity": { "time": "O(n)", "space": "O(n)" },
-    "sourceMetadata": { "source": "striver_sde_sheet", "verified": false, "qualityScore": 0.9 }
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(n)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.9
+    }
   },
   {
     "questionId": "curated-dsa-daily-temperatures",
@@ -188,25 +1144,184 @@
     "question": "Given an array `temperatures` of integers representing daily temperatures, return an array `answer` where `answer[i]` is the number of days you have to wait after the `i`th day to get a warmer temperature. If there is no future day for which this is possible, keep `answer[i] == 0`.",
     "roundType": "DSA",
     "difficulty": "medium",
-    "topics": ["stack", "arrays"],
-    "subtopics": ["monotonic stack"],
+    "topics": [
+      "stack",
+      "arrays"
+    ],
+    "subtopics": [
+      "monotonic stack"
+    ],
     "evaluationStrategy": "code_execution",
     "dsaMetadata": {
-      "supportedLanguages": ["python"],
+      "supportedLanguages": [
+        "python"
+      ],
       "functionSignature": "def daily_temperatures(temperatures):",
       "starterCode": "def daily_temperatures(temperatures):\n    pass\n"
     },
     "testCases": [
-      { "input": { "temperatures": [73, 74, 75, 71, 69, 72, 76, 73] }, "expectedOutput": [1, 1, 4, 2, 1, 1, 0, 0], "isHidden": false, "weight": 1 },
-      { "input": { "temperatures": [30, 40, 50, 60] }, "expectedOutput": [1, 1, 1, 0], "isHidden": false, "weight": 1 },
-      { "input": { "temperatures": [30, 60, 90] }, "expectedOutput": [1, 1, 0], "isHidden": true, "weight": 1 },
-      { "input": { "temperatures": [90] }, "expectedOutput": [0], "isHidden": true, "weight": 1 }
+      {
+        "input": {
+          "temperatures": [
+            73,
+            74,
+            75,
+            71,
+            69,
+            72,
+            76,
+            73
+          ]
+        },
+        "expectedOutput": [
+          1,
+          1,
+          4,
+          2,
+          1,
+          1,
+          0,
+          0
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "temperatures": [
+            30,
+            40,
+            50,
+            60
+          ]
+        },
+        "expectedOutput": [
+          1,
+          1,
+          1,
+          0
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "temperatures": [
+            73,
+            74,
+            75,
+            71,
+            69,
+            72,
+            76,
+            73
+          ]
+        },
+        "expectedOutput": [
+          1,
+          1,
+          4,
+          2,
+          1,
+          1,
+          0,
+          0
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "temperatures": [
+            30,
+            40,
+            50,
+            60
+          ]
+        },
+        "expectedOutput": [
+          1,
+          1,
+          1,
+          0
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "temperatures": [
+            30,
+            60,
+            90
+          ]
+        },
+        "expectedOutput": [
+          1,
+          1,
+          0
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "temperatures": [
+            90
+          ]
+        },
+        "expectedOutput": [
+          0
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "temperatures": [
+            30,
+            60,
+            90
+          ]
+        },
+        "expectedOutput": [
+          1,
+          1,
+          0
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "temperatures": [
+            90
+          ]
+        },
+        "expectedOutput": [
+          0
+        ],
+        "isHidden": true,
+        "weight": 1
+      }
     ],
     "rubric": [
-      { "text": "Computes next greater element distances efficiently.", "category": "correctness", "importance": "mustHave", "expectedAnswerMode": "code" }
+      {
+        "text": "Computes next greater element distances efficiently.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
     ],
-    "complexity": { "time": "O(n)", "space": "O(n)" },
-    "sourceMetadata": { "source": "striver_sde_sheet", "verified": false, "qualityScore": 0.86 }
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(n)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.86
+    }
   },
   {
     "questionId": "curated-dsa-binary-search",
@@ -214,25 +1329,154 @@
     "question": "Given a sorted array of distinct integers `nums` and a `target`, return the index of `target` if it exists, otherwise return `-1`. Implement with O(log n) time.",
     "roundType": "DSA",
     "difficulty": "medium",
-    "topics": ["arrays", "binary search"],
+    "topics": [
+      "arrays",
+      "binary search"
+    ],
     "subtopics": [],
     "evaluationStrategy": "code_execution",
     "dsaMetadata": {
-      "supportedLanguages": ["python"],
+      "supportedLanguages": [
+        "python"
+      ],
       "functionSignature": "def binary_search(nums, target):",
       "starterCode": "def binary_search(nums, target):\n    pass\n"
     },
     "testCases": [
-      { "input": { "nums": [-1, 0, 3, 5, 9, 12], "target": 9 }, "expectedOutput": 4, "isHidden": false, "weight": 1 },
-      { "input": { "nums": [-1, 0, 3, 5, 9, 12], "target": 2 }, "expectedOutput": -1, "isHidden": false, "weight": 1 },
-      { "input": { "nums": [5], "target": 5 }, "expectedOutput": 0, "isHidden": true, "weight": 1 },
-      { "input": { "nums": [1, 2, 3, 4, 5], "target": 6 }, "expectedOutput": -1, "isHidden": true, "weight": 1 }
+      {
+        "input": {
+          "nums": [
+            -1,
+            0,
+            3,
+            5,
+            9,
+            12
+          ],
+          "target": 9
+        },
+        "expectedOutput": 4,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            -1,
+            0,
+            3,
+            5,
+            9,
+            12
+          ],
+          "target": 2
+        },
+        "expectedOutput": -1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            -1,
+            0,
+            3,
+            5,
+            9,
+            12
+          ],
+          "target": 9
+        },
+        "expectedOutput": 4,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            -1,
+            0,
+            3,
+            5,
+            9,
+            12
+          ],
+          "target": 2
+        },
+        "expectedOutput": -1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            5
+          ],
+          "target": 5
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "target": 6
+        },
+        "expectedOutput": -1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            5
+          ],
+          "target": 5
+        },
+        "expectedOutput": 0,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "target": 6
+        },
+        "expectedOutput": -1,
+        "isHidden": true,
+        "weight": 1
+      }
     ],
     "rubric": [
-      { "text": "Uses half-interval elimination on sorted array.", "category": "correctness", "importance": "mustHave", "expectedAnswerMode": "code" }
+      {
+        "text": "Uses half-interval elimination on sorted array.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
     ],
-    "complexity": { "time": "O(log n)", "space": "O(1)" },
-    "sourceMetadata": { "source": "striver_sde_sheet", "verified": false, "qualityScore": 0.9 }
+    "complexity": {
+      "time": "O(log n)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.9
+    }
   },
   {
     "questionId": "curated-dsa-search-rotated-sorted",
@@ -240,25 +1484,152 @@
     "question": "There is an integer array `nums` sorted in ascending order with distinct values, then rotated at an unknown pivot. Given `nums` and `target`, return the index of `target` if it is in `nums`, or `-1` if it is not. Must run in O(log n) time.",
     "roundType": "DSA",
     "difficulty": "hard",
-    "topics": ["arrays", "binary search"],
+    "topics": [
+      "arrays",
+      "binary search"
+    ],
     "subtopics": [],
     "evaluationStrategy": "code_execution",
     "dsaMetadata": {
-      "supportedLanguages": ["python"],
+      "supportedLanguages": [
+        "python"
+      ],
       "functionSignature": "def search_rotated(nums, target):",
       "starterCode": "def search_rotated(nums, target):\n    pass\n"
     },
     "testCases": [
-      { "input": { "nums": [4, 5, 6, 7, 0, 1, 2], "target": 0 }, "expectedOutput": 4, "isHidden": false, "weight": 1 },
-      { "input": { "nums": [4, 5, 6, 7, 0, 1, 2], "target": 3 }, "expectedOutput": -1, "isHidden": false, "weight": 1 },
-      { "input": { "nums": [1], "target": 0 }, "expectedOutput": -1, "isHidden": true, "weight": 1 },
-      { "input": { "nums": [1, 3], "target": 3 }, "expectedOutput": 1, "isHidden": true, "weight": 1 }
+      {
+        "input": {
+          "nums": [
+            4,
+            5,
+            6,
+            7,
+            0,
+            1,
+            2
+          ],
+          "target": 0
+        },
+        "expectedOutput": 4,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            4,
+            5,
+            6,
+            7,
+            0,
+            1,
+            2
+          ],
+          "target": 3
+        },
+        "expectedOutput": -1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            4,
+            5,
+            6,
+            7,
+            0,
+            1,
+            2
+          ],
+          "target": 0
+        },
+        "expectedOutput": 4,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            4,
+            5,
+            6,
+            7,
+            0,
+            1,
+            2
+          ],
+          "target": 3
+        },
+        "expectedOutput": -1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1
+          ],
+          "target": 0
+        },
+        "expectedOutput": -1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            3
+          ],
+          "target": 3
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1
+          ],
+          "target": 0
+        },
+        "expectedOutput": -1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            3
+          ],
+          "target": 3
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      }
     ],
     "rubric": [
-      { "text": "Binary search while identifying which half is sorted.", "category": "correctness", "importance": "mustHave", "expectedAnswerMode": "code" }
+      {
+        "text": "Binary search while identifying which half is sorted.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
     ],
-    "complexity": { "time": "O(log n)", "space": "O(1)" },
-    "sourceMetadata": { "source": "striver_sde_sheet", "verified": false, "qualityScore": 0.85 }
+    "complexity": {
+      "time": "O(log n)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.85
+    }
   },
   {
     "questionId": "curated-dsa-find-min-rotated",
@@ -266,25 +1637,146 @@
     "question": "Given the rotated sorted array `nums` of unique elements, return the minimum element. Your algorithm must run in O(log n) time.",
     "roundType": "DSA",
     "difficulty": "medium",
-    "topics": ["arrays", "binary search"],
+    "topics": [
+      "arrays",
+      "binary search"
+    ],
     "subtopics": [],
     "evaluationStrategy": "code_execution",
     "dsaMetadata": {
-      "supportedLanguages": ["python"],
+      "supportedLanguages": [
+        "python"
+      ],
       "functionSignature": "def find_min(nums):",
       "starterCode": "def find_min(nums):\n    pass\n"
     },
     "testCases": [
-      { "input": { "nums": [3, 4, 5, 1, 2] }, "expectedOutput": 1, "isHidden": false, "weight": 1 },
-      { "input": { "nums": [4, 5, 6, 7, 0, 1, 2] }, "expectedOutput": 0, "isHidden": false, "weight": 1 },
-      { "input": { "nums": [11, 13, 15, 17] }, "expectedOutput": 11, "isHidden": true, "weight": 1 },
-      { "input": { "nums": [2, 1] }, "expectedOutput": 1, "isHidden": true, "weight": 1 }
+      {
+        "input": {
+          "nums": [
+            3,
+            4,
+            5,
+            1,
+            2
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            4,
+            5,
+            6,
+            7,
+            0,
+            1,
+            2
+          ]
+        },
+        "expectedOutput": 0,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            3,
+            4,
+            5,
+            1,
+            2
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            4,
+            5,
+            6,
+            7,
+            0,
+            1,
+            2
+          ]
+        },
+        "expectedOutput": 0,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            11,
+            13,
+            15,
+            17
+          ]
+        },
+        "expectedOutput": 11,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            2,
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            11,
+            13,
+            15,
+            17
+          ]
+        },
+        "expectedOutput": 11,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            2,
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      }
     ],
     "rubric": [
-      { "text": "Uses binary search comparing mid to boundary rather than scanning.", "category": "correctness", "importance": "mustHave", "expectedAnswerMode": "code" }
+      {
+        "text": "Uses binary search comparing mid to boundary rather than scanning.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
     ],
-    "complexity": { "time": "O(log n)", "space": "O(1)" },
-    "sourceMetadata": { "source": "striver_sde_sheet", "verified": false, "qualityScore": 0.84 }
+    "complexity": {
+      "time": "O(log n)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.84
+    }
   },
   {
     "questionId": "curated-dsa-koko-bananas",
@@ -292,25 +1784,140 @@
     "question": "Koko loves bananas. There are `n` piles; `piles[i]` is bananas in the i-th pile. Guards return in `h` hours. Koko chooses speed `k` bananas per hour; each hour she eats from one pile only (ceil division per pile). Return the minimum integer `k` such that she can finish all bananas within `h` hours.",
     "roundType": "DSA",
     "difficulty": "hard",
-    "topics": ["arrays", "binary search"],
+    "topics": [
+      "arrays",
+      "binary search"
+    ],
     "subtopics": [],
     "evaluationStrategy": "code_execution",
     "dsaMetadata": {
-      "supportedLanguages": ["python"],
+      "supportedLanguages": [
+        "python"
+      ],
       "functionSignature": "def min_eating_speed(piles, h):",
       "starterCode": "def min_eating_speed(piles, h):\n    pass\n"
     },
     "testCases": [
-      { "input": { "piles": [3, 6, 7, 11], "h": 8 }, "expectedOutput": 4, "isHidden": false, "weight": 1 },
-      { "input": { "piles": [30, 11, 23, 4, 20], "h": 5 }, "expectedOutput": 30, "isHidden": false, "weight": 1 },
-      { "input": { "piles": [312884470], "h": 312884469 }, "expectedOutput": 2, "isHidden": true, "weight": 1 },
-      { "input": { "piles": [1000000000], "h": 1000000000 }, "expectedOutput": 1, "isHidden": true, "weight": 1 }
+      {
+        "input": {
+          "piles": [
+            3,
+            6,
+            7,
+            11
+          ],
+          "h": 8
+        },
+        "expectedOutput": 4,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "piles": [
+            30,
+            11,
+            23,
+            4,
+            20
+          ],
+          "h": 5
+        },
+        "expectedOutput": 30,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "piles": [
+            3,
+            6,
+            7,
+            11
+          ],
+          "h": 8
+        },
+        "expectedOutput": 4,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "piles": [
+            30,
+            11,
+            23,
+            4,
+            20
+          ],
+          "h": 5
+        },
+        "expectedOutput": 30,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "piles": [
+            312884470
+          ],
+          "h": 312884469
+        },
+        "expectedOutput": 2,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "piles": [
+            1000000000
+          ],
+          "h": 1000000000
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "piles": [
+            312884470
+          ],
+          "h": 312884469
+        },
+        "expectedOutput": 2,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "piles": [
+            1000000000
+          ],
+          "h": 1000000000
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      }
     ],
     "rubric": [
-      { "text": "Binary searches on answer k with hours feasibility check.", "category": "correctness", "importance": "mustHave", "expectedAnswerMode": "code" }
+      {
+        "text": "Binary searches on answer k with hours feasibility check.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
     ],
-    "complexity": { "time": "O(n log M)", "space": "O(1)" },
-    "sourceMetadata": { "source": "striver_sde_sheet", "verified": false, "qualityScore": 0.86 }
+    "complexity": {
+      "time": "O(n log M)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.86
+    }
   },
   {
     "questionId": "curated-dsa-valid-anagram",
@@ -318,25 +1925,110 @@
     "question": "Given two strings `s` and `t`, return `True` if `t` is an anagram of `s`, and `False` otherwise. An anagram is formed by rearranging letters of `s` using all original letters exactly once.",
     "roundType": "DSA",
     "difficulty": "medium",
-    "topics": ["string", "hashing"],
+    "topics": [
+      "string",
+      "hashing"
+    ],
     "subtopics": [],
     "evaluationStrategy": "code_execution",
     "dsaMetadata": {
-      "supportedLanguages": ["python"],
+      "supportedLanguages": [
+        "python"
+      ],
       "functionSignature": "def is_anagram(s, t):",
       "starterCode": "def is_anagram(s, t):\n    pass\n"
     },
     "testCases": [
-      { "input": { "s": "anagram", "t": "nagaram" }, "expectedOutput": true, "isHidden": false, "weight": 1 },
-      { "input": { "s": "rat", "t": "car" }, "expectedOutput": false, "isHidden": false, "weight": 1 },
-      { "input": { "s": "", "t": "" }, "expectedOutput": true, "isHidden": true, "weight": 1 },
-      { "input": { "s": "ab", "t": "a" }, "expectedOutput": false, "isHidden": true, "weight": 1 }
+      {
+        "input": {
+          "s": "anagram",
+          "t": "nagaram"
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "rat",
+          "t": "car"
+        },
+        "expectedOutput": false,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "anagram",
+          "t": "nagaram"
+        },
+        "expectedOutput": true,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "rat",
+          "t": "car"
+        },
+        "expectedOutput": false,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "",
+          "t": ""
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "ab",
+          "t": "a"
+        },
+        "expectedOutput": false,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "",
+          "t": ""
+        },
+        "expectedOutput": true,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "s": "ab",
+          "t": "a"
+        },
+        "expectedOutput": false,
+        "isHidden": true,
+        "weight": 1
+      }
     ],
     "rubric": [
-      { "text": "Compares character counts or sorted signatures.", "category": "correctness", "importance": "mustHave", "expectedAnswerMode": "code" }
+      {
+        "text": "Compares character counts or sorted signatures.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
     ],
-    "complexity": { "time": "O(n)", "space": "O(1)" },
-    "sourceMetadata": { "source": "striver_sde_sheet", "verified": false, "qualityScore": 0.88 }
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.88
+    }
   },
   {
     "questionId": "curated-dsa-top-k-frequent",
@@ -344,25 +2036,177 @@
     "question": "Given an integer array `nums` and an integer `k`, return the `k` most frequent elements as a list sorted in ascending order (for a unique deterministic answer in our tests).",
     "roundType": "DSA",
     "difficulty": "medium",
-    "topics": ["arrays", "hashing", "heap"],
+    "topics": [
+      "arrays",
+      "hashing",
+      "heap"
+    ],
     "subtopics": [],
     "evaluationStrategy": "code_execution",
     "dsaMetadata": {
-      "supportedLanguages": ["python"],
+      "supportedLanguages": [
+        "python"
+      ],
       "functionSignature": "def top_k_frequent(nums, k):",
       "starterCode": "def top_k_frequent(nums, k):\n    pass\n"
     },
     "testCases": [
-      { "input": { "nums": [1, 1, 1, 2, 2, 3], "k": 2 }, "expectedOutput": [1, 2], "isHidden": false, "weight": 1 },
-      { "input": { "nums": [1], "k": 1 }, "expectedOutput": [1], "isHidden": false, "weight": 1 },
-      { "input": { "nums": [4, 1, -1, 2, -1, 2, 3], "k": 2 }, "expectedOutput": [-1, 2], "isHidden": true, "weight": 1 },
-      { "input": { "nums": [5, 5, 5, 5, 5], "k": 1 }, "expectedOutput": [5], "isHidden": true, "weight": 1 }
+      {
+        "input": {
+          "nums": [
+            1,
+            1,
+            1,
+            2,
+            2,
+            3
+          ],
+          "k": 2
+        },
+        "expectedOutput": [
+          1,
+          2
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1
+          ],
+          "k": 1
+        },
+        "expectedOutput": [
+          1
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1,
+            1,
+            1,
+            2,
+            2,
+            3
+          ],
+          "k": 2
+        },
+        "expectedOutput": [
+          1,
+          2
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1
+          ],
+          "k": 1
+        },
+        "expectedOutput": [
+          1
+        ],
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            4,
+            1,
+            -1,
+            2,
+            -1,
+            2,
+            3
+          ],
+          "k": 2
+        },
+        "expectedOutput": [
+          -1,
+          2
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            5,
+            5,
+            5,
+            5,
+            5
+          ],
+          "k": 1
+        },
+        "expectedOutput": [
+          5
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            4,
+            1,
+            -1,
+            2,
+            -1,
+            2,
+            3
+          ],
+          "k": 2
+        },
+        "expectedOutput": [
+          -1,
+          2
+        ],
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            5,
+            5,
+            5,
+            5,
+            5
+          ],
+          "k": 1
+        },
+        "expectedOutput": [
+          5
+        ],
+        "isHidden": true,
+        "weight": 1
+      }
     ],
     "rubric": [
-      { "text": "Counts frequencies then selects top k (heap, bucket, or sort by freq).", "category": "correctness", "importance": "mustHave", "expectedAnswerMode": "code" }
+      {
+        "text": "Counts frequencies then selects top k (heap, bucket, or sort by freq).",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
     ],
-    "complexity": { "time": "O(n log k)", "space": "O(n)" },
-    "sourceMetadata": { "source": "striver_sde_sheet", "verified": false, "qualityScore": 0.82 }
+    "complexity": {
+      "time": "O(n log k)",
+      "space": "O(n)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.82
+    }
   },
   {
     "questionId": "curated-dsa-single-number",
@@ -370,25 +2214,134 @@
     "question": "Given a non-empty array `nums` where every element appears twice except for one, find that single element. You must use O(1) extra memory (linear time XOR approach is expected).",
     "roundType": "DSA",
     "difficulty": "medium",
-    "topics": ["arrays", "bit manipulation"],
+    "topics": [
+      "arrays",
+      "bit manipulation"
+    ],
     "subtopics": [],
     "evaluationStrategy": "code_execution",
     "dsaMetadata": {
-      "supportedLanguages": ["python"],
+      "supportedLanguages": [
+        "python"
+      ],
       "functionSignature": "def single_number(nums):",
       "starterCode": "def single_number(nums):\n    pass\n"
     },
     "testCases": [
-      { "input": { "nums": [2, 2, 1] }, "expectedOutput": 1, "isHidden": false, "weight": 1 },
-      { "input": { "nums": [4, 1, 2, 1, 2] }, "expectedOutput": 4, "isHidden": false, "weight": 1 },
-      { "input": { "nums": [1] }, "expectedOutput": 1, "isHidden": true, "weight": 1 },
-      { "input": { "nums": [0, 1, 0] }, "expectedOutput": 1, "isHidden": true, "weight": 1 }
+      {
+        "input": {
+          "nums": [
+            2,
+            2,
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            4,
+            1,
+            2,
+            1,
+            2
+          ]
+        },
+        "expectedOutput": 4,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            2,
+            2,
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            4,
+            1,
+            2,
+            1,
+            2
+          ]
+        },
+        "expectedOutput": 4,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            0,
+            1,
+            0
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            0,
+            1,
+            0
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      }
     ],
     "rubric": [
-      { "text": "Uses XOR property or equivalent O(n) O(1) space solution.", "category": "correctness", "importance": "mustHave", "expectedAnswerMode": "code" }
+      {
+        "text": "Uses XOR property or equivalent O(n) O(1) space solution.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
     ],
-    "complexity": { "time": "O(n)", "space": "O(1)" },
-    "sourceMetadata": { "source": "striver_sde_sheet", "verified": false, "qualityScore": 0.9 }
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.9
+    }
   },
   {
     "questionId": "curated-dsa-majority-element",
@@ -396,24 +2349,143 @@
     "question": "Given an array `nums` of size `n`, return the majority element (appears more than floor(n/2) times). You may assume the majority element always exists.",
     "roundType": "DSA",
     "difficulty": "medium",
-    "topics": ["arrays", "hashing"],
-    "subtopics": ["boyer-moore"],
+    "topics": [
+      "arrays",
+      "hashing"
+    ],
+    "subtopics": [
+      "boyer-moore"
+    ],
     "evaluationStrategy": "code_execution",
     "dsaMetadata": {
-      "supportedLanguages": ["python"],
+      "supportedLanguages": [
+        "python"
+      ],
       "functionSignature": "def majority_element(nums):",
       "starterCode": "def majority_element(nums):\n    pass\n"
     },
     "testCases": [
-      { "input": { "nums": [3, 2, 3] }, "expectedOutput": 3, "isHidden": false, "weight": 1 },
-      { "input": { "nums": [2, 2, 1, 1, 1, 2, 2] }, "expectedOutput": 2, "isHidden": false, "weight": 1 },
-      { "input": { "nums": [1] }, "expectedOutput": 1, "isHidden": true, "weight": 1 },
-      { "input": { "nums": [6, 6, 6, 7, 7] }, "expectedOutput": 6, "isHidden": true, "weight": 1 }
+      {
+        "input": {
+          "nums": [
+            3,
+            2,
+            3
+          ]
+        },
+        "expectedOutput": 3,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            2,
+            2,
+            1,
+            1,
+            1,
+            2,
+            2
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            3,
+            2,
+            3
+          ]
+        },
+        "expectedOutput": 3,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            2,
+            2,
+            1,
+            1,
+            1,
+            2,
+            2
+          ]
+        },
+        "expectedOutput": 2,
+        "isHidden": false,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            6,
+            6,
+            6,
+            7,
+            7
+          ]
+        },
+        "expectedOutput": 6,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            1
+          ]
+        },
+        "expectedOutput": 1,
+        "isHidden": true,
+        "weight": 1
+      },
+      {
+        "input": {
+          "nums": [
+            6,
+            6,
+            6,
+            7,
+            7
+          ]
+        },
+        "expectedOutput": 6,
+        "isHidden": true,
+        "weight": 1
+      }
     ],
     "rubric": [
-      { "text": "Uses Boyer-Moore voting, sorting, or hash counts.", "category": "correctness", "importance": "mustHave", "expectedAnswerMode": "code" }
+      {
+        "text": "Uses Boyer-Moore voting, sorting, or hash counts.",
+        "category": "correctness",
+        "importance": "mustHave",
+        "expectedAnswerMode": "code"
+      }
     ],
-    "complexity": { "time": "O(n)", "space": "O(1)" },
-    "sourceMetadata": { "source": "striver_sde_sheet", "verified": false, "qualityScore": 0.88 }
+    "complexity": {
+      "time": "O(n)",
+      "space": "O(1)"
+    },
+    "sourceMetadata": {
+      "source": "striver_sde_sheet",
+      "verified": false,
+      "qualityScore": 0.88
+    }
   }
 ]

@@ -99,10 +99,13 @@ const sanitizeRoundAbout = (value, fallbackText) => {
   return oneLine || fallbackText;
 };
 
-const clampQuestionCount = (value, fallbackCount) => {
+const clampQuestionCount = (value, fallbackCount, roundType) => {
   const n = Number(value);
-  if (!Number.isFinite(n)) return fallbackCount;
-  return Math.min(5, Math.max(3, Math.round(n)));
+  const base = Number.isFinite(n) ? Math.round(n) : fallbackCount;
+  if (roundType === "DSA") {
+    return Math.min(3, Math.max(3, base));
+  }
+  return Math.min(5, Math.max(3, base));
 };
 
 const inferDifficulty = (text) => {
@@ -113,7 +116,7 @@ const inferDifficulty = (text) => {
 };
 
 const inferQuestionCount = (roundType) => {
-  if (roundType === "DSA") return 4;
+  if (roundType === "DSA") return 3;
   if (roundType === "SQL") return 4;
   if (roundType === "System Design") return 3;
   return 3;
@@ -246,7 +249,7 @@ Rules:
 5) Each round must include one short about line (max 10 words preferred).
 6) type must be exactly one of: DSA, System Design, HR (use those spellings).
 7) difficulty must be one of: easy, medium, hard.
-8) questionCount must be an integer between 3 and 5.
+8) questionCount: for DSA rounds use exactly 3. For other round types use an integer between 3 and 5.
 
 Return JSON:
 {
@@ -256,7 +259,7 @@ Return JSON:
       "type": "DSA",
       "about": "Coding and problem solving",
       "difficulty": "medium",
-      "questionCount": 4
+      "questionCount": 3
     }
   ]
 }`,
@@ -318,7 +321,8 @@ export const generateInterviewPlan = async (companyData) => {
     const difficulty = normalizeDifficultyValue(aiRound.difficulty || fallbackRound.difficulty);
     const questionCount = clampQuestionCount(
       aiRound.questionCount,
-      fallbackRound.questionCount || inferQuestionCount(type)
+      fallbackRound.questionCount || inferQuestionCount(type),
+      type
     );
 
     return {

@@ -1,5 +1,6 @@
 import InterviewQuestion from "../models/InterviewQuestion.js";
 import { normalizeExpectedPoints } from "./mcp/generateQuestion.js";
+import { bankDocSatisfiesCodeGrading, cloneSerializable } from "./interviewCodeGradingGuards.js";
 
 const toSafeString = (value, fallback = "") =>
   typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -46,7 +47,12 @@ const buildRoundTypeMatcher = (roundType) => {
     rt.includes("dsa") ||
     rt.includes("coding") ||
     rt.includes("algorithm") ||
-    rt.includes("data structure")
+    rt.includes("data structure") ||
+    rt.includes("programming") ||
+    rt.includes("technical") ||
+    rt.includes("software") ||
+    rt.includes("developer") ||
+    rt.includes("leetcode")
   ) {
     return { $regex: "(dsa|coding|algorithm|data\\s*structure)", $options: "i" };
   }
@@ -63,8 +69,9 @@ const buildRoundTypeMatcher = (roundType) => {
   return { $regex: `^${escapeRegex(toSafeString(roundType))}$`, $options: "i" };
 };
 
-const pickOneQuestion = async (match) => {
-  const [selected] = await InterviewQuestion.aggregate([
+const pickTopQuestions = async (match, limit = 1) => {
+  const lim = Math.max(1, Math.min(40, Number(limit) || 1));
+  return InterviewQuestion.aggregate([
     { $match: match },
     {
       $addFields: {
@@ -80,7 +87,7 @@ const pickOneQuestion = async (match) => {
         _randomTieBreaker: -1,
       },
     },
-    { $limit: 1 },
+    { $limit: lim },
     {
       $project: {
         _verifiedRank: 0,
@@ -89,7 +96,6 @@ const pickOneQuestion = async (match) => {
       },
     },
   ]);
-  return selected || null;
 };
 
 /**
@@ -128,8 +134,11 @@ export async function retrieveQuestion({
   candidateMatches.push({ roundType: roundTypeMatcher });
 
   let selected = null;
+
   for (const match of candidateMatches) {
-    selected = await pickOneQuestion(match);
+    const batch = await pickTopQuestions(match, 24);
+    selected =
+      batch.find((doc) => bankDocSatisfiesCodeGrading(normalizedRoundType, doc)) || null;
     if (selected) break;
   }
 
@@ -148,14 +157,18 @@ export async function retrieveQuestion({
     expectedAnswerMode,
   });
 
+  const rawTests = Array.isArray(selected.testCases) ? selected.testCases : [];
+
   return {
     question: toSafeString(selected.question),
     expectedAnswerMode,
     expectedPoints,
     questionId: toSafeString(selected.questionId),
     evaluationStrategy: toSafeString(selected.evaluationStrategy),
+    testCases: cloneSerializable(rawTests) || [],
     metadata: {
       title: toSafeString(selected.title),
+      url: toSafeString(selected.url),
       companyTags: Array.isArray(selected.companyTags) ? selected.companyTags : [],
       roundType: toSafeString(selected.roundType),
       difficulty: toSafeString(selected.difficulty),
