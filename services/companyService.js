@@ -1864,6 +1864,8 @@ export async function getCompanyDetailLegacyMergedById(
  * One row per approved company that has any visit in {@link COMPANY_DETAIL_VISIT_YEARS}.
  * `placementYear` picks which visit merges into the card when that year exists; otherwise
  * the other year is used (so 2027-only companies still appear when `?year=2026`).
+ * Rows for the listing year are merged with other cycles in the same hub cluster so PPO/dream
+ * flags and `?cluster=` buckets stay consistent (e.g. 2026 + 2027 CSE visits both under `cs`).
  * @returns {Promise<Record<string, unknown>[]>}
  */
 export async function listApprovedCompaniesLegacyMerged(
@@ -1932,10 +1934,9 @@ export async function listApprovedCompaniesLegacyMerged(
     return "";
   };
 
-  const normalizeClusterKey = (raw) =>
-    String(raw || "")
-      .trim()
-      .toLowerCase();
+  /** Hub bucket key (cs|ec|me|chem|…) — matches GET /api/companies ?cluster= and detail routing. */
+  const listingHubClusterKey = (visit) =>
+    clusterKeyFromPlacementVisitClusterField(clusterFromVisit(visit));
 
   for (const row of rows) {
     const staticRow = row.c;
@@ -1950,14 +1951,23 @@ export async function listApprovedCompaniesLegacyMerged(
         .sort(sortVisitsForListing);
       // Keep company visible on the selected hub year even if its first approved visit
       // is in another supported year (e.g. listing 2026 should still show 2027-only cards).
-      if (matchedYearVisits.length > 0) return matchedYearVisits;
-      return [...allVisits].sort(sortVisitsForListing);
+      if (matchedYearVisits.length === 0) {
+        return [...allVisits].sort(sortVisitsForListing);
+      }
+      const matchedIds = new Set(
+        matchedYearVisits.map((v) => (v?._id != null ? String(v._id) : "")).filter(Boolean)
+      );
+      const rest = allVisits.filter((v) => {
+        const id = v?._id != null ? String(v._id) : "";
+        return id && !matchedIds.has(id);
+      });
+      return [...matchedYearVisits, ...rest].sort(sortVisitsForListing);
     })();
 
     /** One list row per company per cluster (avoid duplicate company cards within same cluster). */
     const visitsByCluster = new Map();
     for (const visit of visitsForListing) {
-      const clusterKey = normalizeClusterKey(clusterFromVisit(visit));
+      const clusterKey = listingHubClusterKey(visit);
       if (!visitsByCluster.has(clusterKey)) visitsByCluster.set(clusterKey, []);
       visitsByCluster.get(clusterKey).push(visit);
     }
@@ -1966,9 +1976,9 @@ export async function listApprovedCompaniesLegacyMerged(
       const visit = [...clusterVisits].sort(sortVisitsForListing)[0];
       if (!visit) continue;
 
-      const clusterKey = normalizeClusterKey(clusterFromVisit(visit));
+      const clusterKey = listingHubClusterKey(visit);
       const clusterScopedVisits = allVisits.filter(
-        (v) => normalizeClusterKey(clusterFromVisit(v)) === clusterKey
+        (v) => listingHubClusterKey(v) === clusterKey
       );
       const scopedVisits = clusterScopedVisits.length > 0 ? clusterScopedVisits : [visit];
 
