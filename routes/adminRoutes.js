@@ -48,6 +48,8 @@ import {
   updateCompanyVisit,
 } from "../services/companyService.js";
 import { invalidateLeaderboardCache } from "./leaderboardRoutes.js";
+import { dispatchEvent } from "../services/events/eventDispatcher.js";
+import { EVENT_TYPES } from "../services/events/eventTypes.js";
 import { PPO_BRANCH_CODES, PPO_BRANCH_CODES_ARRAY } from "../utils/ppoBranchCodes.js";
 import {
   importStudentsFromXlsxBuffer,
@@ -1230,6 +1232,7 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
       });
     }
 
+    let companyVisitWasApproved = false;
     // Persist to companies + company_visits (replaces single Company / companies1 save)
     try {
       console.log("📊 Company data before persist:");
@@ -1269,6 +1272,7 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
           visitApprovedAt,
           String(submission.companyId)
         );
+        companyVisitWasApproved = true;
       } else {
         console.warn(
           "⚠️ Submission approved but no company_visits row found to normalize/approve for company",
@@ -1337,6 +1341,17 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
     const companyOut = reloadedSub?.merged
       ? companyToJsonSafePlainObject(reloadedSub.merged)
       : null;
+
+    if (companyVisitWasApproved) {
+      const notifyName =
+        (companyOut?.name && String(companyOut.name).trim()) ||
+        (reloadedSub?.static?.name && String(reloadedSub.static.name).trim()) ||
+        "";
+      dispatchEvent(EVENT_TYPES.COMPANY_APPROVED, {
+        companyId: submission.companyId,
+        companyName: notifyName,
+      });
+    }
 
     res.json({
       message: "Submission approved and company updated successfully",
@@ -1473,6 +1488,14 @@ adminRouter.post("/companies/:id/approve", async (req, res) => {
       });
     }
     const mergedOut = mergeToLegacyShape(staticRow, refreshedVisit);
+    const companyNameForNotify =
+      (staticRow.name && String(staticRow.name).trim()) ||
+      (mergedOut?.name && String(mergedOut.name).trim()) ||
+      "";
+    dispatchEvent(EVENT_TYPES.COMPANY_APPROVED, {
+      companyId: staticRow._id,
+      companyName: companyNameForNotify,
+    });
     res.json({
       message: "Company approved successfully",
       company: mergedOut ? companyToJsonSafePlainObject(mergedOut) : null,
