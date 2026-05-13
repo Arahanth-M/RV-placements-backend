@@ -5,7 +5,7 @@ import authJWT from "../middleware/authJWT.js";
 import checkBetaAccess from "../middleware/checkBetaAccess.js";
 import authorize from "../middleware/authorize.js";
 import validateRequest from "../middleware/validateRequest.js";
-import { submissionInputSchema } from "../validations/submission.validation.js";
+import { submissionInputSchema, submissionUpdateSchema } from "../validations/submission.validation.js";
 import { messages } from "../config/constants.js";
 import { normalizeCompanyDetailYear } from "../services/companyService.js";
 import { getAuthUserModel } from "../utils/authUserModel.js";
@@ -13,6 +13,10 @@ import { getAuthUserModel } from "../utils/authUserModel.js";
 
 const submissionRouter = express.Router();
 const escapeRegex = (value) => String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
 
 submissionRouter.get(
   "/mine",
@@ -43,6 +47,14 @@ submissionRouter.get(
         isAnonymous: submission.isAnonymous === true,
         status: submission.status,
         submittedAt: submission.submittedAt,
+        approvedAt: submission.approvedAt ?? null,
+        reviewedBy: submission.reviewedBy
+          ? {
+              role: submission.reviewedBy.role ?? null,
+              name: submission.reviewedBy.name ?? "",
+              email: submission.reviewedBy.email ?? "",
+            }
+          : null,
         placementYear: submission.placementYear ?? null,
         placementListContext: submission.placementListContext ?? null,
         companyVisitId: submission.companyVisitId
@@ -119,5 +131,100 @@ submissionRouter.post(
     res.status(500).json({ error: messages.ERROR.SAVE_ERROR });
   }
 });
+
+submissionRouter.put(
+  "/:id",
+  authJWT,
+  checkBetaAccess,
+  authorize(["student", "admin", "spc"]),
+  validateRequest(submissionUpdateSchema),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({ error: "Invalid submission id" });
+      }
+
+      const submission = await Submission.findById(id);
+      if (!submission) {
+        return res.status(404).json({ error: "Submission not found" });
+      }
+
+      const ownerEmail = normalizeEmail(submission.submittedBy?.email);
+      const sessionEmail = normalizeEmail(req.user?.email);
+      if (!sessionEmail || ownerEmail !== sessionEmail) {
+        return res.status(403).json({ error: "You can only edit your own submissions" });
+      }
+
+      if (submission.status !== "pending") {
+        return res.status(400).json({ error: "Only pending submissions can be edited" });
+      }
+
+      submission.content = req.body.content;
+      if (req.body.isAnonymous !== undefined) {
+        submission.isAnonymous =
+          req.body.isAnonymous === true || req.body.isAnonymous === "true";
+      }
+      await submission.save();
+      await submission.populate("companyId", "name");
+
+      return res.json({
+        message: "Submission updated",
+        submission: {
+          _id: submission._id,
+          type: submission.type,
+          content: submission.content,
+          isAnonymous: submission.isAnonymous === true,
+          status: submission.status,
+          submittedAt: submission.submittedAt,
+          placementYear: submission.placementYear ?? null,
+          placementListContext: submission.placementListContext ?? null,
+          companyVisitId: submission.companyVisitId ? String(submission.companyVisitId) : null,
+          companyId: submission.companyId?._id || null,
+          companyName: submission.companyId?.name || "Unknown company",
+        },
+      });
+    } catch (error) {
+      console.error("Error updating submission:", error);
+      return res.status(500).json({ error: "Error updating submission" });
+    }
+  }
+);
+
+submissionRouter.delete(
+  "/:id",
+  authJWT,
+  checkBetaAccess,
+  authorize(["student", "admin", "spc"]),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({ error: "Invalid submission id" });
+      }
+
+      const submission = await Submission.findById(id);
+      if (!submission) {
+        return res.status(404).json({ error: "Submission not found" });
+      }
+
+      const ownerEmail = normalizeEmail(submission.submittedBy?.email);
+      const sessionEmail = normalizeEmail(req.user?.email);
+      if (!sessionEmail || ownerEmail !== sessionEmail) {
+        return res.status(403).json({ error: "You can only delete your own submissions" });
+      }
+
+      if (submission.status !== "pending") {
+        return res.status(400).json({ error: "Only pending submissions can be deleted" });
+      }
+
+      await Submission.deleteOne({ _id: id });
+      return res.json({ message: "Submission deleted" });
+    } catch (error) {
+      console.error("Error deleting submission:", error);
+      return res.status(500).json({ error: "Error deleting submission" });
+    }
+  }
+);
 
 export default submissionRouter;

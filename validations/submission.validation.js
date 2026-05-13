@@ -26,6 +26,14 @@ export const submissionInputSchema = Joi.object({
     .optional(),
 }).unknown(true);
 
+export const submissionUpdateSchema = Joi.object({
+  content: Joi.string().min(1).max(70000).required(),
+  isAnonymous: Joi.alternatives()
+    .try(Joi.boolean(), Joi.string().valid("true", "false"))
+    .optional(),
+}).unknown(true);
+
 export default {
   submissionInputSchema,
+  submissionUpdateSchema,
 };
