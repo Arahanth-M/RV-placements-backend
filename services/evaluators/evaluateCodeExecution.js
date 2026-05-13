@@ -7,6 +7,7 @@ import {
   EXECUTION_TIMEOUT,
 } from "../codeExecution/executionTypes.js";
 import { buildMisconfiguredCodeGradingEvaluation } from "../interviewCodeGradingGuards.js";
+import { logInterviewDsaLlmDebug } from "../interviewDebugLog.js";
 
 const clamp01 = (value) => {
   const numeric = Number(value);
@@ -222,7 +223,28 @@ export const evaluateCodeExecution = async (payload) => {
     ? `Execution issue (${executionResult?.status || "EXECUTION_ERROR"}): the submission did not complete sandboxed evaluation successfully.`
     : "";
 
-  const feedback = executionIssueFeedback.trim();
+  const hiddenPart =
+    hiddenTotalCount > 0
+      ? `Hidden tests passed: ${hiddenPassedCount}/${hiddenTotalCount}.`
+      : "Hidden tests: none configured for this problem.";
+
+  const countsLine = `Visible tests passed: ${visiblePassedCount}/${visibleTotalCount}. ${hiddenPart} Score: ${finalScore}/10 (${verdict}).`;
+
+  const feedback = [executionIssueFeedback.trim(), countsLine].filter(Boolean).join(" ");
+
+  logInterviewDsaLlmDebug("code_execution_deterministic_feedback", {
+    questionIdTail: String(payload?.metadata?.questionId || "").slice(-12),
+    visiblePassedCount,
+    visibleTotalCount,
+    hiddenPassedCount,
+    hiddenTotalCount,
+    passedCount,
+    totalCount,
+    weightedPassRate,
+    finalScore,
+    verdict,
+    executionStatus: executionResult?.status || "",
+  });
 
   return {
     type: "code_execution",

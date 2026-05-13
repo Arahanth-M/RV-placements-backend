@@ -33,6 +33,7 @@ import {
   discardInProgressSession,
   startRound,
   resolveInterviewCompanyName,
+  collectTopicsForCompletedCodingRound,
 } from "../services/interviewSessionService.js";
 import {
   generateInterviewPlanFromCustomRounds,
@@ -1152,15 +1153,43 @@ router.get("/interview-status/:sessionId", async (req, res) => {
     const nextRoundAvailable =
       roundCompleted && currentRoundIndex + 1 < rounds.length;
     const fb = currentRoundDoc?.feedback;
-    const roundFeedback =
-      roundCompleted && fb
-        ? {
-            score: typeof fb.score === "number" ? fb.score : null,
-            strengths: Array.isArray(fb.strengths) ? fb.strengths : [],
-            weaknesses: Array.isArray(fb.weaknesses) ? fb.weaknesses : [],
-            summary: fb.summary || "",
-          }
-        : null;
+    let roundFeedback = null;
+    if (roundCompleted && fb) {
+      const dsaRaw = fb.dsaRoundStats;
+      const dsaRoundStats =
+        dsaRaw && typeof dsaRaw === "object"
+          ? {
+              totalQuestions: Number(dsaRaw.totalQuestions),
+              answeredCorrectly: Number(dsaRaw.answeredCorrectly),
+              partiallyAnswered: Number(dsaRaw.partiallyAnswered),
+              notAnswered: Number(dsaRaw.notAnswered),
+            }
+          : null;
+      const dsaValid =
+        dsaRoundStats &&
+        Number.isFinite(dsaRoundStats.totalQuestions) &&
+        Number.isFinite(dsaRoundStats.answeredCorrectly) &&
+        Number.isFinite(dsaRoundStats.partiallyAnswered) &&
+        Number.isFinite(dsaRoundStats.notAnswered);
+
+      let topicsCoveredThisRound = Array.isArray(fb.topicsCoveredThisRound)
+        ? fb.topicsCoveredThisRound.map((t) => String(t || "").trim()).filter(Boolean)
+        : [];
+
+      if (dsaValid && isDsaInterviewRoundType(currentRoundDoc?.type) && topicsCoveredThisRound.length === 0) {
+        topicsCoveredThisRound = await collectTopicsForCompletedCodingRound(currentRoundDoc);
+      }
+
+      roundFeedback = {
+        score: typeof fb.score === "number" ? fb.score : null,
+        strengths: Array.isArray(fb.strengths) ? fb.strengths : [],
+        weaknesses: Array.isArray(fb.weaknesses) ? fb.weaknesses : [],
+        summary: typeof fb.summary === "string" ? fb.summary : "",
+        improvementTips: Array.isArray(fb.improvementTips) ? fb.improvementTips : [],
+        dsaRoundStats: dsaValid ? dsaRoundStats : null,
+        topicsCoveredThisRound,
+      };
+    }
     const report =
       session.state === INTERVIEW_STATES.INTERVIEW_COMPLETE
         ? session.finalReport || null

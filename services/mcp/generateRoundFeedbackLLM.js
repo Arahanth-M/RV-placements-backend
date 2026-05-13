@@ -1,5 +1,6 @@
 import { callLLM } from "../llmClient.js";
 import { parseJSONResponse } from "../../utils/parseJSONResponse.js";
+import { logInterviewDsaLlmDebug } from "../interviewDebugLog.js";
 
 const TOOL_ROUND_FEEDBACK_MODEL =
   process.env.GROQ_TOOL_MODEL || "llama-3.1-8b-instant";
@@ -42,6 +43,13 @@ export const generateRoundFeedbackLLM = async ({ roundData, companyContext = {} 
   const transcript = buildRoundTranscript(round);
   const roundType = toSafeString(round?.type) || "General";
   const roundNumber = Number(round?.roundNumber) || 1;
+
+  logInterviewDsaLlmDebug("round_feedback_llm_invoke", {
+    roundNumber,
+    roundType,
+    transcriptSlots: transcript.length,
+    note: "If this fires for a DSA-only round, round.type likely did not match code-execution interview heuristics.",
+  });
 
   const avgFromAggregate = Number(round?.aggregate?.averageScore);
   const scores = transcript.map((t) => t.score).filter((s) => s != null && Number.isFinite(s));

@@ -1,6 +1,7 @@
 import { getEmbedding, cosineSimilarity } from "../../utils/embedding.js";
 import { callLLM } from "../llmClient.js";
 import { parseJSONResponse } from "../../utils/parseJSONResponse.js";
+import { logInterviewDsaLlmDebug } from "../interviewDebugLog.js";
 
 const TOOL_EVAL_MODEL = process.env.GROQ_TOOL_MODEL || "llama-3.1-8b-instant";
 const SCORING_VERSION = "v3-rubric-strict";
@@ -509,6 +510,14 @@ export const evaluateRubricLLM = async ({
       ? "story"
       : "conceptual");
 
+  if (type === "coding" && !suppressLlm) {
+    logInterviewDsaLlmDebug("rubric_eval_coding_shape_llm_may_run", {
+      rubricPointCount: rubricPoints.length,
+      expectedAnswerMode,
+      hint: "Answer/question looks like code but evaluator is rubric_llm. Prefer code_execution with testcases for DSA.",
+    });
+  }
+
   if (!safeAnswer) {
     return {
       score: 1,
@@ -588,6 +597,15 @@ export const evaluateRubricLLM = async ({
       mustHaveCoverage: rubricSummary.mustHaveCoverage,
       deterministicScore,
     });
+
+  logInterviewDsaLlmDebug("rubric_eval_llm_gate", {
+    suppressLlm,
+    useLLMGrader,
+    detectedQuestionType: type,
+    rubricPointCount: rubricPoints.length,
+    wordCount,
+    forceLlmGradingEnv: process.env.EVAL_FORCE_LLM === "1",
+  });
 
   if (useLLMGrader) {
     const cacheKey = makeLLMCacheKey({
