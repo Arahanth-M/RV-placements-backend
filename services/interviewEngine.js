@@ -12,6 +12,7 @@ import { getCompanyContext } from "./mcp/getCompanyContext.js";
 import { getNumberOfRounds } from "./mcp/getNumberOfRounds.js";
 import { generateFinalFeedback } from "./mcp/generateFinalFeedback.js";
 import { INTERVIEW_STATES } from "./interviewStateMachine.js";
+import { logInterviewDsaLlmDebug, tailId } from "./interviewDebugLog.js";
 import {
   buildInterviewRoundEvidence,
   classifyRoundTypeFromHint,
@@ -454,6 +455,16 @@ export const generateFinalReport = async (session) => {
   } catch (err) {
     console.warn("[generateFinalReport] company context failed:", err?.message || err);
   }
+
+  const roundTypesInTranscript = [
+    ...new Set(transcriptRows.map((row) => toSafeString(row.roundType, "(empty)"))),
+  ];
+  logInterviewDsaLlmDebug("final_report_llm_invoke", {
+    sessionIdTail: tailId(session?._id),
+    transcriptRowCount: transcriptRows.length,
+    roundTypesInTranscript,
+    avgScoreComputed: boundedOverall,
+  });
 
   const finalFeedback = await generateFinalFeedback({
     transcript: transcriptRows,

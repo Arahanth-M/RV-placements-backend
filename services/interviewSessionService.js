@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import InterviewSession from "../models/InterviewSession.js";
+import InterviewQuestion from "../models/InterviewQuestion.js";
 import {
   COMPANY_VISIT_YEAR,
   getCompanyMergedForAdminById,
@@ -12,6 +13,7 @@ import { generateQuestion, normalizeExpectedPoints } from "./mcp/generateQuestio
 import { generateRoundFeedback as generateRoundFeedbackMCP } from "./mcp/generateRoundFeedback.js";
 import { generateRoundFeedbackLLM } from "./mcp/generateRoundFeedbackLLM.js";
 import { roundTypeImpliesCodeExecutionInterview } from "./interviewCodeGradingGuards.js";
+import { logInterviewDsaLlmDebug, tailId } from "./interviewDebugLog.js";
 import { computeDsaRoundQuestionBuckets } from "../utils/interviewQuestionAttempts.js";
 import { INTERVIEW_STATES } from "./interviewStateMachine.js";
 
@@ -21,6 +23,36 @@ const updateOptions = {
 };
 
 const UNKNOWN_COMPANY_NAME = "Unknown Company";
+
+/** Union of round `about` tokens and bank topics/subtopics for completed coding-style rounds. */
+export const collectTopicsForCompletedCodingRound = async (round) => {
+  const about = String(round?.about || "").trim();
+  const slots = Array.isArray(round?.questions) ? round.questions : [];
+  const ids = [...new Set(slots.map((s) => String(s?.questionId || "").trim()).filter(Boolean))];
+  const bag = new Set();
+  if (about) {
+    about
+      .split(/[,;]/)
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .forEach((x) => bag.add(x));
+  }
+  if (ids.length === 0) return [...bag];
+  const docs = await InterviewQuestion.find({ questionId: { $in: ids } })
+    .select({ topics: 1, subtopics: 1 })
+    .lean();
+  for (const d of docs) {
+    for (const t of Array.isArray(d?.topics) ? d.topics : []) {
+      const x = String(t || "").trim();
+      if (x) bag.add(x);
+    }
+    for (const t of Array.isArray(d?.subtopics) ? d.subtopics : []) {
+      const x = String(t || "").trim();
+      if (x) bag.add(x);
+    }
+  }
+  return [...bag];
+};
 
 const expectedPointsFromStrings = (points, defaults = {}) =>
   normalizeExpectedPoints(points, defaults);
@@ -372,10 +404,20 @@ export const generateRoundFeedback = async (sessionId, roundNumber) => {
   const questions = Array.isArray(round.questions) ? round.questions : [];
   const isDsaStyleRound = roundTypeImpliesCodeExecutionInterview(round.type);
 
+  logInterviewDsaLlmDebug("generate_round_feedback_start", {
+    sessionIdTail: tailId(sessionId),
+    roundNumber: targetRoundNumber,
+    roundTypeStored: round.type ?? null,
+    roundStatus: round.status ?? null,
+    questionCount: questions.length,
+    impliesCodeExecutionInterviewRound: isDsaStyleRound,
+  });
+
   // DSA / code-execution rounds: deterministic counts only — no LLM, no strengths/weaknesses lists.
   if (isDsaStyleRound) {
     const dsaRoundStats = computeDsaRoundQuestionBuckets(questions);
     const { totalQuestions, answeredCorrectly, partiallyAnswered, notAnswered } = dsaRoundStats;
+    const topicsCoveredThisRound = await collectTopicsForCompletedCodingRound(round);
     const summary = `This round had ${totalQuestions} question${
       totalQuestions === 1 ? "" : "s"
     }. You answered ${answeredCorrectly} correctly, ${partiallyAnswered} partially, and ${notAnswered} with no submission.`;
@@ -386,9 +428,17 @@ export const generateRoundFeedback = async (sessionId, roundNumber) => {
       weaknesses: [],
       improvementTips: [],
       dsaRoundStats,
+      topicsCoveredThisRound,
     };
     session.markModified("rounds");
     await session.save();
+
+    logInterviewDsaLlmDebug("generate_round_feedback_dsa_counts_only", {
+      sessionIdTail: tailId(sessionId),
+      roundNumber: targetRoundNumber,
+      roundTypeStored: round.type ?? null,
+      dsaRoundStats,
+    });
 
     return {
       summary: round.feedback.summary,
@@ -396,6 +446,7 @@ export const generateRoundFeedback = async (sessionId, roundNumber) => {
       weaknesses: round.feedback.weaknesses,
       improvementTips: round.feedback.improvementTips,
       dsaRoundStats: round.feedback.dsaRoundStats,
+      topicsCoveredThisRound: round.feedback.topicsCoveredThisRound || [],
     };
   }
 
@@ -422,15 +473,36 @@ export const generateRoundFeedback = async (sessionId, roundNumber) => {
     },
   };
 
+  logInterviewDsaLlmDebug("generate_round_feedback_llm_path", {
+    sessionIdTail: tailId(sessionId),
+    roundNumber: targetRoundNumber,
+    roundTypeStored: round.type ?? null,
+    impliesCodeExecutionInterviewRound: false,
+    answeredWithTextCount: answered.length,
+    finiteScoreCount: scores.length,
+    averageScore,
+  });
+
   let feedback = await generateRoundFeedbackLLM({
     roundData: roundPayload,
     companyContext,
   });
 
   if (!feedback) {
+    logInterviewDsaLlmDebug("generate_round_feedback_llm_empty_try_mcp", {
+      sessionIdTail: tailId(sessionId),
+      roundNumber: targetRoundNumber,
+      roundTypeStored: round.type ?? null,
+    });
     feedback = await generateRoundFeedbackMCP({
       roundData: roundPayload,
       companyContext,
+    });
+  } else {
+    logInterviewDsaLlmDebug("generate_round_feedback_llm_ok", {
+      sessionIdTail: tailId(sessionId),
+      roundNumber: targetRoundNumber,
+      roundTypeStored: round.type ?? null,
     });
   }
 

@@ -15,6 +15,7 @@ import {
   logCodeGradingGuard,
   roundTypeImpliesCodeExecutionInterview,
 } from "../services/interviewCodeGradingGuards.js";
+import { logInterviewDsaLlmDebug, tailId } from "../services/interviewDebugLog.js";
 import {
   getSession,
   generateRoundFeedback as generateRoundFeedbackForRound,
@@ -160,6 +161,14 @@ async function processEvaluateAnswerJob(sessionId, answer, options = {}) {
 
   // 3) Pre-evaluation LLM reasoning — skipped for DSA / coding-style rounds (no LLM on those paths).
   const suppressInterviewLlm = roundTypeImpliesCodeExecutionInterview(currentRound.type);
+  logInterviewDsaLlmDebug("submit_answer_pre_eval", {
+    sessionIdTail: tailId(sessionId),
+    roundNumber: currentRound.roundNumber ?? currentRoundNumber,
+    roundTypeStored: currentRound.type ?? null,
+    impliesCodeExecutionInterviewRound: suppressInterviewLlm,
+    willCallPreEvalReasoningLlm: !suppressInterviewLlm,
+    currentQuestionIndex,
+  });
   let llmReasoning = "";
   if (!suppressInterviewLlm) {
     const reasoningMessages = [
@@ -287,6 +296,21 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       });
     }
 
+    if (suppressInterviewLlm && effectiveEvaluationStrategy !== "code_execution") {
+      logInterviewDsaLlmDebug("coding_style_round_using_non_code_evaluator", {
+        sessionIdTail: tailId(sessionId),
+        roundTypeStored: currentRound.type ?? null,
+        effectiveEvaluationStrategy,
+        slotEvalStrategy,
+        bankEvalStrategy,
+        bankRoundTypeLabel,
+        hasTests,
+        isBankSqlTheoreticalRound,
+        questionIdTail: tailId(questionIdHint || questionMetadataDoc?.questionId || ""),
+        hint: "Per-question feedback can follow rubric/LLM. Check bank evaluationStrategy, SQL flags, and resolved testcases on the session slot.",
+      });
+    }
+
     evaluation = await evaluateAnswer({
       answer: trimmedAnswer,
       question: currentQuestion,
@@ -304,6 +328,19 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
         sqlMetadata,
         questionId: questionIdHint || questionMetadataDoc?.questionId || "",
       },
+    });
+    logInterviewDsaLlmDebug("submit_answer_evaluated", {
+      sessionIdTail: tailId(sessionId),
+      roundNumber: currentRound.roundNumber ?? currentRoundNumber,
+      roundTypeStored: currentRound.type ?? null,
+      impliesCodeExecutionInterviewRound: suppressInterviewLlm,
+      evaluationStrategy: effectiveEvaluationStrategy,
+      suppressLlmPassedToEvaluator: suppressInterviewLlm,
+      testcaseCount: executionTestCases.length,
+      questionIdTail: tailId(questionIdHint || questionMetadataDoc?.questionId || ""),
+      score: evaluation?.score ?? null,
+      verdict: evaluation?.verdict ?? null,
+      evalType: evaluation?.type ?? null,
     });
     if (effectiveEvaluationStrategy === "code_execution") {
       console.log("[interviewWorker] code-eval payload summary", {
@@ -655,7 +692,22 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
   session.markModified("currentRoundIndex");
   await session.save();
 
+  logInterviewDsaLlmDebug("submit_answer_round_complete_generate_feedback", {
+    sessionIdTail: tailId(sessionId),
+    roundNumber: currentRound.roundNumber,
+    roundTypeStored: currentRound.type ?? null,
+    impliesCodeExecutionInterviewRound: roundTypeImpliesCodeExecutionInterview(currentRound.type),
+  });
   const roundFeedback = await generateRoundFeedbackForRound(sessionId, currentRound.roundNumber);
+  logInterviewDsaLlmDebug("submit_answer_round_feedback_returned", {
+    sessionIdTail: tailId(sessionId),
+    roundNumber: currentRound.roundNumber,
+    roundTypeStored: currentRound.type ?? null,
+    hasDsaRoundStats: Boolean(roundFeedback?.dsaRoundStats),
+    strengthsLen: Array.isArray(roundFeedback?.strengths) ? roundFeedback.strengths.length : 0,
+    weaknessesLen: Array.isArray(roundFeedback?.weaknesses) ? roundFeedback.weaknesses.length : 0,
+    summaryLen: typeof roundFeedback?.summary === "string" ? roundFeedback.summary.length : 0,
+  });
 
   // Reload to avoid version conflicts after the service saves the same document.
   const refreshedSession = await getSession(sessionId);

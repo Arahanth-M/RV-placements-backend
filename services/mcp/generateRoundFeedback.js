@@ -1,3 +1,5 @@
+import { logInterviewDsaLlmDebug } from "../interviewDebugLog.js";
+
 const toSafeString = (value, fallback = "") => {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 };
@@ -20,6 +22,13 @@ const unique = (items) => [...new Set(items)];
 export const generateRoundFeedback = async ({ roundData, companyContext }) => {
   const round = roundData || {};
   const questions = Array.isArray(round?.questions) ? round.questions : [];
+
+  logInterviewDsaLlmDebug("round_feedback_mcp_invoke", {
+    roundNumber: round?.roundNumber ?? null,
+    roundType: round?.type ?? null,
+    questionCount: questions.length,
+  });
+
   const answered = questions.filter((q) => toSafeString(q?.answer));
   const scores = answered
     .map((q) => Number(q?.score))

@@ -158,6 +158,8 @@ const roundFeedbackSchema = new mongoose.Schema(
     improvementTips: { type: [String], default: [] },
     /** Populated for DSA / code-execution rounds only — deterministic counts, no LLM. */
     dsaRoundStats: { type: roundDsaStatsSchema, default: undefined },
+    /** Union of round focus + bank topics/subtopics for DSA-style rounds. */
+    topicsCoveredThisRound: { type: [String], default: undefined },
     /** Average score for the round (merged by worker after feedback generation). */
     score: { type: Number },
   },
