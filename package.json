@@ -5,6 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "start:main": "node server-main.js",
+    "start:interview": "node server-interview.js",
     "dev": "nodemon server.js",
     "worker:interview": "node workers/interviewWorker.js",
     "worker:execution": "node workers/executionWorker.js",

@@ -30,8 +30,15 @@ const getClientBaseUrl = (req) => {
     return urls.CLIENT_URL;
   }
 
-  // Local dev split-port fallback: backend on 7779, frontend on 5173.
-  if (host.includes("localhost:7779") || host.includes("127.0.0.1:7779")) {
+  // Local dev: OAuth callback hits the API host (legacy :7779 or split :7778/:7777); send the browser to Vite.
+  if (
+    host.includes("localhost:7779") ||
+    host.includes("127.0.0.1:7779") ||
+    host.includes("localhost:7778") ||
+    host.includes("127.0.0.1:7778") ||
+    host.includes("localhost:7777") ||
+    host.includes("127.0.0.1:7777")
+  ) {
     return config.FRONTEND_URL;
   }
 
