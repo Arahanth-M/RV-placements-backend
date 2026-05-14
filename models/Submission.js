@@ -35,6 +35,12 @@ const submissionSchema = new mongoose.Schema({
   approvedAt: {
     type: Date,
   },
+  /** Set when a submission is approved (admin session or SPC). */
+  reviewedBy: {
+    role: { type: String, enum: ["admin", "spc"] },
+    name: { type: String },
+    email: { type: String },
+  },
   /** Placement cycle for visit-backed types (OA, interview, etc.); defaults to 2026 in approval logic when unset. */
   placementYear: {
     type: Number,

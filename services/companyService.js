@@ -1683,9 +1683,12 @@ export async function findApprovedVisitForCompanyDetail(
 ) {
   const clusterFilter = normalizePlacementClusterQuery(placementClusterRaw);
   const hint = toObjectId(companyVisitIdHint);
+  const yearNorm = normalizeCompanyDetailYear(yearRaw);
 
   // Resolve exact card row first. Many legacy visits store `companyId` as a **name string**, so
   // ObjectId equality would wrongly reject the hint and we'd fall back to `migratedAt` order.
+  // Never accept a hint from another calendar year — Dream/Open dream year tabs keep the same
+  // `placementCompanyVisitId` in the URL, which would otherwise pin detail to the wrong cycle.
   if (hint && staticRowForVisitHint) {
     const hintedRaw = await CompanyVisit.findOne({
       _id: hint,
@@ -1693,6 +1696,7 @@ export async function findApprovedVisitForCompanyDetail(
     }).lean();
     if (
       hintedRaw &&
+      visitEffectiveMatchYear(hintedRaw) === yearNorm &&
       visitRowBelongsToCompanyStatic(hintedRaw, staticRowForVisitHint) &&
       (!clusterFilter ||
         clusterKeyFromPlacementVisitClusterField(hintedRaw?.cluster) === clusterFilter)
@@ -1723,7 +1727,7 @@ export async function findApprovedVisitForCompanyDetail(
         _id: hint,
         status: "approved",
       }).lean();
-      if (hintedRaw) {
+      if (hintedRaw && visitEffectiveMatchYear(hintedRaw) === yearNorm) {
         const cid = toObjectId(companyId);
         const vid = toObjectId(hintedRaw.companyId);
         const sameCompany = cid && vid && String(vid) === String(cid);

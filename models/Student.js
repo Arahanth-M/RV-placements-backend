@@ -30,6 +30,11 @@ const studentSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    /** Event `ObjectId`s the student marked as registered on the Events page (self-service). */
+    registeredEventIds: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Event" }],
+      default: [],
+    },
   },
   {
     timestamps: true,

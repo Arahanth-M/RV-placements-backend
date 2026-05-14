@@ -5,6 +5,7 @@ import XLSX from "xlsx";
 import authJWT from "../middleware/authJWT.js";
 import authorize from "../middleware/authorize.js";
 import requireAdmin from "../middleware/requireAdmin.js";
+import requireAdminOrSpc from "../middleware/requireAdminOrSpc.js";
 import validateRequest from "../middleware/validateRequest.js";
 import {
   adminOaQuestionUpdateSchema,
@@ -58,6 +59,8 @@ import {
 
 const adminRouter = express.Router();
 
+const submissionModRouter = express.Router();
+
 const studentBatchUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 12 * 1024 * 1024 },
@@ -71,8 +74,11 @@ const studentBatchUpload = multer({
   },
 });
 
-// All admin routes: JWT → RBAC (admin role) → legacy admin session check
+// JWT first; submission moderation allows admin session OR SPC; everything else admin-only
 adminRouter.use(authJWT);
+submissionModRouter.use(authorize(["admin", "spc"]));
+submissionModRouter.use(requireAdminOrSpc);
+adminRouter.use(submissionModRouter);
 adminRouter.use(authorize(["admin"]));
 adminRouter.use(requireAdmin);
 
@@ -677,7 +683,7 @@ async function enrichSubmissionVisitMeta(docs) {
 }
 
 // Paginated submissions list (trimmed content for table rows; use GET /submissions/:id for full body)
-adminRouter.get("/submissions", async (req, res) => {
+submissionModRouter.get("/submissions", async (req, res) => {
   try {
     const { status } = req.query;
     const query = status ? { status } : {};
@@ -688,7 +694,7 @@ adminRouter.get("/submissions", async (req, res) => {
       Submission.find(query)
         .populate({ path: "companyId", select: "name", model: "CompanyStatic" })
         .select(
-          "companyId type submittedBy isAnonymous status submittedAt approvedAt content placementYear placementListContext companyVisitId"
+          "companyId type submittedBy isAnonymous status submittedAt approvedAt reviewedBy content placementYear placementListContext companyVisitId"
         )
         .sort({ submittedAt: -1 })
         .skip(skip)
@@ -714,7 +720,7 @@ adminRouter.get("/submissions", async (req, res) => {
 });
 
 // Full submission (e.g. admin modal)
-adminRouter.get("/submissions/:id", async (req, res) => {
+submissionModRouter.get("/submissions/:id", async (req, res) => {
   try {
     const submission = await Submission.findById(req.params.id).populate({ path: "companyId", select: "name", model: "CompanyStatic" });
     if (!submission) {
@@ -793,7 +799,7 @@ adminRouter.delete("/missing-companies/:id", async (req, res) => {
 });
 
 // Approve submission and update company
-adminRouter.post("/submissions/:id/approve", async (req, res) => {
+submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
   try {
     const submission = await Submission.findById(req.params.id);
     
@@ -1308,6 +1314,23 @@ adminRouter.post("/submissions/:id/approve", async (req, res) => {
     // Mark submission as approved instead of deleting
     submission.status = "approved";
     submission.approvedAt = new Date();
+    const reviewerRole =
+      req.user?.isAdminSession === true
+        ? "admin"
+        : req.user?.role === "spc"
+          ? "spc"
+          : "admin";
+    const reviewerName =
+      String(req.user?.username || "").trim() ||
+      String(req.user?.email || "")
+        .split("@")[0]
+        .trim() ||
+      "Reviewer";
+    submission.reviewedBy = {
+      role: reviewerRole,
+      name: reviewerName,
+      email: String(req.user?.email || "").trim(),
+    };
     await submission.save();
 
     // Award leaderboard points: question = 5, interview experience = 10
@@ -2209,7 +2232,7 @@ adminRouter.put(
 
 
 // Reject submission (delete it from database)
-adminRouter.delete("/submissions/:id/reject", async (req, res) => {
+submissionModRouter.delete("/submissions/:id/reject", async (req, res) => {
   try {
     const submission = await Submission.findById(req.params.id);
     

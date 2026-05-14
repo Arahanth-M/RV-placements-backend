@@ -2,6 +2,18 @@ import mongoose from "mongoose";
 
 const eventSchema = new mongoose.Schema(
   {
+    type: {
+      type: String,
+      trim: true,
+      maxlength: [80, "Type cannot exceed 80 characters"],
+      default: "",
+    },
+    organizer: {
+      type: String,
+      trim: true,
+      maxlength: [120, "Organizer cannot exceed 120 characters"],
+      default: "",
+    },
     title: {
       type: String,
       required: [true, "Event title is required"],
