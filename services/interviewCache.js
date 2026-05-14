@@ -1,128 +1,132 @@
-import redis, { redisUrl } from "../src/utils/redisClient.js";
-import { addToSet, deleteKey, getJSON, getSetMembers, setJSON } from "../src/utils/redisHelpers.js";
+/**
+ * Redis-backed interview list/detail cache and a short-lived "processing" flag
+ * so the API can avoid duplicate work and surface evaluation-in-flight state.
+ * If Redis is unavailable, all operations no-op safely (cache miss; processing false).
+ */
+import redis, { connectRedis } from "../src/utils/redisClient.js";
 
-const SUMMARY_TTL_SECONDS = 30;
-const DETAIL_TTL_SECONDS = 120;
-const SUMMARY_INDEX_TTL_SECONDS = 24 * 60 * 60;
-const PROCESSING_TTL_SECONDS = 5 * 60;
+const SUMMARY_TTL_SEC = 30;
+const DETAIL_TTL_SEC = 120;
+const PROCESSING_TTL_SEC = 600;
 
-const metrics = {
-  summaries: { hit: 0, miss: 0 },
-  details: { hit: 0, miss: 0 },
-};
+const summaryKey = (userId, page, limit) =>
+  `rvp:interview:summaries:${String(userId)}:${Number(page)}:${Number(limit)}`;
 
-const shouldUseRedis = () => Boolean(redisUrl);
+const detailKey = (sessionId) => `rvp:interview:detail:${String(sessionId)}`;
 
-const summaryKey = ({ userId, page, limit }) =>
-  `interview:summaries:user:${String(userId)}:page:${Number(page)}:limit:${Number(limit)}`;
-const summaryIndexKey = (userId) => `interview:summaries:user:${String(userId)}:keys`;
-const detailKey = (sessionId) => `interview:detail:session:${String(sessionId)}`;
-const processingKey = (sessionId) => `interview:processing:session:${String(sessionId)}`;
+const processingKey = (sessionId) => `rvp:interview:processing:${String(sessionId)}`;
 
-function logMetricsOccasionally() {
-  const totalSummary = metrics.summaries.hit + metrics.summaries.miss;
-  const totalDetails = metrics.details.hit + metrics.details.miss;
-  const total = totalSummary + totalDetails;
-  if (total === 0 || total % 50 !== 0) return;
-
-  const summaryHitRate = totalSummary
-    ? Math.round((metrics.summaries.hit / totalSummary) * 100)
-    : 0;
-  const detailsHitRate = totalDetails
-    ? Math.round((metrics.details.hit / totalDetails) * 100)
-    : 0;
-
-  console.info("[interview-cache] hit-rate", {
-    summaries: `${summaryHitRate}%`,
-    details: `${detailsHitRate}%`,
-    summaryTotals: metrics.summaries,
-    detailTotals: metrics.details,
-  });
+async function getRedis() {
+  if (!process.env.REDIS_URL) {
+    return null;
+  }
+  try {
+    await connectRedis();
+    return redis;
+  } catch {
+    return null;
+  }
 }
 
 export async function getCachedInterviewSummaries(userId, page, limit) {
-  if (!shouldUseRedis()) return null;
-  const key = summaryKey({ userId, page, limit });
-  const cached = await getJSON(key);
-  if (cached) {
-    metrics.summaries.hit += 1;
-    logMetricsOccasionally();
-    return cached;
+  const r = await getRedis();
+  if (!r) return null;
+  try {
+    const raw = await r.get(summaryKey(userId, page, limit));
+    if (!raw || typeof raw !== "string") return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
   }
-  metrics.summaries.miss += 1;
-  logMetricsOccasionally();
-  return null;
 }
 
 export async function setCachedInterviewSummaries(userId, page, limit, payload) {
-  if (!shouldUseRedis()) return false;
-  const key = summaryKey({ userId, page, limit });
-  const ok = await setJSON(key, payload, SUMMARY_TTL_SECONDS);
-  if (ok) {
-    await addToSet(summaryIndexKey(userId), key, SUMMARY_INDEX_TTL_SECONDS);
+  const r = await getRedis();
+  if (!r) return;
+  try {
+    await r.set(summaryKey(userId, page, limit), JSON.stringify(payload), {
+      EX: SUMMARY_TTL_SEC,
+    });
+  } catch (e) {
+    console.warn("[interviewCache] setCachedInterviewSummaries:", e?.message || e);
   }
-  return ok;
 }
 
 export async function invalidateInterviewSummaries(userId) {
-  if (!shouldUseRedis()) return;
-  const indexKey = summaryIndexKey(userId);
-  const keys = await getSetMembers(indexKey);
-  if (keys.length > 0) {
-    await Promise.all(keys.map((key) => deleteKey(key)));
+  const r = await getRedis();
+  if (!r) return;
+  const pattern = `rvp:interview:summaries:${String(userId)}:*`;
+  try {
+    const keys = await r.keys(pattern);
+    if (keys.length > 0) {
+      await r.del(keys);
+    }
+  } catch (e) {
+    console.warn("[interviewCache] invalidateInterviewSummaries:", e?.message || e);
   }
-  await deleteKey(indexKey);
 }
 
 export async function getCachedInterviewDetail(sessionId) {
-  if (!shouldUseRedis()) return null;
-  const key = detailKey(sessionId);
-  const cached = await getJSON(key);
-  if (cached) {
-    metrics.details.hit += 1;
-    logMetricsOccasionally();
-    return cached;
+  const r = await getRedis();
+  if (!r) return null;
+  try {
+    const raw = await r.get(detailKey(sessionId));
+    if (!raw || typeof raw !== "string") return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
   }
-  metrics.details.miss += 1;
-  logMetricsOccasionally();
-  return null;
 }
 
 export async function setCachedInterviewDetail(sessionId, payload) {
-  if (!shouldUseRedis()) return false;
-  return setJSON(detailKey(sessionId), payload, DETAIL_TTL_SECONDS);
-}
-
-export async function invalidateInterviewDetail(sessionId) {
-  if (!shouldUseRedis()) return;
-  await deleteKey(detailKey(sessionId));
-}
-
-export async function markInterviewProcessing(sessionId) {
-  if (!shouldUseRedis()) return;
+  const r = await getRedis();
+  if (!r) return;
   try {
-    await redis.set(processingKey(sessionId), "1", { EX: PROCESSING_TTL_SECONDS });
-  } catch (error) {
-    console.error("[interview-cache] failed to mark processing:", error?.message || error);
+    await r.set(detailKey(sessionId), JSON.stringify(payload), {
+      EX: DETAIL_TTL_SEC,
+    });
+  } catch (e) {
+    console.warn("[interviewCache] setCachedInterviewDetail:", e?.message || e);
   }
 }
 
-export async function clearInterviewProcessing(sessionId) {
-  if (!shouldUseRedis()) return;
+export async function invalidateInterviewDetail(sessionId) {
+  const r = await getRedis();
+  if (!r) return;
   try {
-    await redis.del(processingKey(sessionId));
-  } catch (error) {
-    console.error("[interview-cache] failed to clear processing:", error?.message || error);
+    await r.del(detailKey(sessionId));
+  } catch (e) {
+    console.warn("[interviewCache] invalidateInterviewDetail:", e?.message || e);
+  }
+}
+
+export async function markInterviewProcessing(sessionId) {
+  const r = await getRedis();
+  if (!r) return;
+  try {
+    await r.set(processingKey(sessionId), "1", { EX: PROCESSING_TTL_SEC });
+  } catch (e) {
+    console.warn("[interviewCache] markInterviewProcessing:", e?.message || e);
   }
 }
 
 export async function isInterviewProcessing(sessionId) {
-  if (!shouldUseRedis()) return false;
+  const r = await getRedis();
+  if (!r) return false;
   try {
-    const exists = await redis.exists(processingKey(sessionId));
-    return exists === 1;
-  } catch (error) {
-    console.error("[interview-cache] failed to read processing:", error?.message || error);
+    const v = await r.get(processingKey(sessionId));
+    return v === "1";
+  } catch {
     return false;
+  }
+}
+
+export async function clearInterviewProcessing(sessionId) {
+  const r = await getRedis();
+  if (!r) return;
+  try {
+    await r.del(processingKey(sessionId));
+  } catch (e) {
+    console.warn("[interviewCache] clearInterviewProcessing:", e?.message || e);
   }
 }

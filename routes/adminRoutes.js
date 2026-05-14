@@ -56,6 +56,10 @@ import {
   importStudentsFromXlsxBuffer,
   STUDENT_BATCH_COLUMN_GUIDE,
 } from "../services/studentBatchImportService.js";
+import {
+  assertMergeContentValidForSubmissionType,
+  enhanceSubmissionContent,
+} from "../services/submissionEnhanceService.js";
 
 const adminRouter = express.Router();
 
@@ -798,6 +802,31 @@ adminRouter.delete("/missing-companies/:id", async (req, res) => {
   }
 });
 
+// AI polish for SPC/admin review — does not write to the database.
+submissionModRouter.post("/submissions/:id/enhance", async (req, res) => {
+  try {
+    const submission = await Submission.findById(req.params.id);
+    if (!submission) {
+      return res.status(404).json({ error: "Submission not found" });
+    }
+    if (submission.status !== "pending") {
+      return res.status(400).json({ error: "Only pending submissions can be enhanced." });
+    }
+    const enhanced = await enhanceSubmissionContent({
+      type: submission.type,
+      content: submission.content,
+    });
+    return res.json({ content: enhanced });
+  } catch (error) {
+    const msg = String(error?.message || error || "Enhancement failed");
+    if (msg.includes("Missing GROQ_API_KEY")) {
+      return res.status(503).json({ error: "AI enhancement is not configured (missing GROQ_API_KEY)." });
+    }
+    console.error("❌ submission enhance:", msg);
+    return res.status(422).json({ error: msg });
+  }
+});
+
 // Approve submission and update company
 submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
   try {
@@ -805,6 +834,21 @@ submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
     
     if (!submission) {
       return res.status(404).json({ error: "Submission not found" });
+    }
+
+    let mergeSource = submission.content;
+    if (typeof req.body?.mergeContent === "string") {
+      const trimmed = req.body.mergeContent.trim();
+      if (trimmed.length > 0) {
+        try {
+          assertMergeContentValidForSubmissionType(submission.type, trimmed);
+          mergeSource = trimmed.slice(0, 70000);
+        } catch (e) {
+          return res.status(400).json({
+            error: String(e?.message || e || "Invalid mergeContent"),
+          });
+        }
+      }
     }
 
     const placementYear = normalizeCompanyDetailYear(submission.placementYear);
@@ -845,18 +889,18 @@ submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
     }
     removeLegacySolutionField();
 
-    // Parse submission content
+    // Parse submission content (optional mergeContent from body = AI-enhanced text, not persisted on Submission)
     let parsedContent;
     try {
-      parsedContent = JSON.parse(submission.content);
+      parsedContent = JSON.parse(mergeSource);
     } catch {
-      parsedContent = { question: submission.content, solution: "" };
+      parsedContent = { question: mergeSource, solution: "" };
     }
 
     // Update company based on submission type
     if (submission.type === "onlineQuestions") {
       // Ensure we get a string value
-      let questionText = parsedContent.question || submission.content;
+      let questionText = parsedContent.question || mergeSource;
       if (questionText && typeof questionText !== 'string') {
         questionText = String(questionText);
       }
@@ -919,7 +963,7 @@ submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
       }
     } else if (submission.type === "interviewQuestions") {
       // Ensure we get a string value
-      let questionText = parsedContent.question || submission.content;
+      let questionText = parsedContent.question || mergeSource;
       if (questionText && typeof questionText !== 'string') {
         questionText = String(questionText);
       }
@@ -980,7 +1024,7 @@ submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
       }
     } else if (submission.type === "interviewProcess") {
       // Ensure we get a string value
-      let processText = parsedContent.question || parsedContent.content || submission.content;
+      let processText = parsedContent.question || parsedContent.content || mergeSource;
       if (processText && typeof processText !== 'string') {
         processText = String(processText);
       }
@@ -1027,7 +1071,7 @@ submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
       }
     } else if (submission.type === "internshipExperience") {
       let experienceText =
-        parsedContent.experience || parsedContent.content || submission.content;
+        parsedContent.experience || parsedContent.content || mergeSource;
       if (experienceText && typeof experienceText !== "string") {
         experienceText = String(experienceText);
       }
@@ -1070,7 +1114,7 @@ submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
       }
     } else if (submission.type === "mustDoTopics") {
       // Ensure we get a string value
-      let topicText = parsedContent.question || parsedContent.content || parsedContent.topic || submission.content;
+      let topicText = parsedContent.question || parsedContent.content || parsedContent.topic || mergeSource;
       if (topicText && typeof topicText !== 'string') {
         topicText = String(topicText);
       }
