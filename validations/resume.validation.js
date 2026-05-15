@@ -6,7 +6,7 @@ const text = (max) => Joi.string().trim().max(max).allow("");
 const requiredText = (min, max) => Joi.string().trim().min(min).max(max).required();
 
 const bulletSchema = Joi.object({
-  text: requiredText(1, 250),
+  text: text(250),
 }).unknown(false);
 
 const educationSchema = Joi.object({

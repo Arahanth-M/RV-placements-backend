@@ -8,6 +8,7 @@ import {
   resumeDraftSaveSchema,
   resumeExportSchema,
 } from "../validations/resume.validation.js";
+import { buildPdfBufferFromResume } from "../services/resumePdfExport.js";
 
 const router = express.Router();
 
@@ -92,48 +93,7 @@ function buildEmptyDraft() {
   };
 }
 
-function buildPdfBufferFromResume(payload = {}) {
-  const lines = [];
-  const personal = payload.personal || {};
-  lines.push(sanitizeText(personal.fullName || "Resume"));
-  lines.push(sanitizeText(personal.email || ""));
-  lines.push(sanitizeText(personal.phone || ""));
-  lines.push("");
-  lines.push("Skills");
-  (payload.skills || []).forEach((skill) => lines.push(`- ${sanitizeText(skill)}`));
-  lines.push("");
-  lines.push("Education");
-  (payload.education || []).forEach((entry) => {
-    const institution = sanitizeText(entry.institution);
-    const degree = sanitizeText(entry.degree);
-    lines.push(`- ${institution}${degree ? ` | ${degree}` : ""}`);
-  });
-
-  const content = lines.join("\n").slice(0, 2000).replace(/[()\\]/g, "\\$&");
-  const pdfText = `%PDF-1.4
-1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
-2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
-3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj
-4 0 obj << /Length ${content.length + 45} >> stream
-BT /F1 12 Tf 40 760 Td (${content}) Tj ET
-endstream endobj
-5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj
-xref
-0 6
-0000000000 65535 f 
-0000000010 00000 n 
-0000000062 00000 n 
-0000000119 00000 n 
-0000000247 00000 n 
-0000000365 00000 n 
-trailer << /Root 1 0 R /Size 6 >>
-startxref
-438
-%%EOF`;
-  return Buffer.from(pdfText, "utf8");
-}
-
-router.use(authJWT, checkBetaAccess, authorize(["student", "admin"]));
+router.use(authJWT, checkBetaAccess, authorize(["student", "admin", "spc"]));
 
 router.get("/draft", async (req, res) => {
   const startedAt = Date.now();
@@ -226,7 +186,7 @@ router.post("/export", validateRequest(resumeExportSchema), async (req, res) => 
     if (!ownerEmail) return res.status(401).json({ error: "Unauthorized" });
 
     const payload = sanitizeResumePayload(req.body.payload || {});
-    const pdfBuffer = buildPdfBufferFromResume(payload);
+    const pdfBuffer = await buildPdfBufferFromResume(payload);
 
     console.info("[resume] exportPdf", {
       ownerEmail,
