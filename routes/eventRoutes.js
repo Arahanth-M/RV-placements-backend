@@ -10,17 +10,25 @@ import {
   getCachedEventRegistrations,
   setCachedEventRegistrations,
 } from "../services/eventRegistrationCache.js";
+import {
+  getCachedEventCatalog,
+  setCachedEventCatalog,
+  loadEventsCatalogFromDb,
+  invalidateEventCatalogCache,
+} from "../services/eventCatalogCache.js";
 
 const eventRouter = express.Router();
 
 // Public route - Get all events (for students)
 eventRouter.get("/", async (req, res) => {
   try {
-    const events = await Event.find()
-      .sort({ lastDateToRegister: 1, createdAt: -1 })
-      .populate("createdBy", "username email")
-      .select("-__v");
+    const cached = await getCachedEventCatalog();
+    if (cached) {
+      return res.json(cached);
+    }
 
+    const events = await loadEventsCatalogFromDb();
+    await setCachedEventCatalog(events);
     res.json(events);
   } catch (error) {
     console.error("❌ Error fetching events:", error.message);
@@ -161,6 +169,8 @@ eventRouter.post("/", authJWT, requireAdmin, validateRequest(eventCreateSchema),
       .populate("createdBy", "username email")
       .select("-__v");
 
+    await invalidateEventCatalogCache();
+
     res.status(201).json(populatedEvent);
   } catch (error) {
     console.error("❌ Error creating event:", error.message);
@@ -209,6 +219,8 @@ eventRouter.put("/:id", authJWT, requireAdmin, validateRequest(eventUpdateSchema
       .populate("createdBy", "username email")
       .select("-__v");
 
+    await invalidateEventCatalogCache();
+
     res.json(populatedEvent);
   } catch (error) {
     console.error("❌ Error updating event:", error.message);
@@ -237,6 +249,8 @@ eventRouter.delete("/:id", authJWT, requireAdmin, async (req, res) => {
     }
 
     await Event.findByIdAndDelete(req.params.id);
+
+    await invalidateEventCatalogCache();
 
     res.json({ message: "Event deleted successfully" });
   } catch (error) {

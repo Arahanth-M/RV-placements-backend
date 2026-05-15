@@ -29,10 +29,8 @@ async function handleCompanyApproved(payload) {
   const name =
     (companyName && String(companyName).trim()) || "A company on the platform";
 
-  // Fan-out to student users.
-  const cursor = User1.find({
-    role: "student",
-  })
+  // Fan-out to all platform accounts (students, SPCs, and admins — all use `users1`).
+  const cursor = User1.find({})
     .select("_id")
     .lean()
     .cursor();

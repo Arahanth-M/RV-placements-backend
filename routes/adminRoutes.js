@@ -16,7 +16,6 @@ import {
   adminCompanyTotalGotInAdjustmentSchema,
   adminCompanyRolesSchema,
   adminCompanyGeneralSchema,
-  adminMissingCompanyStatusSchema,
 } from "../validations/admin.validation.js";
 import User from "../models/User.js";
 import User1 from "../models/User1.js";
@@ -25,10 +24,13 @@ import PlacementData from "../models/PlacementData.js";
 import Submission from "../models/Submission.js";
 import CompanyStatic from "../models/CompanyStatic.js";
 import CompanyVisit from "../models/CompanyVisit.js";
-import MissingCompany from "../models/MissingCompany.js";
 import Notification from "../models/Notification.js";
 import { getAdminStats } from "../controllers/adminStatsController.js";
 import { invalidateAdminDashboardStatsCache } from "../services/adminDashboardStatsCache.js";
+import {
+  invalidateMySubmissionsCacheByEmail,
+  submitterEmailFromSubmission,
+} from "../services/mySubmissionsCache.js";
 import { invalidateCompanyDetailCache } from "../services/companyDetailCache.js";
 import {
   approveAndNormalizeSingleCompanyVisitById,
@@ -741,67 +743,6 @@ submissionModRouter.get("/submissions/:id", async (req, res) => {
 // Get dashboard stats (Redis-cached when REDIS_URL is set; invalidated on admin mutations)
 adminRouter.get("/stats", getAdminStats);
 
-adminRouter.get("/missing-companies", async (req, res) => {
-  try {
-    const missingCompanies = await MissingCompany.find({})
-      .populate("requestedBy", "_id username email")
-      .sort({ requestCount: -1, createdAt: -1 })
-      .lean();
-
-    res.json({ items: missingCompanies });
-  } catch (error) {
-    console.error("❌ Error fetching missing companies:", error.message);
-    res.status(500).json({ error: "Server error" });
-  }
-});
-
-adminRouter.patch(
-  "/missing-companies/:id/status",
-  validateRequest(adminMissingCompanyStatusSchema),
-  async (req, res) => {
-    try {
-      const missingCompany = await MissingCompany.findByIdAndUpdate(
-        req.params.id,
-        { $set: { status: req.body.status } },
-        { new: true, runValidators: true }
-      );
-
-      if (!missingCompany) {
-        return res.status(404).json({ error: "Missing company request not found" });
-      }
-
-      return res.json({
-        message: "Missing company status updated successfully",
-        missingCompany,
-      });
-    } catch (error) {
-      console.error("❌ Error updating missing company status:", error.message);
-      if (error.name === "CastError") {
-        return res.status(404).json({ error: "Missing company request not found" });
-      }
-      return res.status(500).json({ error: "Server error" });
-    }
-  }
-);
-
-adminRouter.delete("/missing-companies/:id", async (req, res) => {
-  try {
-    const missingCompany = await MissingCompany.findByIdAndDelete(req.params.id);
-
-    if (!missingCompany) {
-      return res.status(404).json({ error: "Missing company request not found" });
-    }
-
-    return res.json({ message: "Missing company request deleted successfully" });
-  } catch (error) {
-    console.error("❌ Error deleting missing company request:", error.message);
-    if (error.name === "CastError") {
-      return res.status(404).json({ error: "Missing company request not found" });
-    }
-    return res.status(500).json({ error: "Server error" });
-  }
-});
-
 // AI polish for SPC/admin review — does not write to the database.
 submissionModRouter.post("/submissions/:id/enhance", async (req, res) => {
   try {
@@ -1282,7 +1223,6 @@ submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
       });
     }
 
-    let companyVisitWasApproved = false;
     // Persist to companies + company_visits (replaces single Company / companies1 save)
     try {
       console.log("📊 Company data before persist:");
@@ -1322,7 +1262,6 @@ submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
           visitApprovedAt,
           String(submission.companyId)
         );
-        companyVisitWasApproved = true;
       } else {
         console.warn(
           "⚠️ Submission approved but no company_visits row found to normalize/approve for company",
@@ -1376,6 +1315,9 @@ submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
       email: String(req.user?.email || "").trim(),
     };
     await submission.save();
+    await invalidateMySubmissionsCacheByEmail(
+      submitterEmailFromSubmission(submission)
+    );
 
     // Award leaderboard points: question = 5, interview experience = 10
     const POINTS_QUESTION = 5;
@@ -1409,16 +1351,9 @@ submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
       ? companyToJsonSafePlainObject(reloadedSub.merged)
       : null;
 
-    if (companyVisitWasApproved) {
-      const notifyName =
-        (companyOut?.name && String(companyOut.name).trim()) ||
-        (reloadedSub?.static?.name && String(reloadedSub.static.name).trim()) ||
-        "";
-      dispatchEvent(EVENT_TYPES.COMPANY_APPROVED, {
-        companyId: submission.companyId,
-        companyName: notifyName,
-      });
-    }
+    // In-app notifications are sent only when a company visit is approved from the
+    // Admin Dashboard Companies tab (`POST /companies/:id/approve`), not when
+    // approving individual content submissions (questions, process, must-do, etc.).
 
     res.json({
       message: "Submission approved and company updated successfully",
@@ -2289,6 +2224,9 @@ submissionModRouter.delete("/submissions/:id/reject", async (req, res) => {
     
     console.log('✅ Submission rejected and deleted:', req.params.id);
     
+    await invalidateMySubmissionsCacheByEmail(
+      submitterEmailFromSubmission(submission)
+    );
     await invalidateAdminDashboardStatsCache();
 
     res.json({ 
@@ -2321,6 +2259,9 @@ adminRouter.delete("/submissions/:id/delete", async (req, res) => {
     
     console.log('✅ Approved submission deleted:', req.params.id);
     
+    await invalidateMySubmissionsCacheByEmail(
+      submitterEmailFromSubmission(submission)
+    );
     await invalidateAdminDashboardStatsCache();
 
     res.json({ 

@@ -3,7 +3,6 @@ import User1 from "../models/User1.js";
 import Submission from "../models/Submission.js";
 import CompanyStatic from "../models/CompanyStatic.js";
 import CompanyVisit from "../models/CompanyVisit.js";
-import MissingCompany from "../models/MissingCompany.js";
 import {
   COMPANY_VISIT_YEAR,
   countAdminListableCompanyVisits,
@@ -200,9 +199,7 @@ export async function computeAdminStatsSnapshot() {
     approvedSubmissions,
     totalSubmissions,
     pendingCompanies,
-    missingCompaniesCount,
     dau,
-    topMissingCompanies,
     mostViewedCompanies,
     mostHelpfulCompanies,
     topSubmittedCompanies,
@@ -218,13 +215,7 @@ export async function computeAdminStatsSnapshot() {
     Submission.countDocuments({ status: "approved" }),
     Submission.countDocuments(),
     countAdminListableCompanyVisits("pending"),
-    MissingCompany.countDocuments(),
     User1.countDocuments({ lastLoginAt: { $gte: todayStart } }),
-    MissingCompany.find({})
-      .select("name requestCount status")
-      .sort({ requestCount: -1, createdAt: -1 })
-      .limit(5)
-      .lean(),
     findMostViewedApprovedCompanies(5),
     findMostHelpfulApprovedCompanies(5),
     aggregateTopSubmittedCompanies(5),
@@ -239,9 +230,7 @@ export async function computeAdminStatsSnapshot() {
     totalCompanies,
     pendingSubmissions,
     dailySubmissions,
-    missingCompaniesCount,
     dau,
-    topMissingCompanies,
     mostViewedCompanies,
     mostHelpfulCompanies,
     topSubmittedCompanies,

@@ -9,13 +9,41 @@ import { submissionInputSchema, submissionUpdateSchema } from "../validations/su
 import { messages } from "../config/constants.js";
 import { normalizeCompanyDetailYear } from "../services/companyService.js";
 import { getAuthUserModel } from "../utils/authUserModel.js";
+import {
+  getCachedMySubmissions,
+  setCachedMySubmissions,
+  invalidateMySubmissionsCacheByEmail,
+  normalizeSubmitterEmail,
+} from "../services/mySubmissionsCache.js";
 
 
 const submissionRouter = express.Router();
 const escapeRegex = (value) => String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-function normalizeEmail(value) {
-  return String(value || "").trim().toLowerCase();
+function buildMySubmissionsPayload(submissions) {
+  return submissions.map((submission) => ({
+    _id: submission._id,
+    type: submission.type,
+    content: submission.content,
+    isAnonymous: submission.isAnonymous === true,
+    status: submission.status,
+    submittedAt: submission.submittedAt,
+    approvedAt: submission.approvedAt ?? null,
+    reviewedBy: submission.reviewedBy
+      ? {
+          role: submission.reviewedBy.role ?? null,
+          name: submission.reviewedBy.name ?? "",
+          email: submission.reviewedBy.email ?? "",
+        }
+      : null,
+    placementYear: submission.placementYear ?? null,
+    placementListContext: submission.placementListContext ?? null,
+    companyVisitId: submission.companyVisitId
+      ? String(submission.companyVisitId)
+      : null,
+    companyId: submission.companyId?._id || null,
+    companyName: submission.companyId?.name || "Unknown company",
+  }));
 }
 
 submissionRouter.get(
@@ -25,10 +53,15 @@ submissionRouter.get(
   authorize(["student", "admin", "spc"]),
   async (req, res) => {
     try {
-      const email = (req.user?.email || "").trim().toLowerCase();
+      const email = normalizeSubmitterEmail(req.user?.email);
 
       if (!email) {
         return res.status(401).json({ error: messages.ERROR.NOT_AUTHENTICATED });
+      }
+
+      const cached = await getCachedMySubmissions(email);
+      if (cached) {
+        return res.json(cached);
       }
 
       const submissions = await Submission.find({
@@ -40,31 +73,10 @@ submissionRouter.get(
         .populate("companyId", "name")
         .lean();
 
-      const payload = submissions.map((submission) => ({
-        _id: submission._id,
-        type: submission.type,
-        content: submission.content,
-        isAnonymous: submission.isAnonymous === true,
-        status: submission.status,
-        submittedAt: submission.submittedAt,
-        approvedAt: submission.approvedAt ?? null,
-        reviewedBy: submission.reviewedBy
-          ? {
-              role: submission.reviewedBy.role ?? null,
-              name: submission.reviewedBy.name ?? "",
-              email: submission.reviewedBy.email ?? "",
-            }
-          : null,
-        placementYear: submission.placementYear ?? null,
-        placementListContext: submission.placementListContext ?? null,
-        companyVisitId: submission.companyVisitId
-          ? String(submission.companyVisitId)
-          : null,
-        companyId: submission.companyId?._id || null,
-        companyName: submission.companyId?.name || "Unknown company",
-      }));
+      const responsePayload = { submissions: buildMySubmissionsPayload(submissions) };
+      await setCachedMySubmissions(email, responsePayload);
 
-      return res.json({ submissions: payload });
+      return res.json(responsePayload);
     } catch (error) {
       console.error("Error fetching user submissions:", error);
       return res.status(500).json({ error: "Error fetching submissions" });
@@ -125,6 +137,8 @@ submissionRouter.post(
       ),
     ]);
 
+    await invalidateMySubmissionsCacheByEmail(req.user?.email);
+
     res.status(201).json({ message: messages.SUCCESS.SUBMISSION_RECEIVED });
   } catch (error) {
     console.error(error);
@@ -150,8 +164,8 @@ submissionRouter.put(
         return res.status(404).json({ error: "Submission not found" });
       }
 
-      const ownerEmail = normalizeEmail(submission.submittedBy?.email);
-      const sessionEmail = normalizeEmail(req.user?.email);
+      const ownerEmail = normalizeSubmitterEmail(submission.submittedBy?.email);
+      const sessionEmail = normalizeSubmitterEmail(req.user?.email);
       if (!sessionEmail || ownerEmail !== sessionEmail) {
         return res.status(403).json({ error: "You can only edit your own submissions" });
       }
@@ -166,6 +180,7 @@ submissionRouter.put(
           req.body.isAnonymous === true || req.body.isAnonymous === "true";
       }
       await submission.save();
+      await invalidateMySubmissionsCacheByEmail(sessionEmail);
       await submission.populate("companyId", "name");
 
       return res.json({
@@ -208,8 +223,8 @@ submissionRouter.delete(
         return res.status(404).json({ error: "Submission not found" });
       }
 
-      const ownerEmail = normalizeEmail(submission.submittedBy?.email);
-      const sessionEmail = normalizeEmail(req.user?.email);
+      const ownerEmail = normalizeSubmitterEmail(submission.submittedBy?.email);
+      const sessionEmail = normalizeSubmitterEmail(req.user?.email);
       if (!sessionEmail || ownerEmail !== sessionEmail) {
         return res.status(403).json({ error: "You can only delete your own submissions" });
       }
@@ -219,6 +234,7 @@ submissionRouter.delete(
       }
 
       await Submission.deleteOne({ _id: id });
+      await invalidateMySubmissionsCacheByEmail(sessionEmail);
       return res.json({ message: "Submission deleted" });
     } catch (error) {
       console.error("Error deleting submission:", error);

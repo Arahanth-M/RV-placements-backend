@@ -28,6 +28,7 @@ import {
 } from "../validations/placement.validation.js";
 import { config, messages } from "../config/constants.js";
 import { invalidateStudentProfileCacheByEmail } from "../services/studentProfileCache.js";
+import { invalidateMySubmissionsCacheByEmail } from "../services/mySubmissionsCache.js";
 
 const router = express.Router();
 
@@ -232,6 +233,8 @@ router.post(
 
     // Save all submissions
     await Submission.insertMany(submissions);
+
+    await invalidateMySubmissionsCacheByEmail(req.user?.email);
 
     // Touch the authenticated student account record after submission.
     if (req.user && req.user._id) {
