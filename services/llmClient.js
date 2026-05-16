@@ -1,24 +1,39 @@
 import Groq from "groq-sdk";
+import {
+  detectGroqKeySlot,
+  getGroqKeyEnvName,
+  GROQ_KEY_ENV_BY_SLOT,
+  resolveGroqApiKey,
+} from "../config/groqApiKey.js";
 
 const DEFAULT_ORCHESTRATOR_MODEL =
   process.env.GROQ_ORCHESTRATOR_MODEL ||
   process.env.GROQ_MODEL ||
   "llama-3.3-70b-versatile";
 
-let groqClient = null;
+/** @type {Map<string, import("groq-sdk").Groq>} */
+const groqClientsByApiKey = new Map();
 
-const getGroqClient = () => {
-  if (groqClient) {
-    return groqClient;
+let loggedKeySlot = false;
+
+const logKeySlotOnce = (slot) => {
+  if (loggedKeySlot) return;
+  loggedKeySlot = true;
+  const envName = slot ? GROQ_KEY_ENV_BY_SLOT[slot] : getGroqKeyEnvName(slot);
+  console.info(`[Groq] API key slot=${slot || "legacy"} env=${envName}`);
+};
+
+const getGroqClient = (options = {}) => {
+  const slot = options.apiKeySlot || detectGroqKeySlot();
+  const apiKey = resolveGroqApiKey(slot);
+  logKeySlotOnce(slot);
+
+  let client = groqClientsByApiKey.get(apiKey);
+  if (!client) {
+    client = new Groq({ apiKey });
+    groqClientsByApiKey.set(apiKey, client);
   }
-
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) {
-    throw new Error("Missing GROQ_API_KEY environment variable.");
-  }
-
-  groqClient = new Groq({ apiKey });
-  return groqClient;
+  return client;
 };
 
 const getErrorMessage = (error) => {
@@ -32,6 +47,8 @@ const getErrorMessage = (error) => {
 
   return "Unknown error while calling Groq LLM.";
 };
+
+export { detectGroqKeySlot, getGroqKeyEnvName, resolveGroqApiKey };
 
 export const callLLM = async (messages, options = {}) => {
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -53,7 +70,7 @@ export const callLLM = async (messages, options = {}) => {
   }
 
   try {
-    const client = getGroqClient();
+    const client = getGroqClient(options);
     const selectedModel =
       typeof options?.model === "string" && options.model.trim()
         ? options.model.trim()
@@ -86,4 +103,3 @@ export const callLLM = async (messages, options = {}) => {
     throw new Error(`Groq LLM request failed: ${message}`);
   }
 };
-

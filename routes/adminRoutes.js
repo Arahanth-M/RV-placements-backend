@@ -20,7 +20,6 @@ import {
 import User from "../models/User.js";
 import User1 from "../models/User1.js";
 import Student from "../models/Student.js";
-import PlacementData from "../models/PlacementData.js";
 import Submission from "../models/Submission.js";
 import CompanyStatic from "../models/CompanyStatic.js";
 import CompanyVisit from "../models/CompanyVisit.js";
@@ -31,7 +30,17 @@ import {
   invalidateMySubmissionsCacheByEmail,
   submitterEmailFromSubmission,
 } from "../services/mySubmissionsCache.js";
+import { invalidateSpcMyRecordsCacheByEmail } from "../services/spcMyRecordsCache.js";
+import { getStudentPlacementStats } from "../services/studentPlacementStatsCache.js";
 import { invalidateCompanyDetailCache } from "../services/companyDetailCache.js";
+
+async function invalidateSubmitterListCaches(submission) {
+  const email = submitterEmailFromSubmission(submission);
+  await Promise.all([
+    invalidateMySubmissionsCacheByEmail(email),
+    invalidateSpcMyRecordsCacheByEmail(email),
+  ]);
+}
 import {
   approveAndNormalizeSingleCompanyVisitById,
   adjustVisitTotalGotIn,
@@ -233,194 +242,6 @@ function companyToJsonSafePlainObject(doc) {
   }
 }
 
-async function buildStudentPlacementStatsByYear(yearRaw) {
-  const requestedYear =
-    yearRaw == null || yearRaw === ""
-      ? null
-      : Number.parseInt(String(yearRaw), 10);
-  if (yearRaw != null && yearRaw !== "" && !Number.isFinite(requestedYear)) {
-    const err = new Error("INVALID_YEAR");
-    throw err;
-  }
-
-  const yearValues = (await PlacementData.distinct("placementYear", {
-    placementYear: { $ne: null },
-  }))
-    .map((v) => Number.parseInt(String(v), 10))
-    .filter((v) => Number.isFinite(v))
-    .sort((a, b) => b - a);
-
-  const selectedYear =
-    requestedYear != null
-      ? requestedYear
-      : yearValues.length > 0
-        ? yearValues[0]
-        : null;
-
-  if (selectedYear == null) {
-    return {
-      years: yearValues,
-      selectedYear: null,
-      branches: [],
-    };
-  }
-
-  const rows = await PlacementData.aggregate([
-    { $match: { placementYear: selectedYear } },
-    {
-      $lookup: {
-        from: Student.collection.name,
-        localField: "studentId",
-        foreignField: "_id",
-        as: "student",
-      },
-    },
-    {
-      $unwind: {
-        path: "$student",
-        preserveNullAndEmptyArrays: true,
-      },
-    },
-    {
-      $project: {
-        _id: 0,
-        name: { $ifNull: ["$student.name", ""] },
-        usn: { $ifNull: ["$student.usn", ""] },
-        email: { $ifNull: ["$student.email", ""] },
-        companyPlaced: { $ifNull: ["$companyPlaced", ""] },
-        typeOfOffer: { $ifNull: ["$typeOfOffer", ""] },
-        stipend: { $ifNull: ["$stipend", ""] },
-        sixMonthsInternshipStipend: { $ifNull: ["$6-months-internship-stipend", ""] },
-        ctc: { $ifNull: ["$ctc", ""] },
-        role: { $ifNull: ["$role", ""] },
-        ppoConversionType: { $ifNull: ["$ppoConversionType", ""] },
-        createdBy: { $ifNull: ["$createdBy", ""] },
-        branchCode: { $ifNull: ["$branchCode", "unknown"] },
-        createdAt: { $ifNull: ["$createdAt", null] },
-      },
-    },
-    {
-      $sort: {
-        branchCode: 1,
-        usn: 1,
-        name: 1,
-        createdAt: -1,
-      },
-    },
-  ]);
-
-  const createdByKeys = Array.from(
-    new Set(
-      rows
-        .map((row) => String(row?.createdBy || "").trim())
-        .filter(Boolean)
-    )
-  );
-  const createdByObjectIds = createdByKeys
-    .filter((value) => mongoose.Types.ObjectId.isValid(value))
-    .map((value) => new mongoose.Types.ObjectId(value));
-  const createdByEmails = createdByKeys
-    .filter((value) => value.includes("@"))
-    .map((value) => value.toLowerCase());
-
-  const [usersById, usersByEmail] = await Promise.all([
-    createdByObjectIds.length > 0
-      ? User1.find({ _id: { $in: createdByObjectIds } })
-          .select("_id email username")
-          .lean()
-      : Promise.resolve([]),
-    createdByEmails.length > 0
-      ? User1.find({ email: { $in: createdByEmails } })
-          .select("_id email username")
-          .lean()
-      : Promise.resolve([]),
-  ]);
-
-  const creatorBaseByKey = new Map();
-  for (const user of [...usersById, ...usersByEmail]) {
-    const idKey = String(user?._id || "").trim();
-    const emailKey = String(user?.email || "").trim().toLowerCase();
-    const payload = {
-      name: String(user?.username || "").trim(),
-      email: String(user?.email || "").trim().toLowerCase(),
-    };
-    if (idKey) creatorBaseByKey.set(idKey, payload);
-    if (emailKey) creatorBaseByKey.set(emailKey, payload);
-  }
-
-  const creatorEmailsToResolve = Array.from(
-    new Set(
-      [
-        ...createdByEmails,
-        ...Array.from(creatorBaseByKey.values())
-          .map((entry) => String(entry?.email || "").trim().toLowerCase())
-          .filter(Boolean),
-      ].filter(Boolean)
-    )
-  );
-  const creatorStudentRows =
-    creatorEmailsToResolve.length > 0
-      ? await Student.find({ email: { $in: creatorEmailsToResolve } })
-          .select("name usn email")
-          .lean()
-      : [];
-  const creatorStudentByEmail = new Map(
-    creatorStudentRows.map((student) => [
-      String(student?.email || "").trim().toLowerCase(),
-      {
-        name: String(student?.name || "").trim(),
-        usn: String(student?.usn || "").trim(),
-      },
-    ])
-  );
-
-  const branchMap = new Map();
-  for (const row of rows) {
-    const branchCode = String(row.branchCode || "unknown").trim().toLowerCase() || "unknown";
-    if (!branchMap.has(branchCode)) {
-      branchMap.set(branchCode, []);
-    }
-    const createdByKey = String(row.createdBy || "").trim();
-    const createdByEmailKey = createdByKey.toLowerCase();
-    const creatorBase =
-      creatorBaseByKey.get(createdByKey) ||
-      creatorBaseByKey.get(createdByEmailKey) || { name: "", email: "" };
-    const creatorEmail = String(creatorBase.email || "").trim().toLowerCase();
-    const creatorStudent = creatorEmail ? creatorStudentByEmail.get(creatorEmail) : null;
-
-    branchMap.get(branchCode).push({
-      name: row.name || "",
-      usn: row.usn || "",
-      email: row.email || "",
-      companyPlaced: row.companyPlaced || "",
-      typeOfOffer: row.typeOfOffer || "",
-      stipend: row.stipend || "",
-      sixMonthsInternshipStipend: row.sixMonthsInternshipStipend || "",
-      ctc: row.ctc || "",
-      role: row.role || "",
-      ppoConversionType: row.ppoConversionType || "",
-      createdBy: row.createdBy || "",
-      addedByName: creatorStudent?.name || creatorBase.name || "",
-      addedByUsn: creatorStudent?.usn || "",
-      addedByEmail: creatorEmail || createdByEmailKey || "",
-    });
-  }
-
-  const branches = Array.from(branchMap.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([branchCode, students]) => ({
-      branchCode,
-      count: students.length,
-      students,
-    }));
-
-  return {
-    years: yearValues,
-    selectedYear,
-    branches,
-  };
-}
-
 // Sanitize text for company content (remove script tags; keep other text as-is)
 function sanitizeText(text) {
   if (text === undefined || text === null) return '';
@@ -451,7 +272,7 @@ adminRouter.get("/stats/users", async (req, res) => {
 // Branch-wise placed students grouped by placement year (admin-only)
 adminRouter.get("/students/placement-stats", async (req, res) => {
   try {
-    const data = await buildStudentPlacementStatsByYear(req.query?.year);
+    const data = await getStudentPlacementStats(req.query?.year);
     return res.json(data);
   } catch (error) {
     if (error?.message === "INVALID_YEAR") {
@@ -464,7 +285,7 @@ adminRouter.get("/students/placement-stats", async (req, res) => {
 
 adminRouter.get("/students/placement-stats/export", async (req, res) => {
   try {
-    const data = await buildStudentPlacementStatsByYear(req.query?.year);
+    const data = await getStudentPlacementStats(req.query?.year);
     const workbook = XLSX.utils.book_new();
 
     for (const branch of data.branches) {
@@ -770,8 +591,8 @@ submissionModRouter.post("/submissions/:id/enhance", async (req, res) => {
     return res.json({ content: enhanced });
   } catch (error) {
     const msg = String(error?.message || error || "Enhancement failed");
-    if (msg.includes("Missing GROQ_API_KEY")) {
-      return res.status(503).json({ error: "AI enhancement is not configured (missing GROQ_API_KEY)." });
+    if (msg.includes("Missing GROQ_KEY_") || msg.includes("Missing GROQ_API_KEY") || msg.includes("Missing Groq API key")) {
+      return res.status(503).json({ error: "AI enhancement is not configured (missing GROQ_KEY_ADMIN)." });
     }
     console.error("❌ submission enhance:", msg);
     return res.status(422).json({ error: msg });
@@ -781,7 +602,7 @@ submissionModRouter.post("/submissions/:id/enhance", async (req, res) => {
 // AI-generated answer for OA / interview questions — does not write to the database.
 submissionModRouter.post("/submissions/:id/add-answer", async (req, res) => {
   try {
-    const submission = await Submission.findById(req.params.id);
+    const submission = await Submission.findById(req.params.id).select("type content status");
     if (!submission) {
       return res.status(404).json({ error: "Submission not found" });
     }
@@ -793,15 +614,16 @@ submissionModRouter.post("/submissions/:id/add-answer", async (req, res) => {
         error: "Add answer is only available for OA and interview question submissions.",
       });
     }
+    const fullContent = typeof submission.content === "string" ? submission.content : "";
     const content = await generateSubmissionAnswer({
       type: submission.type,
-      content: submission.content,
+      content: fullContent,
     });
     return res.json({ content });
   } catch (error) {
     const msg = String(error?.message || error || "Answer generation failed");
-    if (msg.includes("Missing GROQ_API_KEY")) {
-      return res.status(503).json({ error: "AI answer generation is not configured (missing GROQ_API_KEY)." });
+    if (msg.includes("Missing GROQ_KEY_") || msg.includes("Missing GROQ_API_KEY") || msg.includes("Missing Groq API key")) {
+      return res.status(503).json({ error: "AI answer generation is not configured (missing GROQ_KEY_ADMIN)." });
     }
     console.error("❌ submission add-answer:", msg);
     return res.status(422).json({ error: msg });
@@ -1360,9 +1182,7 @@ submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
       email: String(req.user?.email || "").trim(),
     };
     await submission.save();
-    await invalidateMySubmissionsCacheByEmail(
-      submitterEmailFromSubmission(submission)
-    );
+    await invalidateSubmitterListCaches(submission);
 
     // Award leaderboard points: question = 5, interview experience = 10
     const POINTS_QUESTION = 5;
@@ -2269,9 +2089,7 @@ submissionModRouter.delete("/submissions/:id/reject", async (req, res) => {
     
     console.log('✅ Submission rejected and deleted:', req.params.id);
     
-    await invalidateMySubmissionsCacheByEmail(
-      submitterEmailFromSubmission(submission)
-    );
+    await invalidateSubmitterListCaches(submission);
     await invalidateAdminDashboardStatsCache();
 
     res.json({ 
@@ -2304,9 +2122,7 @@ adminRouter.delete("/submissions/:id/delete", async (req, res) => {
     
     console.log('✅ Approved submission deleted:', req.params.id);
     
-    await invalidateMySubmissionsCacheByEmail(
-      submitterEmailFromSubmission(submission)
-    );
+    await invalidateSubmitterListCaches(submission);
     await invalidateAdminDashboardStatsCache();
 
     res.json({ 

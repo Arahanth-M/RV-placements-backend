@@ -1,4 +1,4 @@
-import redis from "./redisClient.js";
+import redis, { redisUrl } from "./redisClient.js";
 
 export async function getJSON(key) {
   let rawValue;
@@ -74,4 +74,26 @@ export async function deleteKey(key) {
     console.error(`[Redis] del failed for key "${key}":`, error);
     return false;
   }
+}
+
+/**
+ * Delete all keys matching `prefix*` (SCAN, not KEYS). No-op if Redis is unset.
+ * @param {string} prefix
+ * @returns {Promise<number>} keys removed
+ */
+export async function deleteKeysByPrefix(prefix) {
+  if (!redisUrl || !prefix) return 0;
+  let deleted = 0;
+  try {
+    for await (const key of redis.scanIterator({
+      MATCH: `${prefix}*`,
+      COUNT: 100,
+    })) {
+      await redis.del(key);
+      deleted += 1;
+    }
+  } catch (error) {
+    console.error(`[Redis] deleteKeysByPrefix failed for "${prefix}":`, error);
+  }
+  return deleted;
 }

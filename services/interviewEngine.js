@@ -1,5 +1,3 @@
-import { callLLM } from "./llmClient.js";
-import { parseJSONResponse } from "../utils/parseJSONResponse.js";
 import {
   resolveInterviewMergedCompanyForSession,
 } from "./interviewSessionService.js";
@@ -9,16 +7,9 @@ import {
   questionSlotHasInterviewPayload,
 } from "../utils/interviewQuestionAttempts.js";
 import { getCompanyContext } from "./mcp/getCompanyContext.js";
-import { getNumberOfRounds } from "./mcp/getNumberOfRounds.js";
 import { generateFinalFeedback } from "./mcp/generateFinalFeedback.js";
 import { INTERVIEW_STATES } from "./interviewStateMachine.js";
 import { logInterviewDsaLlmDebug, tailId } from "./interviewDebugLog.js";
-import {
-  buildInterviewRoundEvidence,
-  classifyRoundTypeFromHint,
-  constrainRoundType,
-  normalizePlannerRoundType,
-} from "./interviewRoundInference.js";
 
 const toSafeString = (value, fallback = "") => {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -33,24 +24,6 @@ export const INTERVIEW_ALLOWED_ROUND_TYPES = [
   "HR",
 ];
 const INTERVIEW_ALLOWED_DIFFICULTIES = ["easy", "medium", "hard"];
-
-function inferRoundAbout(roundType) {
-  if (!roundType) {
-    return "General Technical";
-  }
-
-  const normalized = toSafeString(roundType)
-    .toUpperCase()
-    .replace(/\s+/g, "_");
-
-  const mapping = {
-    DSA: "Data Structures and Algorithms",
-    SYSTEM_DESIGN: "System Design",
-    HR: "Behavioral and HR",
-  };
-
-  return mapping[normalized] || "General Technical";
-}
 
 const normalizeStringArray = (value) => {
   if (!Array.isArray(value)) return [];
@@ -69,51 +42,6 @@ const toBoundedScore = (value) => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
   return Math.max(0, Math.min(10, numeric));
-};
-
-const normalizeDifficultyValue = (value) => {
-  const safe = toSafeString(value).toLowerCase();
-  if (safe === "easy" || safe === "medium" || safe === "hard") return safe;
-  if (safe.includes("easy") || safe.includes("basic")) return "easy";
-  if (safe.includes("hard") || safe.includes("advanced")) return "hard";
-  return "medium";
-};
-
-const sanitizeRoundAbout = (value, fallbackText) => {
-  const raw = toSafeString(value);
-  if (!raw) return fallbackText;
-
-  const cleaned = raw
-    .replace(/^round\s*\d+\s*[:\-]?\s*/i, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!cleaned) return fallbackText;
-
-  let oneLine = cleaned.split(/[;|.]/)[0].trim() || cleaned;
-  const words = oneLine.split(" ").filter(Boolean);
-  if (words.length > 12) {
-    oneLine = `${words.slice(0, 12).join(" ")}...`;
-  }
-  if (oneLine.length > 80) {
-    oneLine = `${oneLine.slice(0, 77).trimEnd()}...`;
-  }
-  return oneLine || fallbackText;
-};
-
-const clampQuestionCount = (value, fallbackCount, roundType) => {
-  const n = Number(value);
-  const base = Number.isFinite(n) ? Math.round(n) : fallbackCount;
-  if (roundType === "DSA") {
-    return Math.min(3, Math.max(3, base));
-  }
-  return Math.min(5, Math.max(3, base));
-};
-
-const inferDifficulty = (text) => {
-  const value = toSafeString(text).toLowerCase();
-  if (value.includes("hard") || value.includes("advanced")) return "hard";
-  if (value.includes("easy") || value.includes("basic")) return "easy";
-  return "medium";
 };
 
 const inferQuestionCount = (roundType) => {
@@ -196,182 +124,8 @@ export const generateInterviewPlanFromCustomRounds = async (customRounds = []) =
   };
 };
 
-const buildFallbackBlueprint = (companyContext, totalRounds, roundHints = [], evidence) => {
-  const hints = Array.isArray(roundHints) ? roundHints : [];
-  return Array.from({ length: totalRounds }, (_, index) => {
-    const seedText = hints[index]?.about || companyContext?.rounds?.[index] || `Round ${index + 1}`;
-    const roundType = classifyRoundTypeFromHint(seedText, evidence || {});
-    return {
-      roundNumber: index + 1,
-      type: roundType,
-      about: sanitizeRoundAbout(
-        seedText || inferRoundAbout(roundType),
-        inferRoundAbout(roundType)
-      ),
-      difficulty: inferDifficulty(seedText),
-      questionCount: inferQuestionCount(roundType),
-    };
-  });
-};
-
-const buildAiRoundBlueprint = async ({ companyContext, totalRounds, roundHints, evidence }) => {
-  const messages = [
-    {
-      role: "system",
-      content:
-        "You are an interview planner. Decide round structure using company context. Return strict JSON only. No markdown or explanation.",
-    },
-    {
-      role: "user",
-      content: `Plan exactly ${totalRounds} interview rounds.
-
-Input context JSON:
-${JSON.stringify({
-  companyName: companyContext?.name,
-  rounds: companyContext?.rounds || [],
-  onlineQuestions: companyContext?.onlineQuestions || [],
-  interviewQuestions: companyContext?.interviewQuestions || [],
-  mustDoTopics: companyContext?.mustDoTopics || [],
-  prevCodingQuestions: companyContext?.prevCodingQuestions || [],
-  roundHints: Array.isArray(roundHints) ? roundHints : [],
-  inferenceSignals: evidence
-    ? {
-        systemDesignMentionedInCorpus: Boolean(evidence.systemDesignAllowed),
-        hrThemesLikely: Boolean(evidence.hrHits >= 1),
-      }
-    : {},
-})}
-
-Rules:
-1) Align round order and themes with roundHints (from interviewProcess). Each round's type must fit what that hint describes.
-2) Map unclear technical rounds to DSA unless hints or interviewQuestions clearly indicate system/HLD design (see inferenceSignals.systemDesignMentionedInCorpus).
-3) Do NOT assign System Design to any round unless systemDesignMentionedInCorpus is true OR that round's hint explicitly mentions system design / HLD / distributed architecture / designing a scalable service.
-4) Prefer HR only when the hint suggests behavioral, HR, managerial, or culture-fit — not for purely coding rounds.
-5) Each round must include one short about line (max 10 words preferred).
-6) type must be exactly one of: DSA, System Design, HR (use those spellings).
-7) difficulty must be one of: easy, medium, hard.
-8) questionCount: for DSA rounds use exactly 3. For other round types use an integer between 3 and 5.
-
-Return JSON:
-{
-  "rounds": [
-    {
-      "roundNumber": 1,
-      "type": "DSA",
-      "about": "Coding and problem solving",
-      "difficulty": "medium",
-      "questionCount": 3
-    }
-  ]
-}`,
-    },
-  ];
-
-  const llmText = await callLLM(messages);
-  const parsed = parseJSONResponse(llmText);
-  return Array.isArray(parsed?.rounds) ? parsed.rounds : [];
-};
-
 /**
- * AI-assisted round plan generation.
- * Backend validates/sanitizes structure before using it.
- */
-export const generateInterviewPlan = async (companyData) => {
-  const companyContext = await getCompanyContext(companyData);
-  const evidence = buildInterviewRoundEvidence(companyData);
-  const { totalRounds: computedTotalRounds, roundHints } = await getNumberOfRounds(companyData);
-  const totalRounds = Math.min(
-    INTERVIEW_MAX_ROUNDS,
-    Math.max(1, Number(computedTotalRounds) || 3)
-  );
-
-  const fallbackBlueprint = buildFallbackBlueprint(companyContext, totalRounds, roundHints, evidence);
-  let aiBlueprint = [];
-  try {
-    aiBlueprint = await buildAiRoundBlueprint({
-      companyContext,
-      totalRounds,
-      roundHints,
-      evidence,
-    });
-  } catch (error) {
-    console.warn("AI round planning failed, using fallback blueprint:", error?.message || error);
-    aiBlueprint = [];
-  }
-
-  const hints = Array.isArray(roundHints) ? roundHints : [];
-  const rounds = Array.from({ length: totalRounds }, (_, index) => {
-    const aiRound = aiBlueprint[index] || {};
-    const fallbackRound = fallbackBlueprint[index] || {
-      roundNumber: index + 1,
-      type: "DSA",
-      about: "General Interview",
-      difficulty: "medium",
-      questionCount: 3,
-    };
-
-    const seedHint =
-      hints[index]?.about ||
-      companyContext?.rounds?.[index] ||
-      fallbackRound.about ||
-      `Round ${index + 1}`;
-    const aiTypeRaw = aiRound.type != null && aiRound.type !== "" ? normalizePlannerRoundType(aiRound.type) : "";
-    const candidateType = aiTypeRaw || fallbackRound.type;
-    const type = constrainRoundType(candidateType, seedHint, evidence, fallbackRound.type);
-    const about = getRoundPreviewLabel(type);
-    const difficulty = normalizeDifficultyValue(aiRound.difficulty || fallbackRound.difficulty);
-    const questionCount = clampQuestionCount(
-      aiRound.questionCount,
-      fallbackRound.questionCount || inferQuestionCount(type),
-      type
-    );
-
-    return {
-      roundNumber: index + 1,
-      type,
-      about,
-      difficulty,
-      questionCount,
-      questions: [],
-      feedback: {},
-      status: index === 0 ? "IN_PROGRESS" : "COMPLETED",
-    };
-  });
-
-  const normalizedRounds =
-    rounds.length > 0
-      ? rounds
-      : [
-          {
-            roundNumber: 1,
-            type: "DSA",
-            about: "Technical Screening",
-            difficulty: "medium",
-            questionCount: 3,
-            questions: [],
-            feedback: {},
-            status: "IN_PROGRESS",
-          },
-        ];
-
-  const roundsPlan = normalizedRounds.map((round) => getRoundPreviewLabel(round.type));
-  const roundsDetails = normalizedRounds.map((round) => ({
-    round: `Round ${round.roundNumber}`,
-    questionType: getRoundPreviewLabel(round.type),
-  }));
-
-  return {
-    rounds: normalizedRounds,
-    roundsPlan,
-    roundsDetails,
-    totalRounds,
-    currentRound: 1,
-    state: INTERVIEW_STATES.IN_PROGRESS,
-  };
-};
-
-/**
- * LLM is used only for natural-language report generation.
+ * Final interview report (natural-language summary via LLM).
  */
 export const generateFinalReport = async (session) => {
   if (!session) {
@@ -435,8 +189,19 @@ export const generateFinalReport = async (session) => {
   });
 
   if (transcriptRows.length === 0) {
+    const readinessScore = Math.max(0, Math.min(100, Math.round(boundedOverall * 10)));
+    const verdict =
+      boundedOverall > 8 ? "ready" : boundedOverall >= 6 ? "needs_improvement" : "not_ready";
     return {
       overallScore: boundedOverall,
+      readinessScore,
+      readinessLabel:
+        verdict === "ready"
+          ? "Ready"
+          : verdict === "not_ready"
+            ? "Not ready"
+            : "Needs improvement",
+      verdict,
       ...emptyReportShell(),
       summaryFeedback:
         boundedOverall > 0
@@ -474,8 +239,29 @@ export const generateFinalReport = async (session) => {
   const strengths = normalizeStringArray(finalFeedback?.strengths);
   const weaknesses = normalizeStringArray(finalFeedback?.weaknesses);
 
+  const verdictRaw = toSafeString(finalFeedback?.verdict).toLowerCase();
+  const verdict =
+    verdictRaw === "ready" || verdictRaw === "not_ready" || verdictRaw === "needs_improvement"
+      ? verdictRaw
+      : boundedOverall > 8
+        ? "ready"
+        : boundedOverall >= 6
+          ? "needs_improvement"
+          : "not_ready";
+
+  const readinessScore = Math.max(0, Math.min(100, Math.round(boundedOverall * 10)));
+  const readinessLabel =
+    verdict === "ready"
+      ? "Ready"
+      : verdict === "not_ready"
+        ? "Not ready"
+        : "Needs improvement";
+
   return {
     overallScore: boundedOverall,
+    readinessScore,
+    readinessLabel,
+    verdict,
     strengths,
     weaknesses,
     improvementPlan: normalizeStringArray(finalFeedback?.improvementPlan),

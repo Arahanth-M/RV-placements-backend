@@ -1,0 +1,61 @@
+# =============================================================================
+# Server 1 (Public Gateway) — NO REDIS, NO NGINX (local dev)
+# =============================================================================
+# Local: frontend :5173, backend-main :7778, interview API :7777 (other compose).
+# Production: add edge nginx separately (nginx/production.server1.conf) — not here.
+#
+# Redis on Server 2 only (compose.interview.yml). backend-main → REMOTE_REDIS_URL.
+#
+# LOCAL TEST FLOW
+#   Step 1: docker compose -f compose.interview.yml up -d
+#   Step 2: docker compose -f compose.main.yml up -d --build
+#   UI:     http://localhost:5173
+#   APIs:   http://localhost:7778 (main)  http://localhost:7777 (interview)
+# =============================================================================
+
+name: rvp-production-main
+
+services:
+  backend-main:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["node", "server-main.js"]
+    env_file:
+      - .env
+    environment:
+      - PORT=7778
+      - BACKEND_URL=http://localhost:7778
+      - FRONTEND_URL=http://localhost:5173
+      - DISABLE_EMBEDDED_INTERVIEW_WORKER=1
+      - GROQ_KEY_SLOT=admin
+      - REDIS_URL=${REMOTE_REDIS_URL:-redis://host.docker.internal:6380}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "7778:7778"
+    restart: unless-stopped
+    networks:
+      - main-network
+
+  frontend:
+    build:
+      context: ${FRONTEND_BUILD_CONTEXT:-../RV-placements-frontend}
+      dockerfile: Dockerfile
+      args:
+        # Pinned for split local dev (auth → :7778, not legacy :7779 in .env).
+        REACT_APP_MAIN_API_URL: "http://localhost:7778"
+        REACT_APP_INTERVIEW_API_URL: "http://localhost:7777"
+        REACT_APP_API_URL: "http://localhost:5173"
+        REACT_APP_ENABLE_RESUME_BUILDER: "1"
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend-main
+    restart: unless-stopped
+    networks:
+      - main-network
+
+networks:
+  main-network:
+    driver: bridge

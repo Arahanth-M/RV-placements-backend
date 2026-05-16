@@ -3,6 +3,8 @@ dotenv.config();
 
 const DEFAULT_CORS_ORIGINS = [
   "http://localhost:5173",
+  "http://localhost:7778",
+  "http://localhost:7777",
   "http://localhost:7779",
   "http://lastminuteplacementprep.in",
   "https://lastminuteplacementprep.in",

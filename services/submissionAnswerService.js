@@ -12,24 +12,61 @@ const ANSWER_MODEL =
       ? process.env.GROQ_SUBMISSION_ENHANCE_MODEL.trim()
       : "llama-3.3-70b-versatile";
 
+const ANSWER_MAX_TOKENS = 8192;
+
 /** OA / interview question submissions only. */
 export function isSubmissionAddAnswerSupported(type) {
   return type === "onlineQuestions" || type === "interviewQuestions";
 }
 
 function parseQuestionSolution(contentStr) {
+  if (typeof contentStr !== "string") {
+    return { question: "", solution: "" };
+  }
+  const trimmed = contentStr.trim();
+  if (!trimmed) {
+    return { question: "", solution: "" };
+  }
   try {
-    const p = JSON.parse(contentStr);
+    const p = JSON.parse(trimmed);
     if (p && typeof p === "object") {
-      return {
-        question: String(p.question ?? "").trim(),
-        solution: p.solution != null ? String(p.solution) : "",
-      };
+      const question =
+        p.question != null
+          ? String(p.question).trim()
+          : p.content != null
+            ? String(p.content).trim()
+            : "";
+      const solution =
+        p.solution != null
+          ? String(p.solution)
+          : p.answer != null
+            ? String(p.answer)
+            : "";
+      return { question, solution };
     }
   } catch {
-    // fall through
+    // fall through — treat entire string as question text
   }
-  return { question: String(contentStr || "").trim(), solution: "" };
+  return { question: trimmed, solution: "" };
+}
+
+function extractSolutionFromLlm(parsed, rawText) {
+  if (parsed && typeof parsed === "object") {
+    if (parsed.solution != null) {
+      if (typeof parsed.solution === "string") return parsed.solution.trim();
+      return JSON.stringify(parsed.solution, null, 2).trim();
+    }
+    if (parsed.answer != null) {
+      return String(parsed.answer).trim();
+    }
+    if (parsed.code != null) {
+      return String(parsed.code).trim();
+    }
+  }
+  const raw = String(rawText || "").trim();
+  if (!raw) return "";
+  // Last resort: model ignored JSON schema — use full reply as solution.
+  return raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
 }
 
 const ANSWER_SYSTEM_PROMPT =
@@ -37,11 +74,12 @@ const ANSWER_SYSTEM_PROMPT =
   "Read ONLY the problem statement provided by the user. " +
   "Decide whether it is a coding/DSA problem (expects implementable code) or a conceptual question " +
   "(theory, HR, system design discussion, aptitude, etc.). " +
-  'Reply with a single JSON object: {"solution": string} — no markdown fences, no extra keys. ' +
+  'Reply with a single JSON object only: {"solution": string} — no markdown fences around the JSON, no extra keys. ' +
   "Rules:\n" +
   "- Do NOT rewrite or repeat the full question in the solution.\n" +
   "- For coding/DSA problems: write a complete, correct solution in C++17 (competitive-programming style). " +
   "Use appropriate #include lines, a clear function or class, and handle constraints from the statement. " +
+  "Escape special characters inside the JSON string (newlines as \\n, quotes as \\\"). " +
   "After the code block, you may add 1–3 short lines on approach and time/space complexity.\n" +
   "- For non-coding problems: give a clear, accurate text answer (bullets or short paragraphs). No code unless a one-line snippet is essential.\n" +
   "- If the statement is ambiguous, state minimal assumptions, then answer.\n" +
@@ -77,26 +115,27 @@ export async function generateSubmissionAnswer({ type, content }) {
 
   const raw = await callLLM(
     [{ role: "system", content: ANSWER_SYSTEM_PROMPT }, { role: "user", content: user }],
-    { model: ANSWER_MODEL, temperature: 0.2 }
+    { model: ANSWER_MODEL, temperature: 0.2, max_tokens: ANSWER_MAX_TOKENS }
   );
 
-  let parsed;
+  let parsed = null;
   try {
     parsed = parseJSONResponse(raw);
   } catch (e) {
-    throw new Error(`Could not parse model output as JSON: ${e?.message || e}`);
+    console.warn("[submissionAnswer] JSON parse failed, using raw model text:", e?.message || e);
   }
 
-  const solution =
-    parsed && typeof parsed === "object" && parsed.solution != null
-      ? String(parsed.solution).trim()
-      : "";
+  const solution = extractSolutionFromLlm(parsed, raw);
   if (!solution) {
     throw new Error("Model returned empty solution.");
   }
 
   const out = JSON.stringify({ question, solution });
-  assertMergeContentValidForSubmissionType(type, out);
+  try {
+    assertMergeContentValidForSubmissionType(type, out);
+  } catch (e) {
+    throw new Error(`Generated answer failed validation: ${e?.message || e}`);
+  }
   if (out.length > MAX_CONTENT_CHARS) {
     throw new Error("Generated answer exceeds maximum length.");
   }

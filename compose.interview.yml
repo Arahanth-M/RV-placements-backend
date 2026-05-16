@@ -1,0 +1,137 @@
+# =============================================================================
+# Server 2 (AI Interview Infra) — OWNS THE ONLY REDIS INSTANCE
+# =============================================================================
+# Services: redis, backend-interview, interview-worker, execution-worker
+# No nginx, frontend, or backend-main on this host.
+#
+# All BullMQ queues, caches, leaderboard stats, and notification SSE pub/sub
+# share this single Redis. backend-main (compose.main.yml) connects here remotely.
+#
+# -----------------------------------------------------------------------------
+# LOCAL TEST FLOW (same machine, simulates production topology)
+# -----------------------------------------------------------------------------
+#   Step 1 — start interview stack (Redis + workers + interview API):
+#     docker compose -f compose.interview.yml up -d
+#
+#   Step 2 — start main stack (default REMOTE_REDIS_URL → host.docker.internal:6380):
+#     docker compose -f compose.main.yml up -d
+#
+#   Port 6380 avoids conflict with a local Redis already on :6379. To use 6379 instead:
+#     REDIS_PUBLISH=127.0.0.1:6379:6379 docker compose -f compose.interview.yml up -d
+#     REMOTE_REDIS_URL=redis://host.docker.internal:6379 docker compose -f compose.main.yml up -d
+#
+# Why: interview stack owns Redis; main stack has no redis service and must not
+# use REDIS_URL=redis://redis from .env (that hostname only exists here).
+#
+# -----------------------------------------------------------------------------
+# PRODUCTION (Server 2)
+# -----------------------------------------------------------------------------
+#   - Redis runs only on this host (compose.interview.yml).
+#   - Publish Redis for Server 1 backend-main (not public internet):
+#       export REDIS_PUBLISH=0.0.0.0:6379:6379
+#     Restrict with firewall: allow TCP 6379 ONLY from Server 1 private IP.
+#   - On Server 1 deploy env:
+#       REMOTE_REDIS_URL=redis://SERVER2_PRIVATE_IP:6379
+#   - Prefer VPC/private network; add Redis AUTH (requirepass) when hardening.
+#   - Expose :7777 only to Server 1 (nginx proxies /api/interview).
+# =============================================================================
+
+name: rvp-production-interview
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      # Default host :6380 → container :6379 (avoids local Redis already on 6379)
+      # Production: REDIS_PUBLISH=0.0.0.0:6379:6379 + firewall allow Server 1 only
+      - "${REDIS_PUBLISH:-127.0.0.1:6380:6379}"
+    volumes:
+      - redis-data:/data
+    networks:
+      - interview-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  backend-interview:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["node", "server-interview.js"]
+    env_file:
+      - .env
+    environment:
+      # In-stack Redis (same Docker network as workers)
+      - REDIS_URL=redis://redis:6379
+      - PORT=7777
+      - GROQ_KEY_SLOT=interview_api
+      - EXECUTION_DOCKER_MEMORY=${EXECUTION_DOCKER_MEMORY:-512m}
+      - EXECUTION_DOCKER_MEMORY_CPP=${EXECUTION_DOCKER_MEMORY_CPP:-1024m}
+      - EXECUTION_DOCKER_CPUS=${EXECUTION_DOCKER_CPUS:-1}
+      - DISABLE_EMBEDDED_INTERVIEW_WORKER=1
+    ports:
+      - "7777:7777"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - interview-network
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  interview-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["node", "workers/interviewWorker.js"]
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - GROQ_KEY_SLOT=interview_worker
+      - EXECUTION_DOCKER_MEMORY=${EXECUTION_DOCKER_MEMORY:-512m}
+      - EXECUTION_DOCKER_MEMORY_CPP=${EXECUTION_DOCKER_MEMORY_CPP:-1024m}
+      - EXECUTION_DOCKER_CPUS=${EXECUTION_DOCKER_CPUS:-1}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - interview-network
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  execution-worker:
+    container_name: rvp-execution-worker
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["npm", "run", "worker:execution"]
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - EXECUTION_DOCKER_MEMORY=${EXECUTION_DOCKER_MEMORY:-512m}
+      - EXECUTION_DOCKER_MEMORY_CPP=${EXECUTION_DOCKER_MEMORY_CPP:-1024m}
+      - EXECUTION_DOCKER_CPUS=${EXECUTION_DOCKER_CPUS:-1}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - interview-network
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+networks:
+  interview-network:
+    driver: bridge
+
+volumes:
+  redis-data:

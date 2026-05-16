@@ -7,12 +7,15 @@ import redis, { connectRedis } from "../src/utils/redisClient.js";
 
 const SUMMARY_TTL_SEC = 30;
 const DETAIL_TTL_SEC = 120;
+const ANALYTICS_TTL_SEC = 300;
 const PROCESSING_TTL_SEC = 600;
 
 const summaryKey = (userId, page, limit) =>
   `rvp:interview:summaries:${String(userId)}:${Number(page)}:${Number(limit)}`;
 
 const detailKey = (sessionId) => `rvp:interview:detail:${String(sessionId)}`;
+
+const analyticsKey = (userId) => `rvp:interview:analytics:${String(userId)}`;
 
 const processingKey = (sessionId) => `rvp:interview:processing:${String(sessionId)}`;
 
@@ -97,6 +100,40 @@ export async function invalidateInterviewDetail(sessionId) {
     await r.del(detailKey(sessionId));
   } catch (e) {
     console.warn("[interviewCache] invalidateInterviewDetail:", e?.message || e);
+  }
+}
+
+export async function getCachedInterviewAnalytics(userId) {
+  const r = await getRedis();
+  if (!r) return null;
+  try {
+    const raw = await r.get(analyticsKey(userId));
+    if (!raw || typeof raw !== "string") return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+export async function setCachedInterviewAnalytics(userId, payload) {
+  const r = await getRedis();
+  if (!r) return;
+  try {
+    await r.set(analyticsKey(userId), JSON.stringify(payload), {
+      EX: ANALYTICS_TTL_SEC,
+    });
+  } catch (e) {
+    console.warn("[interviewCache] setCachedInterviewAnalytics:", e?.message || e);
+  }
+}
+
+export async function invalidateInterviewAnalytics(userId) {
+  const r = await getRedis();
+  if (!r) return;
+  try {
+    await r.del(analyticsKey(userId));
+  } catch (e) {
+    console.warn("[interviewCache] invalidateInterviewAnalytics:", e?.message || e);
   }
 }
 

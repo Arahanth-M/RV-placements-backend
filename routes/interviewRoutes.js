@@ -28,7 +28,7 @@ import {
   getInProgressSession,
   getUserSessionSummariesPaginated,
   getUserSessionDetail,
-  buildUserInterviewAnalytics,
+  getUserInterviewAnalytics,
   updateSession,
   discardInProgressSession,
   startRound,
@@ -54,6 +54,7 @@ import {
   getCachedInterviewDetail,
   setCachedInterviewDetail,
   invalidateInterviewDetail,
+  invalidateInterviewAnalytics,
   markInterviewProcessing,
   isInterviewProcessing,
   clearInterviewProcessing,
@@ -405,6 +406,7 @@ async function invalidateSessionAndSummaryCaches(userId, sessionId) {
   await Promise.all([
     invalidateInterviewDetail(sessionId),
     invalidateInterviewSummaries(userId),
+    invalidateInterviewAnalytics(userId),
   ]);
 }
 
@@ -709,7 +711,7 @@ router.get("/analytics/:userId", async (req, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const data = await buildUserInterviewAnalytics(userId);
+    const data = await getUserInterviewAnalytics(userId);
     return res.json(data);
   } catch (error) {
     console.error("❌ Error fetching interview analytics:", error.message);
@@ -1529,62 +1531,6 @@ router.delete("/discard/:sessionId", async (req, res) => {
   } catch (error) {
     console.error("❌ Error discarding interview:", error.message);
     return res.status(500).json({ error: "Failed to discard interview" });
-  }
-});
-
-router.get("/preview-plan/:companyId", async (req, res) => {
-  try {
-    const { companyId } = req.params;
-    const {
-      placementVisitType,
-      placementCluster,
-      placementYear: placementYearRaw,
-      mergePlacementByType: mergePlacementByTypeRaw,
-    } = req.query;
-    if (!companyId) {
-      return res.status(400).json({ error: "companyId is required" });
-    }
-
-    const mergePlacementByType = parseMergePlacementByType(mergePlacementByTypeRaw);
-    const norm = normalizeVisitKeyParts(
-      placementVisitType,
-      mergePlacementByType ? "" : placementCluster
-    );
-    const placementYear = mergePlacementByType
-      ? normalizePlacementVisitYear(undefined)
-      : normalizePlacementVisitYear(placementYearRaw);
-    const loaded = await getInterviewMergedCompanyPayload(
-      String(companyId),
-      norm.type,
-      norm.cluster,
-      placementYear,
-      mergePlacementByType
-    );
-    if (!loaded?.staticRow || !loaded.merged) {
-      return res.status(404).json({ error: "Company not found" });
-    }
-    const companyData = loaded.merged;
-
-    const plan = await generateInterviewPlan(companyData);
-    console.info("📋 Interview preview generated", {
-      companyId,
-      totalRounds: plan?.totalRounds || 0,
-      roundsPlanCount: Array.isArray(plan?.roundsPlan) ? plan.roundsPlan.length : 0,
-      placementVisitType: norm.type,
-      placementCluster: norm.cluster,
-      placementYear: loaded.placementYear,
-      mergePlacementByType,
-    });
-    return res.json({
-      ...plan,
-      placementVisitType: norm.type,
-      placementCluster: norm.cluster,
-      placementYear: loaded.placementYear,
-      mergePlacementByType,
-    });
-  } catch (error) {
-    console.error("❌ Error generating interview preview:", error.message);
-    return res.status(500).json({ error: "Failed to generate interview preview" });
   }
 });
 

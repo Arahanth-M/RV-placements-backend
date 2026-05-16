@@ -34,6 +34,7 @@ import {
   clearInterviewProcessing,
   invalidateInterviewDetail,
   invalidateInterviewSummaries,
+  invalidateInterviewAnalytics,
   markInterviewProcessing,
 } from "../services/interviewCache.js";
 import {
@@ -779,8 +780,25 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
             ) / 10
           : roundAverageScore;
       // Fallback with minimal info so we don't save a completely null report if possible
+      const fallbackReadiness = Math.max(
+        0,
+        Math.min(100, Math.round(sessionAvgOverall * 10))
+      );
       refreshedSession.finalReport = {
         overallScore: sessionAvgOverall,
+        readinessScore: fallbackReadiness,
+        readinessLabel:
+          sessionAvgOverall > 8
+            ? "Ready"
+            : sessionAvgOverall >= 6
+              ? "Needs improvement"
+              : "Not ready",
+        verdict:
+          sessionAvgOverall > 8
+            ? "ready"
+            : sessionAvgOverall >= 6
+              ? "needs_improvement"
+              : "not_ready",
         summaryFeedback: "Your interview is complete. Feedback is being generated and will be available in your history shortly.",
         summary: "Interview complete.",
       };
@@ -841,7 +859,10 @@ const processor = async (job) => {
       try {
         const latest = await getSession(sessionId);
         if (latest?.userId) {
-          await invalidateInterviewSummaries(latest.userId);
+          await Promise.all([
+            invalidateInterviewSummaries(latest.userId),
+            invalidateInterviewAnalytics(latest.userId),
+          ]);
         }
       } catch (err) {
         console.warn("[interviewWorker] cache invalidation after job failed:", err?.message || err);

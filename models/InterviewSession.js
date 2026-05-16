@@ -291,6 +291,12 @@ const interviewSessionSchema = new mongoose.Schema(
     },
     finalReport: {
       overallScore: { type: Number },
+      /** 0–100 readiness for this company (derived from performance + verdict). */
+      readinessScore: { type: Number, min: 0, max: 100 },
+      /** Human label: Ready | Needs improvement | Not ready */
+      readinessLabel: { type: String, trim: true },
+      /** LLM verdict slug: ready | needs_improvement | not_ready */
+      verdict: { type: String, trim: true },
       strengths: [{ type: String }],
       weaknesses: [{ type: String }],
       improvementPlan: [{ type: String }],
@@ -302,6 +308,8 @@ const interviewSessionSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+interviewSessionSchema.index({ userId: 1, state: 1, updatedAt: 1 });
 
 /**
  * Canonical state is `state`.

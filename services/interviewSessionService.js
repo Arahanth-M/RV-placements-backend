@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import InterviewSession from "../models/InterviewSession.js";
+import CompanyStatic from "../models/CompanyStatic.js";
 import InterviewQuestion from "../models/InterviewQuestion.js";
 import {
   COMPANY_VISIT_YEAR,
@@ -16,6 +17,10 @@ import { roundTypeImpliesCodeExecutionInterview } from "./interviewCodeGradingGu
 import { logInterviewDsaLlmDebug, tailId } from "./interviewDebugLog.js";
 import { computeDsaRoundQuestionBuckets } from "../utils/interviewQuestionAttempts.js";
 import { INTERVIEW_STATES } from "./interviewStateMachine.js";
+import {
+  getCachedInterviewAnalytics,
+  setCachedInterviewAnalytics,
+} from "./interviewCache.js";
 
 const updateOptions = {
   new: true,
@@ -94,6 +99,48 @@ const getLegacyCompanyNameById = async (companyId) => {
     .findOne({ _id: objectId }, { projection: { name: 1 } });
 
   return toSafeString(legacyCompany?.name);
+};
+
+/** Batch-resolve company display names for analytics (avoids per-session merge loads). */
+const resolveCompanyNamesForAnalytics = async (companyIds) => {
+  const map = new Map();
+  const uniqueIds = [
+    ...new Set(
+      companyIds.map((id) => String(id || "").trim()).filter(Boolean)
+    ),
+  ];
+  if (uniqueIds.length === 0) return map;
+
+  const objectIds = uniqueIds
+    .filter((id) => mongoose.isValidObjectId(id))
+    .map((id) => new mongoose.Types.ObjectId(id));
+
+  if (objectIds.length > 0) {
+    const staticRows = await CompanyStatic.find({ _id: { $in: objectIds } })
+      .select("name")
+      .lean();
+    for (const row of staticRows) {
+      const name = toSafeString(row.name);
+      map.set(String(row._id), name || UNKNOWN_COMPANY_NAME);
+    }
+
+    const missing = objectIds.filter((oid) => !map.has(String(oid)));
+    if (missing.length > 0) {
+      const legacyRows = await mongoose.connection
+        .collection("companies1")
+        .find({ _id: { $in: missing } }, { projection: { name: 1 } })
+        .toArray();
+      for (const row of legacyRows) {
+        const name = toSafeString(row.name);
+        map.set(String(row._id), name || UNKNOWN_COMPANY_NAME);
+      }
+    }
+  }
+
+  for (const id of uniqueIds) {
+    if (!map.has(id)) map.set(id, UNKNOWN_COMPANY_NAME);
+  }
+  return map;
 };
 
 export const resolveInterviewMergedCompanyForSession = async (session) => {
@@ -525,19 +572,41 @@ export const generateRoundFeedback = async (sessionId, roundNumber) => {
   };
 };
 
+const ANALYTICS_SESSION_SELECT =
+  "companyId companyName finalReport.overallScore rounds.type rounds.questions.score history.score updatedAt state";
+
+const resolveAnalyticsCompanyName = (session, nameById) => {
+  const directName =
+    toSafeString(session?.companyName) || getCompanyRefName(session?.companyId);
+  if (directName && directName !== UNKNOWN_COMPANY_NAME) {
+    return directName;
+  }
+  const companyId = getCompanyRefId(session?.companyId);
+  if (!companyId) return UNKNOWN_COMPANY_NAME;
+  return nameById.get(companyId) || UNKNOWN_COMPANY_NAME;
+};
+
 /** Average scores by round type + one progress point per session (chronological) for analytics UI. */
 export const buildUserInterviewAnalytics = async (userId) => {
-  const sessions = await InterviewSession.find({ userId })
+  const sessions = await InterviewSession.find({
+    userId,
+    state: INTERVIEW_STATES.INTERVIEW_COMPLETE,
+  })
+    .select(ANALYTICS_SESSION_SELECT)
     .sort({ updatedAt: 1 })
     .lean();
 
+  const companyIds = sessions
+    .map((session) => getCompanyRefId(session.companyId))
+    .filter(Boolean);
+  const nameById = await resolveCompanyNamesForAnalytics(companyIds);
+
   const skillTotals = {};
   const progress = [];
-  const companyNameCache = new Map();
 
   for (const session of sessions) {
     const rounds = Array.isArray(session.rounds) ? session.rounds : [];
-    const companyName = await resolveInterviewCompanyName(session, companyNameCache);
+    const companyName = resolveAnalyticsCompanyName(session, nameById);
 
     for (const round of rounds) {
       const type = round.type || "General";
@@ -579,9 +648,9 @@ export const buildUserInterviewAnalytics = async (userId) => {
     }
 
     if (sessionScore != null) {
-      progress.push({ 
+      progress.push({
         score: Math.round(sessionScore * 10) / 10,
-        companyName 
+        companyName,
       });
     }
   }
@@ -594,6 +663,15 @@ export const buildUserInterviewAnalytics = async (userId) => {
   }
 
   return { skillBreakdown, progress };
+};
+
+/** Read-through Redis cache for analytics (5 min TTL). */
+export const getUserInterviewAnalytics = async (userId) => {
+  const cached = await getCachedInterviewAnalytics(userId);
+  if (cached) return cached;
+  const data = await buildUserInterviewAnalytics(userId);
+  await setCachedInterviewAnalytics(userId, data);
+  return data;
 };
 
 export const updateSession = async (sessionId, data) => {

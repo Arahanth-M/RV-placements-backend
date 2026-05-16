@@ -44,35 +44,41 @@ export function applySharedHttpMiddleware(app, options = {}) {
     })
   );
 
+  const isProduction = process.env.NODE_ENV === "production";
+
   app.use(
     helmet({
+      // HSTS on http://localhost breaks split local dev (browser upgrades :7778 → https → ERR_NETWORK).
+      strictTransportSecurity: isProduction,
       crossOriginResourcePolicy: { policy: "cross-origin" },
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'self'"],
-          scriptSrc: [
-            "'self'",
-            "'unsafe-inline'",
-            "https://cdn.voiceflow.com",
-            "https://*.voiceflow.com",
-          ],
-          connectSrc: [
-            "'self'",
-            "https://general-runtime.voiceflow.com",
-            "https://*.voiceflow.com",
-          ],
-          imgSrc: [
-            "'self'",
-            "data:",
-            "https://*.googleusercontent.com",
-            "https://cdn.voiceflow.com",
-            "https://*.voiceflow.com",
-          ],
-          frameSrc: ["'self'", "https://*.voiceflow.com"],
-          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-          fontSrc: ["'self'", "https://fonts.gstatic.com"],
-        },
-      },
+      contentSecurityPolicy: isProduction
+        ? {
+            directives: {
+              defaultSrc: ["'self'"],
+              scriptSrc: [
+                "'self'",
+                "'unsafe-inline'",
+                "https://cdn.voiceflow.com",
+                "https://*.voiceflow.com",
+              ],
+              connectSrc: [
+                "'self'",
+                "https://general-runtime.voiceflow.com",
+                "https://*.voiceflow.com",
+              ],
+              imgSrc: [
+                "'self'",
+                "data:",
+                "https://*.googleusercontent.com",
+                "https://cdn.voiceflow.com",
+                "https://*.voiceflow.com",
+              ],
+              frameSrc: ["'self'", "https://*.voiceflow.com"],
+              styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+              fontSrc: ["'self'", "https://fonts.gstatic.com"],
+            },
+          }
+        : false,
     })
   );
 

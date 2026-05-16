@@ -29,6 +29,26 @@ import {
 import { config, messages } from "../config/constants.js";
 import { invalidateStudentProfileCacheByEmail } from "../services/studentProfileCache.js";
 import { invalidateMySubmissionsCacheByEmail } from "../services/mySubmissionsCache.js";
+import {
+  getCachedSpcMyRecords,
+  setCachedSpcMyRecords,
+  loadSpcMyRecordsFromDb,
+  invalidateSpcMyRecordsCacheByEmail,
+} from "../services/spcMyRecordsCache.js";
+import { invalidateStudentPlacementStatsCache } from "../services/studentPlacementStatsCache.js";
+
+async function invalidateSpcCachesForUser(user) {
+  const email = String(user?.email || "").trim();
+  await Promise.all([
+    invalidateMySubmissionsCacheByEmail(email),
+    invalidateSpcMyRecordsCacheByEmail(email),
+    invalidateStudentPlacementStatsCache(),
+  ]);
+}
+
+async function invalidatePlacementStatsAfterWrite() {
+  await invalidateStudentPlacementStatsCache().catch(() => {});
+}
 
 const router = express.Router();
 
@@ -234,7 +254,7 @@ router.post(
     // Save all submissions
     await Submission.insertMany(submissions);
 
-    await invalidateMySubmissionsCacheByEmail(req.user?.email);
+    await invalidateSpcCachesForUser(req.user);
 
     // Touch the authenticated student account record after submission.
     if (req.user && req.user._id) {
@@ -481,6 +501,11 @@ router.put(
         await invalidateStudentProfileCacheByEmail(nextStudentEmail).catch(() => {});
       }
 
+      await Promise.all([
+        invalidateSpcMyRecordsCacheByEmail(email).catch(() => {}),
+        invalidatePlacementStatsAfterWrite(),
+      ]);
+
       return res.json({ message: "Placement record updated successfully" });
     } catch (error) {
       console.error("❌ Error updating SPC placement record:", error.message);
@@ -489,89 +514,23 @@ router.put(
   }
 );
 
-/** Escape string for use inside a RegExp source (email-safe). */
-function escapeRegexForEmail(value) {
-  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 /**
  * Company-card contribution submissions + placement/conversion rows this SPC filed (`createdBy`).
+ * Read-through Redis cache; invalidated on SPC add/edit/delete (see spcMyRecordsCache.js).
  */
 router.get("/spc/my-submissions", authJWT, requireSPC, async (req, res) => {
   try {
     const email = String(req.user?.email || "").trim().toLowerCase();
     const userId = String(req.user?._id || req.user?.id || "").trim();
 
-    const contributionFilter = email
-      ? {
-          "submittedBy.email": {
-            $regex: new RegExp(`^${escapeRegexForEmail(email)}$`, "i"),
-          },
-        }
-      : { _id: null };
-
-    const createdByOr = [];
-    if (userId) createdByOr.push({ createdBy: userId });
-    if (email) {
-      createdByOr.push({ createdBy: email });
-      createdByOr.push({
-        createdBy: { $regex: new RegExp(`^${escapeRegexForEmail(email)}$`, "i") },
-      });
+    const cached = await getCachedSpcMyRecords(email);
+    if (cached) {
+      return res.json(cached);
     }
-    const placementFilter =
-      createdByOr.length > 0 ? { $or: createdByOr } : { _id: null };
 
-    const [contributionsRaw, placementRaw] = await Promise.all([
-      Submission.find(contributionFilter)
-        .sort({ submittedAt: -1, _id: -1 })
-        .populate("companyId", "name")
-        .limit(200)
-        .lean(),
-      PlacementData.find(placementFilter)
-        .sort({ updatedAt: -1 })
-        .populate("companyId", "name")
-        .populate("studentId", "name email usn")
-        .limit(200)
-        .lean(),
-    ]);
-
-    const contributions = contributionsRaw.map((s) => ({
-      _id: String(s._id),
-      kind: "company_contribution",
-      type: s.type,
-      status: s.status,
-      submittedAt: s.submittedAt,
-      placementYear: s.placementYear ?? null,
-      placementListContext: s.placementListContext ?? null,
-      companyId: s.companyId?._id ? String(s.companyId._id) : null,
-      companyName: s.companyId?.name || "Unknown company",
-      contentPreview: String(s.content || "").slice(0, 200),
-    }));
-
-    const placements = placementRaw.map((p) => ({
-      _id: String(p._id),
-      kind: "placement_record",
-      companyPlaced: p.companyPlaced,
-      companyId: p.companyId?._id ? String(p.companyId._id) : null,
-      companyName: p.companyId?.name || p.companyPlaced || "—",
-      placementYear: p.placementYear ?? null,
-      branchCode: p.branchCode || "",
-      typeOfOffer: p.typeOfOffer || "",
-      ppoConversionType: p.ppoConversionType || "",
-      role: p.role || "",
-      stipend: p.stipend || "",
-      sixMonthsInternshipStipend: p["6-months-internship-stipend"] || "",
-      base: p.base || "",
-      ctc: p.ctc || "",
-      studentName: p.studentId?.name || "—",
-      studentEmail: p.studentId?.email || "",
-      studentUsn: p.studentId?.usn || "",
-      createdAt: p.createdAt,
-      updatedAt: p.updatedAt,
-      createdBy: p.createdBy || "",
-    }));
-
-    return res.json({ contributions, placements });
+    const payload = await loadSpcMyRecordsFromDb(email, userId);
+    await setCachedSpcMyRecords(email, payload);
+    return res.json(payload);
   } catch (error) {
     console.error("❌ Error fetching SPC my-submissions:", error.message);
     return res.status(500).json({ message: "Server error" });
@@ -808,6 +767,10 @@ router.post(
       }
 
       await invalidateStudentProfileCacheByEmail(email).catch(() => {});
+      await Promise.all([
+        invalidateSpcMyRecordsCacheByEmail(String(req.user?.email || "")).catch(() => {}),
+        invalidatePlacementStatsAfterWrite(),
+      ]);
 
       return res.json({
         message: shouldIncrementConvertedOnly ? "Conversion details saved" : "Conversion details updated",
@@ -996,6 +959,10 @@ router.post(
       }
 
       await invalidateStudentProfileCacheByEmail(email).catch(() => {});
+      await Promise.all([
+        invalidateSpcMyRecordsCacheByEmail(String(req.user?.email || "")).catch(() => {}),
+        invalidatePlacementStatsAfterWrite(),
+      ]);
 
       return res.json({
         message: "Placement data submitted successfully",
@@ -1012,7 +979,6 @@ router.post(
     });
 
     if (duplicate) {
-      await invalidateStudentProfileCacheByEmail(email).catch(() => {});
       return res.status(400).json({ message: "Duplicate entry" });
     }
 
@@ -1027,6 +993,10 @@ router.post(
     });
 
     await invalidateStudentProfileCacheByEmail(email).catch(() => {});
+    await Promise.all([
+      invalidateSpcMyRecordsCacheByEmail(String(req.user?.email || "")).catch(() => {}),
+      invalidatePlacementStatsAfterWrite(),
+    ]);
 
     return res.json({
       message: "Placement data submitted successfully",
