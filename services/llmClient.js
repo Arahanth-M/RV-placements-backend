@@ -59,10 +59,18 @@ export const callLLM = async (messages, options = {}) => {
         ? options.model.trim()
         : DEFAULT_ORCHESTRATOR_MODEL;
 
-    const completion = await client.chat.completions.create({
+    const request = {
       model: selectedModel,
       messages,
-    });
+    };
+    if (typeof options?.temperature === "number" && Number.isFinite(options.temperature)) {
+      request.temperature = options.temperature;
+    }
+    if (typeof options?.max_tokens === "number" && Number.isFinite(options.max_tokens)) {
+      request.max_tokens = options.max_tokens;
+    }
+
+    const completion = await client.chat.completions.create(request);
 
     return completion?.choices?.[0]?.message?.content?.trim() || "";
   } catch (error) {

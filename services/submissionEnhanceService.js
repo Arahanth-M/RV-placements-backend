@@ -8,6 +8,11 @@ const ENHANCE_MODEL =
     ? process.env.GROQ_SUBMISSION_ENHANCE_MODEL.trim()
     : "llama-3.1-8b-instant";
 
+/** Submission types that support AI polish before approve. */
+export function isSubmissionEnhancementSupported(type) {
+  return type !== "mustDoTopics";
+}
+
 function parseLikeApprove(contentStr) {
   try {
     return JSON.parse(contentStr);
@@ -21,6 +26,9 @@ function parseLikeApprove(contentStr) {
  * Throws Error with message suitable for 400 responses.
  */
 export function assertMergeContentValidForSubmissionType(type, mergeContentStr) {
+  if (!isSubmissionEnhancementSupported(type)) {
+    throw new Error("AI enhancement is not available for must-do topic submissions.");
+  }
   if (typeof mergeContentStr !== "string" || !mergeContentStr.trim()) {
     throw new Error("mergeContent must be a non-empty string.");
   }
@@ -46,13 +54,6 @@ export function assertMergeContentValidForSubmissionType(type, mergeContentStr) 
         (parsed.content != null ? String(parsed.content).trim() : "");
       return t;
     }
-    if (type === "mustDoTopics") {
-      const t =
-        (parsed.topic != null ? String(parsed.topic).trim() : "") ||
-        (parsed.question != null ? String(parsed.question).trim() : "") ||
-        (parsed.content != null ? String(parsed.content).trim() : "");
-      return t;
-    }
     throw new Error(`Unsupported submission type for merge: ${type}`);
   })();
 
@@ -70,12 +71,6 @@ function serializeForType(type, obj) {
   if (type === "interviewProcess") {
     const content = String(obj.content ?? obj.question ?? "").trim();
     return JSON.stringify({ content });
-  }
-  if (type === "mustDoTopics") {
-    const topic =
-      String(obj.topic ?? obj.content ?? obj.question ?? "")
-        .trim() || String(obj.question ?? "").trim();
-    return JSON.stringify({ topic });
   }
   if (type === "internshipExperience") {
     const experience =
@@ -98,12 +93,6 @@ function buildPromptPayload(type, contentStr) {
     const text = String(p.content ?? p.question ?? "").trim();
     return { content: text };
   }
-  if (type === "mustDoTopics") {
-    const text =
-      String(p.topic ?? p.question ?? p.content ?? "")
-        .trim() || String(p.content ?? "").trim();
-    return { topic: text };
-  }
   if (type === "internshipExperience") {
     const text =
       String(p.experience ?? p.content ?? "")
@@ -113,30 +102,48 @@ function buildPromptPayload(type, contentStr) {
   throw new Error(`Unsupported submission type: ${type}`);
 }
 
-function systemPromptForType(type) {
-  const base =
-    "You polish student-written placement-prep content for a college app. " +
-    "Improve clarity, grammar, and structure only; keep technical meaning and facts. " +
-    "Do not invent company-specific facts. " +
-    "Reply with a single JSON object only (no markdown fences, no commentary). ";
+const MEANING_PRESERVATION_RULES =
+  "You are a conservative copy-editor for student placement-prep submissions. " +
+  "Your job is ONLY to fix spelling, grammar, punctuation, and awkward phrasing. " +
+  "CRITICAL — preserve meaning exactly: do NOT change facts, steps, requirements, constraints, " +
+  "difficulty claims, round names, technologies, numbers, dates, company names, or the author's intent. " +
+  "Do NOT add, remove, reorder, summarize, or expand ideas. Do NOT paraphrase in a way that changes meaning. " +
+  "Do NOT invent or infer information that is not in the input. " +
+  "If a sentence is unclear but grammatical, leave its meaning unchanged (at most fix typos). " +
+  "Reply with a single JSON object only (no markdown fences, no commentary). ";
 
+function systemPromptForType(type) {
   if (type === "onlineQuestions" || type === "interviewQuestions") {
     return (
-      base +
-      'Schema: {"question": string, "solution": string}. ' +
-      "Both fields required; use empty string for solution if none."
+      MEANING_PRESERVATION_RULES +
+      'Schema: {"question": string, "solution": string}. Both fields required; use empty string for solution if none. ' +
+      "For question: copy-edit the problem statement only — keep the same problem, same constraints, same examples. " +
+      "For solution: fix grammar in prose only; preserve all code, logic, variable names, complexity, and algorithm steps exactly " +
+      "(only fix obvious typos in identifiers or comments if clearly misspelled)."
     );
   }
   if (type === "interviewProcess") {
-    return base + 'Schema: {"content": string} — one narrative of the interview process.';
-  }
-  if (type === "mustDoTopics") {
-    return base + 'Schema: {"topic": string} — one concise must-do topic line.';
+    return (
+      MEANING_PRESERVATION_RULES +
+      'Schema: {"content": string}. Copy-edit the interview-process narrative only; keep the same rounds, order, and details.'
+    );
   }
   if (type === "internshipExperience") {
-    return base + 'Schema: {"experience": string} — internship experience write-up.';
+    return (
+      MEANING_PRESERVATION_RULES +
+      'Schema: {"experience": string}. Copy-edit the internship write-up only; keep the same events and claims.'
+    );
   }
-  return base;
+  return MEANING_PRESERVATION_RULES;
+}
+
+function userPromptForEnhancement(type, payloadJson) {
+  return (
+    `Submission type: ${type}\n` +
+    "Task: Return the SAME JSON keys and values, with copy-edits only (spelling/grammar/punctuation). " +
+    "The reviewer must recognize this as the same submission — meaning unchanged.\n" +
+    `Input JSON:\n${payloadJson}`
+  );
 }
 
 function normalizeLlmObject(type, raw) {
@@ -154,11 +161,6 @@ function normalizeLlmObject(type, raw) {
     if (!content) throw new Error("Enhanced output missing content.");
     return { content };
   }
-  if (type === "mustDoTopics") {
-    const topic = String(raw.topic ?? raw.content ?? raw.question ?? "").trim();
-    if (!topic) throw new Error("Enhanced output missing topic.");
-    return { topic };
-  }
   if (type === "internshipExperience") {
     const experience = String(raw.experience ?? raw.content ?? "").trim();
     if (!experience) throw new Error("Enhanced output missing experience text.");
@@ -171,6 +173,9 @@ function normalizeLlmObject(type, raw) {
  * One-click AI polish. Does not persist. Returns content string in the same shape approve() expects.
  */
 export async function enhanceSubmissionContent({ type, content }) {
+  if (!isSubmissionEnhancementSupported(type)) {
+    throw new Error("AI enhancement is not available for must-do topic submissions.");
+  }
   if (typeof content !== "string" || !content.trim()) {
     throw new Error("Submission content is empty.");
   }
@@ -185,16 +190,14 @@ export async function enhanceSubmissionContent({ type, content }) {
   }
 
   const system = systemPromptForType(type);
-  const user =
-    `Submission type: ${type}\n` +
-    `Input JSON (improve these fields in-place semantically, same keys):\n${payloadJson}`;
+  const user = userPromptForEnhancement(type, payloadJson);
 
   const raw = await callLLM(
     [
       { role: "system", content: system },
       { role: "user", content: user },
     ],
-    { model: ENHANCE_MODEL }
+    { model: ENHANCE_MODEL, temperature: 0 }
   );
 
   let parsed;

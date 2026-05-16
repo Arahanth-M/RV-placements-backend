@@ -59,8 +59,13 @@ import {
   STUDENT_BATCH_COLUMN_GUIDE,
 } from "../services/studentBatchImportService.js";
 import {
+  generateSubmissionAnswer,
+  isSubmissionAddAnswerSupported,
+} from "../services/submissionAnswerService.js";
+import {
   assertMergeContentValidForSubmissionType,
   enhanceSubmissionContent,
+  isSubmissionEnhancementSupported,
 } from "../services/submissionEnhanceService.js";
 
 const adminRouter = express.Router();
@@ -753,6 +758,11 @@ submissionModRouter.post("/submissions/:id/enhance", async (req, res) => {
     if (submission.status !== "pending") {
       return res.status(400).json({ error: "Only pending submissions can be enhanced." });
     }
+    if (!isSubmissionEnhancementSupported(submission.type)) {
+      return res.status(400).json({
+        error: "AI enhancement is not available for must-do topic submissions.",
+      });
+    }
     const enhanced = await enhanceSubmissionContent({
       type: submission.type,
       content: submission.content,
@@ -764,6 +774,36 @@ submissionModRouter.post("/submissions/:id/enhance", async (req, res) => {
       return res.status(503).json({ error: "AI enhancement is not configured (missing GROQ_API_KEY)." });
     }
     console.error("❌ submission enhance:", msg);
+    return res.status(422).json({ error: msg });
+  }
+});
+
+// AI-generated answer for OA / interview questions — does not write to the database.
+submissionModRouter.post("/submissions/:id/add-answer", async (req, res) => {
+  try {
+    const submission = await Submission.findById(req.params.id);
+    if (!submission) {
+      return res.status(404).json({ error: "Submission not found" });
+    }
+    if (submission.status !== "pending") {
+      return res.status(400).json({ error: "Only pending submissions can receive a generated answer." });
+    }
+    if (!isSubmissionAddAnswerSupported(submission.type)) {
+      return res.status(400).json({
+        error: "Add answer is only available for OA and interview question submissions.",
+      });
+    }
+    const content = await generateSubmissionAnswer({
+      type: submission.type,
+      content: submission.content,
+    });
+    return res.json({ content });
+  } catch (error) {
+    const msg = String(error?.message || error || "Answer generation failed");
+    if (msg.includes("Missing GROQ_API_KEY")) {
+      return res.status(503).json({ error: "AI answer generation is not configured (missing GROQ_API_KEY)." });
+    }
+    console.error("❌ submission add-answer:", msg);
     return res.status(422).json({ error: msg });
   }
 });
@@ -781,6 +821,11 @@ submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
     if (typeof req.body?.mergeContent === "string") {
       const trimmed = req.body.mergeContent.trim();
       if (trimmed.length > 0) {
+        if (!isSubmissionEnhancementSupported(submission.type)) {
+          return res.status(400).json({
+            error: "AI enhancement is not available for must-do topic submissions.",
+          });
+        }
         try {
           assertMergeContentValidForSubmissionType(submission.type, trimmed);
           mergeSource = trimmed.slice(0, 70000);
