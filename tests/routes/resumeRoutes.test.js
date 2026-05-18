@@ -19,6 +19,7 @@ describe("Resume routes auth", () => {
           skills: [],
           projects: [],
           experience: [],
+          certifications: [],
           achievements: [],
         },
       })
