@@ -10,6 +10,11 @@ import { getCompanyContext } from "./mcp/getCompanyContext.js";
 import { generateFinalFeedback } from "./mcp/generateFinalFeedback.js";
 import { INTERVIEW_STATES } from "./interviewStateMachine.js";
 import { logInterviewDsaLlmDebug, tailId } from "./interviewDebugLog.js";
+import {
+  getRoundPreviewLabel,
+  normalizeCustomRoundFocus,
+  resolveRoundAbout,
+} from "../config/interviewRoundFocus.js";
 
 const toSafeString = (value, fallback = "") => {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -44,19 +49,13 @@ const toBoundedScore = (value) => {
   return Math.max(0, Math.min(10, numeric));
 };
 
-const inferQuestionCount = (roundType) => {
+export const inferQuestionCount = (roundType) => {
   if (roundType === "DSA") return 3;
   if (roundType === "SQL") return 4;
   if (roundType === "System Design") return 3;
+  if (roundType === "HR") return 1;
+  if (roundType === "CS Fundamentals") return 3;
   return 3;
-};
-
-const getRoundPreviewLabel = (roundType) => {
-  if (roundType === "System Design") return "System Design Round";
-  if (roundType === "SQL") return "SQL Round";
-  if (roundType === "CS Fundamentals") return "CS Fundamentals Round";
-  if (roundType === "HR") return "HR/Behavioral Round";
-  return "DSA/Coding Round";
 };
 
 const normalizeCustomRoundType = (value) => {
@@ -77,11 +76,24 @@ const validateCustomRoundPlan = (rounds) => {
     throw new Error(`Custom interview plan cannot exceed ${INTERVIEW_MAX_ROUNDS} rounds.`);
   }
 
-  const normalized = rounds.map((round, index) => ({
-    roundNumber: index + 1,
-    type: normalizeCustomRoundType(round?.type),
-    difficulty: normalizeCustomRoundDifficulty(round?.difficulty),
-  }));
+  const normalized = rounds.map((round, index) => {
+    const type = normalizeCustomRoundType(round?.type);
+    const focus =
+      type === "DSA"
+        ? ""
+        : round?.focus != null
+          ? normalizeCustomRoundFocus(type, round.focus)
+          : round?.about != null
+            ? normalizeCustomRoundFocus(type, round.about)
+            : normalizeCustomRoundFocus(type, "");
+    return {
+      roundNumber: index + 1,
+      type,
+      difficulty: normalizeCustomRoundDifficulty(round?.difficulty),
+      ...(focus ? { focus } : {}),
+      about: resolveRoundAbout(type, focus),
+    };
+  });
 
   const hrCount = normalized.filter((round) => round.type === "HR").length;
   if (hrCount < 1) {
@@ -103,7 +115,7 @@ export const generateInterviewPlanFromCustomRounds = async (customRounds = []) =
   const rounds = normalizedRounds.map((round, index) => ({
     roundNumber: round.roundNumber,
     type: round.type,
-    about: getRoundPreviewLabel(round.type),
+    about: round.about,
     difficulty: round.difficulty,
     questionCount: inferQuestionCount(round.type),
     questions: [],
@@ -113,10 +125,10 @@ export const generateInterviewPlanFromCustomRounds = async (customRounds = []) =
 
   return {
     rounds,
-    roundsPlan: rounds.map((round) => getRoundPreviewLabel(round.type)),
+    roundsPlan: rounds.map((round) => `${getRoundPreviewLabel(round.type)} — ${round.about}`),
     roundsDetails: rounds.map((round) => ({
       round: `Round ${round.roundNumber}`,
-      questionType: getRoundPreviewLabel(round.type),
+      questionType: round.about,
     })),
     totalRounds: rounds.length,
     currentRound: 1,

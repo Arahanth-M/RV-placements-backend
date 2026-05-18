@@ -25,7 +25,11 @@
     "backfill:mustDoTopics:cse-visits": "node scripts/backfill-must-do-topics-to-cse-visits.js",
     "backfill:mustDoTopics:cse-visits:dry-run": "node scripts/backfill-must-do-topics-to-cse-visits.js --dry-run",
     "seed:gap-interview-questions": "node scripts/seedGapGeneratedInterviewQuestions.js",
-    "seed:gap-interview-questions:dry-run": "node scripts/seedGapGeneratedInterviewQuestions.js --dry-run"
+    "seed:gap-interview-questions:dry-run": "node scripts/seedGapGeneratedInterviewQuestions.js --dry-run",
+    "interview-questions:assign-company-tags": "node scripts/assignCompanyTagsToInterviewQuestions.js",
+    "interview-questions:assign-company-tags:dry-run": "node scripts/assignCompanyTagsToInterviewQuestions.js --dry-run",
+    "interview-questions:assign-company-tags-sd": "node scripts/assignCompanyTagsToInterviewQuestions.js --round-types \"System Design\" --first-companies 30",
+    "interview-questions:assign-company-tags-sd:dry-run": "node scripts/assignCompanyTagsToInterviewQuestions.js --round-types \"System Design\" --first-companies 30 --dry-run"
   },
   "dependencies": {
     "@xenova/transformers": "^2.17.2",

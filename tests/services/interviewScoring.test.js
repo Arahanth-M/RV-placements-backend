@@ -13,8 +13,11 @@ const mockCallLLM = jest.fn(async () =>
   JSON.stringify({
     verdict: "partial",
     confidence: 0.7,
-    insight: "The answer covered the main idea but missed some precision.",
-    improvement: "Be explicit about edge cases and complexity.",
+    expectedAnswer:
+      "Explain a sound approach, edge cases, and time/space complexity clearly.",
+    closeness:
+      "The answer mentioned binary search and complexity but edge-case handling was thin.",
+    improvements: ["Be explicit about edge cases and tricky inputs."],
     matchedRubricPoints: ["Choose a sound approach"],
     missingRubricPoints: ["Cover edge cases or tricky inputs"],
     subscores: {
@@ -48,9 +51,11 @@ jest.unstable_mockModule("../../services/llmClient.js", () => ({
   callLLM: mockCallLLM,
 }));
 
-const { normalizeExpectedPoints } = await import(
+const { normalizeExpectedPoints, getAdaptiveFollowUp } = await import(
   "../../services/mcp/generateQuestion.js"
 );
+const { resolveRoundAbout } = await import("../../config/interviewRoundFocus.js");
+const { inferQuestionCount } = await import("../../services/interviewEngine.js");
 const { evaluateAnswer } = await import("../../services/mcp/evaluateAnswer.js");
 
 describe("AI interview scoring helpers", () => {
@@ -132,6 +137,10 @@ describe("AI interview scoring helpers", () => {
     expect(result.evaluationTrace.expectedAnswerMode).toBe("code");
     expect(result.evaluationTrace.subscores.algorithmChoice).toBeGreaterThan(0);
     expect(Array.isArray(result.evaluationTrace.matchedRubricPoints)).toBe(true);
+    expect(result.feedback).toContain("Score:");
+    expect(result.feedback).toContain("Expected answer:");
+    expect(result.feedback).toContain("How close your answer was:");
+    expect(result.feedback).toContain("What to improve:");
     expect(mockCallLLM).toHaveBeenCalled();
   });
 
@@ -174,5 +183,52 @@ describe("AI interview scoring helpers", () => {
     expect(result.score).toBeLessThanOrEqual(4);
     expect(result.verdict).not.toBe("correct");
     expect(result.evaluationTrace.criticalMisses.length).toBeGreaterThan(0);
+  });
+
+  it("repair follow-up targets the first critical rubric miss", () => {
+    const result = getAdaptiveFollowUp({
+      hasPreviousAnswer: true,
+      previousScore: 6,
+      previousEvaluation: {
+        criticalMisses: ["Cover edge cases", "Mention complexity"],
+        missingRubricPoints: ["Handle null inputs"],
+        recentScores: [6],
+      },
+      difficulty: "medium",
+    });
+
+    expect(result.followUpMode).toBe("repair");
+    expect(result.targetRubricGap).toBe("Cover edge cases");
+  });
+
+  it("clarify follow-up targets a missing rubric point when score is low", () => {
+    const result = getAdaptiveFollowUp({
+      hasPreviousAnswer: true,
+      previousScore: 3,
+      previousEvaluation: {
+        criticalMisses: [],
+        missingRubricPoints: ["Explain indexing trade-offs"],
+        recentScores: [3],
+      },
+      difficulty: "hard",
+    });
+
+    expect(result.followUpMode).toBe("clarify");
+    expect(result.targetRubricGap).toBe("Explain indexing trade-offs");
+  });
+
+  it("resolveRoundAbout maps SQL focus ids to descriptive topics", () => {
+    expect(resolveRoundAbout("SQL", "joins")).toContain("Join");
+    expect(resolveRoundAbout("HR", "leadership")).toContain("Leadership");
+  });
+
+  it("resolveRoundAbout ignores focus for DSA rounds", () => {
+    expect(resolveRoundAbout("DSA", "dp")).toContain("Data structures");
+    expect(resolveRoundAbout("DSA", "arrays")).toContain("Data structures");
+  });
+
+  it("HR rounds plan for a single question to limit token usage", () => {
+    expect(inferQuestionCount("HR")).toBe(1);
+    expect(inferQuestionCount("DSA")).toBe(3);
   });
 });

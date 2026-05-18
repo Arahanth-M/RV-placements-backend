@@ -99,16 +99,6 @@ const setLLMCache = (key, value) => {
   }
 };
 
-const extractReasoningHighlight = (reasoning) => {
-  const text = toSafeString(reasoning);
-  if (!text) return "";
-  const firstSentence = text.split(/[.!?]/)[0]?.trim() || "";
-  if (!firstSentence) return "";
-  return firstSentence.length > 140
-    ? `${firstSentence.slice(0, 137).trimEnd()}...`
-    : firstSentence;
-};
-
 const tokenize = (text) =>
   toSafeString(text)
     .toLowerCase()
@@ -345,53 +335,104 @@ const QUESTION_TYPE_WEIGHTS = {
   },
 };
 
-const buildHumanFeedback = ({
-  type,
+const STRUCTURED_FEEDBACK_MAX_CHARS = Number(process.env.EVAL_FEEDBACK_MAX_CHARS || 900);
+
+const trimFeedbackSection = (value, maxChars = 320) => {
+  const text = toSafeString(value);
+  if (!text) return "";
+  if (!Number.isFinite(maxChars) || maxChars <= 0) return text;
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars - 3).trimEnd()}...`;
+};
+
+/** Precise per-question feedback for non–code_execution rounds (SQL, HR, CS, system design, etc.). */
+const buildStructuredFeedback = ({
   finalScore,
-  matchedRubricPoints,
-  missingRubricPoints,
-  reasoningHighlight,
-  llmInsight,
-  llmImprovement,
+  expectedAnswer,
+  closeness,
+  improvements = [],
 }) => {
-  const lines = [];
+  const improveItems = (Array.isArray(improvements) ? improvements : [])
+    .map((item) => toSafeString(item))
+    .filter(Boolean)
+    .slice(0, 2);
+  const improveText =
+    improveItems.length > 0
+      ? improveItems.join(" ")
+      : "Strengthen the missing rubric points in your next answer.";
 
-  if (finalScore >= 8) {
-    lines.push("Good answer. This felt interview-ready overall.");
-  } else if (finalScore >= 6) {
-    lines.push("You're on the right track, but there is still room to make the answer sharper.");
+  const sections = [
+    `Score: ${finalScore}/10`,
+    `Expected answer: ${trimFeedbackSection(expectedAnswer, 280)}`,
+    `How close your answer was: ${trimFeedbackSection(closeness, 280)}`,
+    `What to improve: ${trimFeedbackSection(improveText, 220)}`,
+  ];
+
+  return sections.join("\n\n").slice(0, STRUCTURED_FEEDBACK_MAX_CHARS);
+};
+
+const buildDeterministicStructuredFeedback = ({
+  finalScore,
+  rubricPoints = [],
+  matchedRubricPoints = [],
+  missingRubricPoints = [],
+}) => {
+  const rubricTexts = (Array.isArray(rubricPoints) ? rubricPoints : [])
+    .map((point) => toSafeString(point?.text))
+    .filter(Boolean);
+
+  const expectedAnswer =
+    rubricTexts.length > 0
+      ? `Interviewers expect you to cover: ${rubricTexts.slice(0, 5).join("; ")}.`
+      : "Interviewers expect a direct, complete answer that addresses the question.";
+
+  let closeness;
+  if (matchedRubricPoints.length > 0 && missingRubricPoints.length > 0) {
+    closeness = `You hit: ${matchedRubricPoints.slice(0, 3).join("; ")}. You missed: ${missingRubricPoints.slice(0, 3).join("; ")}.`;
+  } else if (matchedRubricPoints.length > 0) {
+    closeness = `You aligned well with what interviewers look for: ${matchedRubricPoints.slice(0, 4).join("; ")}.`;
+  } else if (missingRubricPoints.length > 0) {
+    closeness = `Your answer did not clearly cover: ${missingRubricPoints.slice(0, 4).join("; ")}.`;
   } else {
-    lines.push("This answer needs stronger completeness and precision to land well in a real interview.");
+    closeness = "Your answer was too brief or off-topic to match the expected bar.";
   }
 
-  if (matchedRubricPoints.length > 0) {
-    lines.push(`You covered well: ${matchedRubricPoints.slice(0, 2).join("; ")}.`);
+  const improvements = missingRubricPoints
+    .slice(0, 2)
+    .map((text) => (text.startsWith("Add") ? text : `Add: ${text}`));
+
+  return buildStructuredFeedback({
+    finalScore,
+    expectedAnswer,
+    closeness,
+    improvements,
+  });
+};
+
+const parseLlmStructuredFeedback = (parsedEval) => {
+  const improvements = [];
+  if (Array.isArray(parsedEval?.improvements)) {
+    for (const item of parsedEval.improvements) {
+      const safe = toSafeString(item);
+      if (safe) improvements.push(safe);
+    }
   }
-  if (missingRubricPoints.length > 0) {
-    lines.push(`What was missing: ${missingRubricPoints.slice(0, 2).join("; ")}.`);
+  const legacyImprovement = toSafeString(parsedEval?.improvement);
+  if (legacyImprovement && improvements.length === 0) {
+    improvements.push(legacyImprovement);
   }
 
-  if (type === "coding" && missingRubricPoints.length > 0) {
-    lines.push("For coding rounds, prioritize the approach, edge cases, and executable logic over general explanation.");
-  }
-  if (type === "system_design" && missingRubricPoints.length > 0) {
-    lines.push("For design rounds, make the components, trade-offs, and failure handling explicit.");
-  }
-  if (type === "behavioral" && missingRubricPoints.length > 0) {
-    lines.push("For behavioral rounds, keep the response grounded in your actions and measurable outcomes.");
-  }
+  const expectedAnswer =
+    toSafeString(parsedEval?.expectedAnswer) ||
+    toSafeString(parsedEval?.insight);
 
-  if (reasoningHighlight) {
-    lines.push(`What stood out: ${reasoningHighlight}.`);
-  }
-  if (llmInsight) {
-    lines.push(llmInsight);
-  }
-  if (llmImprovement) {
-    lines.push(`Suggestion: ${llmImprovement}`);
-  }
+  const closeness =
+    toSafeString(parsedEval?.closeness) ||
+    (toSafeString(parsedEval?.insight) && !toSafeString(parsedEval?.expectedAnswer)
+      ? toSafeString(parsedEval?.insight)
+      : "");
 
-  return lines.slice(0, 6).join(" ").slice(0, 1200);
+  return { expectedAnswer, closeness, improvements };
 };
 
 const deriveStrictVerdict = ({
@@ -434,7 +475,7 @@ const buildLLMGradingPrompt = ({
   {
     role: "system",
     content:
-      "You are a strict but fair interview grader. Return strict JSON only. Judge the answer against the rubric points. Do not invent rubric points or give credit without evidence from the answer.",
+      "You are a strict but fair interview grader. Return strict JSON only. Judge the answer against the rubric. Be precise and concise—no filler, praise, or generic coaching. Do not invent rubric points or give credit without evidence in the answer.",
   },
   {
     role: "user",
@@ -452,8 +493,9 @@ Return STRICT JSON:
 {
   "verdict": "correct | partial | incorrect",
   "confidence": 0.0,
-  "insight": "one concise paragraph",
-  "improvement": "one clear actionable suggestion",
+  "expectedAnswer": "2-3 short sentences: what a strong candidate would say (what interviewers expect). No bullet lists.",
+  "closeness": "2-3 short sentences: how this answer compares to that bar—what matched and what did not.",
+  "improvements": ["one concrete fix", "optional second fix"],
   "matchedRubricPoints": ["string"],
   "missingRubricPoints": ["string"],
   "subscores": {
@@ -519,10 +561,23 @@ export const evaluateRubricLLM = async ({
   }
 
   if (!safeAnswer) {
+    const emptyFeedback = buildStructuredFeedback({
+      finalScore: 1,
+      expectedAnswer:
+        rubricPoints.length > 0
+          ? `Interviewers expect: ${rubricPoints
+              .map((point) => toSafeString(point?.text))
+              .filter(Boolean)
+              .slice(0, 4)
+              .join("; ")}.`
+          : "A direct answer that addresses the question.",
+      closeness: "No answer was submitted.",
+      improvements: ["Answer the question and cover the expected points."],
+    });
     return {
       score: 1,
       type,
-      feedback: "No answer was provided. Try answering directly and covering the key points of the question.",
+      feedback: emptyFeedback,
       verdict: "incorrect",
       evaluationTrace: {
         scoringVersion: SCORING_VERSION,
@@ -563,7 +618,6 @@ export const evaluateRubricLLM = async ({
   }));
 
   const rubricSummary = buildRubricBuckets(rubricWithSimilarity);
-  const reasoningHighlight = extractReasoningHighlight(llmReasoning);
   const clarity = clarityScore(safeAnswer);
   const structure = detectStructure(safeAnswer);
   const wordCount = tokenize(safeAnswer).length;
@@ -581,8 +635,9 @@ export const evaluateRubricLLM = async ({
   const deterministicScore = combineWeightedScore(weights, baseSubscores);
 
   let llmVerdict = "partial";
-  let llmInsight = "";
-  let llmImprovement = "";
+  let llmExpectedAnswer = "";
+  let llmCloseness = "";
+  let llmImprovements = [];
   let llmConfidence = 0.55;
   let llmMatched = [];
   let llmMissing = [];
@@ -642,8 +697,10 @@ export const evaluateRubricLLM = async ({
       if (["correct", "partial", "incorrect"].includes(verdictCandidate)) {
         llmVerdict = verdictCandidate;
       }
-      llmInsight = toSafeString(parsedEval?.insight);
-      llmImprovement = toSafeString(parsedEval?.improvement);
+      const structured = parseLlmStructuredFeedback(parsedEval);
+      llmExpectedAnswer = structured.expectedAnswer;
+      llmCloseness = structured.closeness;
+      llmImprovements = structured.improvements;
       llmConfidence = clamp01(parsedEval?.confidence || llmConfidence);
       llmMatched = Array.isArray(parsedEval?.matchedRubricPoints)
         ? parsedEval.matchedRubricPoints.map((item) => toSafeString(item)).filter(Boolean)
@@ -712,15 +769,20 @@ export const evaluateRubricLLM = async ({
       0.1 * clarity
   );
 
-  const feedback = buildHumanFeedback({
-    type,
-    finalScore,
-    matchedRubricPoints,
-    missingRubricPoints,
-    reasoningHighlight,
-    llmInsight,
-    llmImprovement,
-  });
+  const feedback =
+    llmExpectedAnswer || llmCloseness || llmImprovements.length > 0
+      ? buildStructuredFeedback({
+          finalScore,
+          expectedAnswer: llmExpectedAnswer,
+          closeness: llmCloseness,
+          improvements: llmImprovements,
+        })
+      : buildDeterministicStructuredFeedback({
+          finalScore,
+          rubricPoints,
+          matchedRubricPoints,
+          missingRubricPoints,
+        });
 
   return {
     score: finalScore,

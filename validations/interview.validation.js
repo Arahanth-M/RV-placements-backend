@@ -23,6 +23,8 @@ export const interviewStartSchema = Joi.object({
           .valid("DSA", "System Design", "SQL", "CS Fundamentals", "HR")
           .required(),
         difficulty: Joi.string().valid("easy", "medium", "hard").required(),
+        focus: Joi.string().trim().max(120).optional(),
+        about: Joi.string().trim().max(120).optional(),
       })
     )
     .required(),

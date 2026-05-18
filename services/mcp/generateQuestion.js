@@ -11,8 +11,9 @@ const MIN_POOL_SIZE = 5;
 const MAX_POOL_SIZE = 10;
 const QUESTION_POOL_TTL_SECONDS = 60 * 60;
 const USER_SEEN_TTL_SECONDS = 24 * 60 * 60;
-// Temporary switch: allow repeat questions for the same user when question bank is limited.
-const DISABLE_USER_SEEN_DEDUPE = true;
+// Re-enable seen-question dedupe by default; set DISABLE_USER_SEEN_DEDUPE=true to allow repeats.
+const DISABLE_USER_SEEN_DEDUPE =
+  String(process.env.DISABLE_USER_SEEN_DEDUPE || "").toLowerCase() === "true";
 
 const toSafeString = (value, fallback = "") => {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -296,6 +297,105 @@ const mergeUniqueQuestions = (...questionLists) => {
   return merged;
 };
 
+const formatPreviousFeedbackForPrompt = (feedback) => {
+  const safe = toSafeString(feedback);
+  if (!safe) return "N/A";
+  const improveMatch = safe.match(/What to improve:\s*([\s\S]+?)(?:\n\n|$)/i);
+  if (improveMatch?.[1]) {
+    return truncateText(improveMatch[1].trim(), 320);
+  }
+  const closenessMatch = safe.match(/How close:\s*([\s\S]+?)(?:\n\nWhat to improve:|$)/i);
+  if (closenessMatch?.[1]) {
+    return truncateText(closenessMatch[1].trim(), 280);
+  }
+  return truncateText(safe, 360);
+};
+
+const isSingleQuestionHrRound = (roundType, roundQuestionCount) => {
+  const safeType = toSafeString(roundType).toLowerCase();
+  const count = Number(roundQuestionCount);
+  return (safeType.includes("hr") || safeType.includes("behavior")) && count === 1;
+};
+
+const getPoolMinSizeForRound = (roundType, roundQuestionCount) =>
+  isSingleQuestionHrRound(roundType, roundQuestionCount) ? 1 : MIN_POOL_SIZE;
+
+const buildRoundSpecificPromptRules = (roundType, roundAbout, options = {}) => {
+  const safeType = toSafeString(roundType, "DSA").toLowerCase();
+  const topic = toSafeString(roundAbout, "this topic");
+  const singleHr = options.singleQuestionHrRound === true;
+
+  if (safeType.includes("hr") || safeType.includes("behavior")) {
+    return `HR / behavioral round rules:
+- Ask STAR-style behavioral questions (situation, action, result) tied to: ${topic}.
+- Prefer prompts about real past experience, teamwork, conflict, leadership, or motivation.
+- expectedAnswerMode should be "story".
+- Rubric categories: situationClarity, actionOwnership, resultSpecificity, reflection.${
+      singleHr
+        ? `
+- This HR round has exactly ONE question for the entire round. Generate one substantive, interview-realistic STAR prompt (not generic small talk).
+- The question must be specific enough that a strong answer covers situation, personal action, and outcome.`
+        : ""
+    }`;
+  }
+
+  if (safeType.includes("system")) {
+    return `System design round rules:
+- Ask an open-ended design question focused on: ${topic}.
+- Expect trade-offs (scale, consistency, latency, cost), components, and failure handling.
+- expectedAnswerMode should be "design".
+- Rubric categories: architectureCoverage, tradeoffs, scalability, failureHandling.`;
+  }
+
+  if (safeType.includes("sql")) {
+    return `SQL round rules:
+- Ask practical SQL scenarios (queries, schema reasoning, optimization) for: ${topic}.
+- Questions may reference realistic table relationships; avoid trivia-only definitions.
+- expectedAnswerMode should be "code" (SQL as the answer medium).
+- Rubric categories: queryDesign, correctness, performance, edgeCases.`;
+  }
+
+  if (
+    safeType.includes("cs fundamentals") ||
+    safeType.includes("oops") ||
+    safeType.includes("dbms") ||
+    safeType.includes("computer network")
+  ) {
+    return `CS fundamentals round rules:
+- Ask conceptual depth questions on: ${topic} (definitions, trade-offs, real-world use).
+- Avoid full coding implementations unless the focus clearly requires it.
+- expectedAnswerMode should be "conceptual".
+- Rubric categories: coverage, reasoning, tradeoffs, application.`;
+  }
+
+  if (safeType.includes("dsa") || safeType.includes("coding")) {
+    return `DSA / coding round rules (LLM pool only — bank may supply executable problems):
+- Ask algorithmic problems aligned with: ${topic}.
+- Include constraints, edge cases, and complexity expectations in the rubric.
+- expectedAnswerMode should be "code".
+- Rubric categories: algorithmChoice, edgeCases, complexityAwareness, implementationQuality.`;
+  }
+
+  return `General technical round rules:
+- Stay on topic: ${topic}.
+- Match difficulty and follow-up mode.
+- Use rubric categories appropriate to the question (coverage, reasoning, communication).`;
+};
+
+const buildFollowUpRequirementBlock = (adaptiveFollowUp) => {
+  const gap = toSafeString(adaptiveFollowUp?.targetRubricGap);
+  const mode = toSafeString(adaptiveFollowUp?.followUpMode);
+  if (!gap || (mode !== "repair" && mode !== "clarify")) {
+    return "";
+  }
+  return `
+CRITICAL follow-up requirement (followUpMode=${mode}):
+The next question MUST directly probe this specific gap from the candidate's last answer:
+"${gap}"
+Include at least one mustHave rubric point that evaluates whether they addressed this gap.
+Do not change the subject until this gap is tested.`;
+};
+
 const buildQuestionPoolPrompt = ({
   companyContext,
   roundType,
@@ -309,7 +409,14 @@ const buildQuestionPoolPrompt = ({
   previousScore,
   condensedHistory,
   requestedCount,
+  singleQuestionHrRound = false,
 }) => {
+  const roundRules = buildRoundSpecificPromptRules(roundType, roundAbout, {
+    singleQuestionHrRound,
+  });
+  const followUpBlock = buildFollowUpRequirementBlock(adaptiveFollowUp);
+  const formattedFeedback = formatPreviousFeedbackForPrompt(previousFeedback);
+
   return [
     {
       role: "system",
@@ -329,39 +436,36 @@ Base difficulty: ${normalizeDifficulty(difficulty)}
 Target difficulty for this question: ${adaptiveFollowUp.targetDifficulty}
 Follow-up mode: ${adaptiveFollowUp.followUpMode}
 Interviewer intent: ${adaptiveFollowUp.interviewerIntent}
+${adaptiveFollowUp.targetRubricGap ? `Target rubric gap to address: ${adaptiveFollowUp.targetRubricGap}` : ""}
 
 Has previous answer in this round: ${hasPreviousAnswer ? "yes" : "no"}
 Previous question: ${truncateText(previousQuestion, 220)}
 Previous answer: ${truncateText(previousAnswer, 320)}
-Previous feedback: ${truncateText(previousFeedback, 220)}
+Previous feedback (what to improve / gaps): ${formattedFeedback}
 Previous score: ${
         Number.isFinite(Number(previousScore)) ? Number(previousScore) : "N/A"
       }
 
 Recent round history: ${JSON.stringify(condensedHistory)}
 
+Round-specific interviewer rules:
+${roundRules}
+${followUpBlock}
+
 Rules:
 1) Speak like a real interviewer, not like a question generator.
 2) Use natural conversational phrasing (e.g., "Can you walk me through...", "What would happen if...", "How would you approach...").
 3) If previous answer exists, each question should feel like a continuation of the conversation.
-4) If previous feedback highlights a gap or mistake, include follow-up questions that target that gap.
+4) If previous feedback highlights a gap, the follow-up must target that gap (especially in repair/clarify modes).
 5) Avoid robotic phrasing like "Explain..." or "Describe...".
 6) Keep each question concise (1-2 sentences max).
 7) Do NOT include explanations, only what the interviewer would say.
-8) Respect target difficulty and follow-up mode.
-9) Avoid repeating the same question or asking something unrelated.
+8) Respect target difficulty, round focus/topic, and follow-up mode.
+9) Avoid repeating the same question or asking something unrelated to the round focus.
 10) Return exactly ${requestedCount} questions.
 11) For each question, include 4-6 rubric points a strong answer should cover.
-12) Each rubric point must include:
-   - text
-   - category
-   - importance ("mustHave" | "goodToHave" | "redFlag")
-13) Set expectedAnswerMode to one of: "code", "design", "story", "conceptual".
-14) Use category values that help grading, such as:
-   - coding: "algorithmChoice", "edgeCases", "complexityAwareness", "implementationQuality"
-   - system design: "architectureCoverage", "tradeoffs", "scalability", "failureHandling"
-   - behavioral: "situationClarity", "actionOwnership", "resultSpecificity", "reflection"
-   - general: "coverage", "reasoning", "communication"
+12) Each rubric point must include: text, category, importance ("mustHave" | "goodToHave" | "redFlag").
+13) Set expectedAnswerMode per the round-specific rules above.
 
 Return JSON:
 {
@@ -569,7 +673,21 @@ const buildBasicFallbackQuestion = ({ roundType, roundAbout, difficulty }) => {
   };
 };
 
-const getAdaptiveFollowUp = ({
+const pickFollowUpTargetGap = ({ followUpMode, criticalMisses, missingRubricPoints }) => {
+  if (followUpMode !== "repair" && followUpMode !== "clarify") {
+    return "";
+  }
+  const combined = [
+    ...(Array.isArray(criticalMisses) ? criticalMisses : []),
+    ...(Array.isArray(missingRubricPoints) ? missingRubricPoints : []),
+  ]
+    .map((item) => toSafeString(item))
+    .filter(Boolean);
+  const unique = [...new Set(combined)];
+  return unique[0] || "";
+};
+
+export const getAdaptiveFollowUp = ({
   hasPreviousAnswer,
   previousScore,
   previousEvaluation,
@@ -587,60 +705,72 @@ const getAdaptiveFollowUp = ({
     ? recentScores.reduce((sum, value) => sum + value, 0) / recentScores.length
     : score;
   const criticalMisses = Array.isArray(previousEvaluation?.criticalMisses)
-    ? previousEvaluation.criticalMisses.filter(Boolean)
+    ? previousEvaluation.criticalMisses.map((item) => toSafeString(item)).filter(Boolean)
+    : [];
+  const missingRubricPoints = Array.isArray(previousEvaluation?.missingRubricPoints)
+    ? previousEvaluation.missingRubricPoints.map((item) => toSafeString(item)).filter(Boolean)
     : [];
   const lowConfidence = Number.isFinite(priorConfidence) && priorConfidence < 0.55;
 
+  const withTargetGap = (payload) => ({
+    ...payload,
+    targetRubricGap: pickFollowUpTargetGap({
+      followUpMode: payload.followUpMode,
+      criticalMisses,
+      missingRubricPoints,
+    }),
+  });
+
   if (!hasPreviousAnswer || !Number.isFinite(smoothedScore)) {
-    return {
+    return withTargetGap({
       targetDifficulty: baseDifficulty,
       followUpMode: "opening",
-      interviewerIntent: "Ask a strong opening question for this round.",
-    };
+      interviewerIntent: "Ask a strong opening question for this round focus.",
+    });
   }
 
   if (criticalMisses.length >= 2) {
-    return {
+    return withTargetGap({
       targetDifficulty: baseDifficulty === "hard" ? "medium" : "easy",
       followUpMode: "repair",
       interviewerIntent:
         "Candidate missed important rubric points. Ask a targeted follow-up that repairs conceptual gaps before moving ahead.",
-    };
+    });
   }
 
   if (lowConfidence) {
-    return {
+    return withTargetGap({
       targetDifficulty: baseDifficulty,
       followUpMode: "steady",
       interviewerIntent:
         "Confidence in the previous score is limited. Ask a nearby follow-up at similar difficulty to confirm the candidate's level.",
-    };
+    });
   }
 
   if (smoothedScore >= 8) {
-    return {
+    return withTargetGap({
       targetDifficulty: baseDifficulty === "easy" ? "medium" : "hard",
       followUpMode: "challenge",
       interviewerIntent:
         "Candidate did well. Ask a tougher follow-up with deeper reasoning, edge cases, optimization, or trade-off analysis.",
-    };
+    });
   }
 
   if (smoothedScore <= 4.5) {
-    return {
+    return withTargetGap({
       targetDifficulty: baseDifficulty === "hard" ? "medium" : "easy",
       followUpMode: "clarify",
       interviewerIntent:
-        "Candidate struggled. Ask a clarifying/foundational follow-up that checks core understanding before moving harder.",
-    };
+        "Candidate struggled. Ask a clarifying follow-up that checks the weakest rubric point from their last answer before going harder.",
+    });
   }
 
-  return {
+  return withTargetGap({
     targetDifficulty: baseDifficulty,
     followUpMode: "steady",
     interviewerIntent:
       "Candidate is average. Ask a related follow-up at similar difficulty to test consistency and practical application.",
-  };
+  });
 };
 
 /**
@@ -665,8 +795,11 @@ export const generateQuestion = async ({
   placementYear,
   mergePlacementByType,
   excludedQuestionIds = [],
+  roundQuestionCount = null,
 }) => {
   try {
+    const poolMinSize = getPoolMinSizeForRound(roundType, roundQuestionCount);
+    const singleQuestionHrRound = isSingleQuestionHrRound(roundType, roundQuestionCount);
     // Retrieval-first path: if curated question exists, use it.
     const seenQuestionsKey = buildSeenQuestionsKey(userId);
     const seenQuestionMembers = DISABLE_USER_SEEN_DEDUPE
@@ -821,10 +954,11 @@ export const generateQuestion = async ({
       `[generateQuestion] Seen questions count: ${seenLookup.size} (dedupeEnabled=${!DISABLE_USER_SEEN_DEDUPE})`
     );
 
-    const refillQuestionPool = async (currentPool, requestedCount = MIN_POOL_SIZE) => {
+    const refillQuestionPool = async (currentPool, requestedCount = poolMinSize) => {
       try {
+        const llmRequestCount = singleQuestionHrRound && !hasPreviousAnswer ? 1 : requestedCount;
         console.log(
-          `[generateQuestion] Refilling pool... current size=${currentPool.length}, requested=${requestedCount}`
+          `[generateQuestion] Refilling pool... current size=${currentPool.length}, requested=${llmRequestCount}`
         );
         console.log("[generateQuestion] LLM call: generating question pool");
         const messages = buildQuestionPoolPrompt({
@@ -839,7 +973,8 @@ export const generateQuestion = async ({
           previousFeedback,
           previousScore,
           condensedHistory,
-          requestedCount,
+          requestedCount: llmRequestCount,
+          singleQuestionHrRound,
         });
         const llmText = await callLLM(messages);
         const parsed = parseJSONResponse(llmText);
@@ -869,11 +1004,11 @@ export const generateQuestion = async ({
       }
     };
 
-    if (questionPool.length < MIN_POOL_SIZE) {
-      const missingCount = Math.max(1, MIN_POOL_SIZE - questionPool.length);
-      const requestedCount = Math.max(MIN_POOL_SIZE, missingCount);
+    if (questionPool.length < poolMinSize) {
+      const missingCount = Math.max(1, poolMinSize - questionPool.length);
+      const requestedCount = Math.max(poolMinSize, missingCount);
       console.log(
-        `[generateQuestion] Pool below minimum (${questionPool.length} < ${MIN_POOL_SIZE}), triggering refill`
+        `[generateQuestion] Pool below minimum (${questionPool.length} < ${poolMinSize}), triggering refill`
       );
       questionPool = await refillQuestionPool(questionPool, requestedCount);
     }
@@ -887,7 +1022,7 @@ export const generateQuestion = async ({
 
     if (availableQuestions.length === 0) {
       console.log("[generateQuestion] No unseen questions left, refilling pool...");
-      questionPool = await refillQuestionPool(questionPool, MIN_POOL_SIZE);
+      questionPool = await refillQuestionPool(questionPool, poolMinSize);
       availableQuestions = questionPool.filter(
         (item) => !seenLookup.has(item.question.toLowerCase())
       );

@@ -439,6 +439,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       roundType: currentRound.type,
       roundAbout: currentRound.about,
       difficulty: currentRound.difficulty,
+      roundQuestionCount: currentRound.questionCount,
       previousQuestion: currentQuestion,
       previousAnswer: trimmedAnswer,
       previousFeedback: evaluation.feedback,
@@ -446,6 +447,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       previousEvaluation: {
         confidence: evaluation?.evaluationTrace?.confidence,
         criticalMisses: evaluation?.evaluationTrace?.criticalMisses || [],
+        missingRubricPoints: evaluation?.evaluationTrace?.missingRubricPoints || [],
         recentScores,
       },
       roundHistory: roundHistoryForGen,

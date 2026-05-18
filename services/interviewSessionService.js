@@ -348,6 +348,7 @@ export const startRound = async (sessionId) => {
     roundType: currentRound.type,
     roundAbout: currentRound.about,
     difficulty: currentRound.difficulty,
+    roundQuestionCount: currentRound.questionCount,
     previousQuestion: "",
     previousAnswer: "",
     previousFeedback: "",
