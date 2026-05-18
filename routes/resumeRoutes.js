@@ -9,6 +9,7 @@ import {
   resumeExportSchema,
 } from "../validations/resume.validation.js";
 import { buildPdfBufferFromResume } from "../services/resumePdfExport.js";
+import { buildDocxBufferFromResume } from "../services/resumeDocxExport.js";
 
 const router = express.Router();
 
@@ -58,10 +59,15 @@ function sanitizeResumePayload(payload = {}) {
     experience: (Array.isArray(payload.experience) ? payload.experience : []).map((item) => ({
       company: sanitizeText(item?.company),
       role: sanitizeText(item?.role),
+      techStack: sanitizeText(item?.techStack),
       location: sanitizeText(item?.location),
       startDate: sanitizeText(item?.startDate),
       endDate: sanitizeText(item?.endDate),
       bullets: sanitizeBulletList(item?.bullets),
+    })),
+    certifications: (Array.isArray(payload.certifications) ? payload.certifications : []).map((item) => ({
+      title: sanitizeText(item?.title),
+      link: sanitizeText(item?.link ?? item?.detail),
     })),
     achievements: (Array.isArray(payload.achievements) ? payload.achievements : []).map((item) => ({
       title: sanitizeText(item?.title),
@@ -88,6 +94,7 @@ function buildEmptyDraft() {
     skills: [],
     projects: [],
     experience: [],
+    certifications: [],
     achievements: [],
     version: 0,
   };
@@ -115,6 +122,7 @@ router.get("/draft", async (req, res) => {
       skills: doc.skills,
       projects: doc.projects,
       experience: doc.experience,
+      certifications: doc.certifications || [],
       achievements: doc.achievements,
       version: doc.version || 1,
       updatedAt: doc.updatedAt,
@@ -201,6 +209,31 @@ router.post("/export", validateRequest(resumeExportSchema), async (req, res) => 
   } catch (error) {
     console.error("[resume] exportPdf failed", error?.message || error);
     return res.status(500).json({ error: "Failed to export resume" });
+  }
+});
+
+router.post("/export/docx", validateRequest(resumeExportSchema), async (req, res) => {
+  const startedAt = Date.now();
+  try {
+    const ownerEmail = String(req.user?.email || "").trim().toLowerCase();
+    if (!ownerEmail) return res.status(401).json({ error: "Unauthorized" });
+
+    const payload = sanitizeResumePayload(req.body.payload || {});
+    const docxBuffer = await buildDocxBufferFromResume(payload);
+
+    console.info("[resume] exportDocx", {
+      ownerEmail,
+      status: 200,
+      latencyMs: Date.now() - startedAt,
+      bytes: docxBuffer.length,
+    });
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition", 'attachment; filename="resume.docx"');
+    return res.send(docxBuffer);
+  } catch (error) {
+    console.error("[resume] exportDocx failed", error?.message || error);
+    return res.status(500).json({ error: "Failed to export resume as Word document" });
   }
 });
 

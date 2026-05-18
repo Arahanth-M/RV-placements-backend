@@ -31,13 +31,19 @@ const projectSchema = Joi.object({
 const experienceSchema = Joi.object({
   company: text(140),
   role: text(120),
+  techStack: text(180),
   location: text(120),
   startDate: text(30),
   endDate: text(30),
   bullets: Joi.array().items(bulletSchema).max(8).default([]),
 }).unknown(false);
 
-const achievementSchema = Joi.object({
+const certificationSchema = Joi.object({
+  title: text(160),
+  link: text(300),
+}).unknown(false);
+
+const titledDetailSchema = Joi.object({
   title: text(160),
   detail: text(250),
 }).unknown(false);
@@ -61,7 +67,8 @@ const resumePayloadSchema = Joi.object({
   skills: Joi.array().items(requiredText(1, 80)).max(40).default([]),
   projects: Joi.array().items(projectSchema).max(12).default([]),
   experience: Joi.array().items(experienceSchema).max(10).default([]),
-  achievements: Joi.array().items(achievementSchema).max(15).default([]),
+  certifications: Joi.array().items(certificationSchema).max(15).default([]),
+  achievements: Joi.array().items(titledDetailSchema).max(15).default([]),
 }).unknown(false);
 
 export const resumeDraftSaveSchema = Joi.object({

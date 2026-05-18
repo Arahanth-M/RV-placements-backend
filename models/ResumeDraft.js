@@ -38,6 +38,7 @@ const experienceSchema = new Schema(
   {
     company: { type: String, trim: true, maxlength: 140, default: "" },
     role: { type: String, trim: true, maxlength: 120, default: "" },
+    techStack: { type: String, trim: true, maxlength: 180, default: "" },
     location: { type: String, trim: true, maxlength: 120, default: "" },
     startDate: { type: String, trim: true, maxlength: 30, default: "" },
     endDate: { type: String, trim: true, maxlength: 30, default: "" },
@@ -46,7 +47,15 @@ const experienceSchema = new Schema(
   { _id: false }
 );
 
-const achievementSchema = new Schema(
+const certificationSchema = new Schema(
+  {
+    title: { type: String, trim: true, maxlength: 160, default: "" },
+    link: { type: String, trim: true, maxlength: 300, default: "" },
+  },
+  { _id: false }
+);
+
+const titledDetailSchema = new Schema(
   {
     title: { type: String, trim: true, maxlength: 160, default: "" },
     detail: { type: String, trim: true, maxlength: 250, default: "" },
@@ -80,7 +89,8 @@ const resumeDraftSchema = new Schema(
     skills: { type: [String], default: [] },
     projects: { type: [projectSchema], default: [] },
     experience: { type: [experienceSchema], default: [] },
-    achievements: { type: [achievementSchema], default: [] },
+    certifications: { type: [certificationSchema], default: [] },
+    achievements: { type: [titledDetailSchema], default: [] },
     version: { type: Number, default: 1 },
     expireAt: {
       type: Date,
