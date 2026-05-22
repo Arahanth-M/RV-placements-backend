@@ -3,6 +3,11 @@ import { parseJSONResponse } from "../../utils/parseJSONResponse.js";
 import { addToSet, getJSON, getSetMembers, setJSON } from "../../src/utils/redisHelpers.js";
 import { retrieveQuestion } from "../questionRetrievalService.js";
 import {
+  isInterviewQuestionExcluded,
+  mergeInterviewQuestionExclusions,
+  normalizeInterviewQuestionText,
+} from "../interviewQuestionExclusions.js";
+import {
   cloneSerializable,
   roundTypeImpliesCodeExecutionInterview,
 } from "../interviewCodeGradingGuards.js";
@@ -132,7 +137,7 @@ const buildSeenQuestionsKey = (userId) => {
   return `user:${normalizedUserId}:seen_questions`;
 };
 
-const normalizeQuestionTextKey = (value) => toSafeString(value).toLowerCase();
+const normalizeQuestionTextKey = normalizeInterviewQuestionText;
 
 const buildSeenTokenFromQuestionId = (questionId) => {
   const safe = toSafeString(questionId);
@@ -396,6 +401,18 @@ Include at least one mustHave rubric point that evaluates whether they addressed
 Do not change the subject until this gap is tested.`;
 };
 
+const formatDoNotRepeatQuestionsBlock = (excludedTexts = []) => {
+  const list = [...excludedTexts]
+    .map((item) => truncateText(String(item || ""), 200))
+    .filter(Boolean)
+    .slice(0, 15);
+  if (!list.length) return "";
+  return `
+
+Questions already asked in THIS interview (do NOT repeat or closely paraphrase):
+${list.map((q, index) => `${index + 1}. ${q}`).join("\n")}`;
+};
+
 const buildQuestionPoolPrompt = ({
   companyContext,
   roundType,
@@ -410,6 +427,7 @@ const buildQuestionPoolPrompt = ({
   condensedHistory,
   requestedCount,
   singleQuestionHrRound = false,
+  doNotRepeatQuestionTexts = [],
 }) => {
   const roundRules = buildRoundSpecificPromptRules(roundType, roundAbout, {
     singleQuestionHrRound,
@@ -451,6 +469,7 @@ Recent round history: ${JSON.stringify(condensedHistory)}
 Round-specific interviewer rules:
 ${roundRules}
 ${followUpBlock}
+${formatDoNotRepeatQuestionsBlock(doNotRepeatQuestionTexts)}
 
 Rules:
 1) Speak like a real interviewer, not like a question generator.
@@ -795,38 +814,32 @@ export const generateQuestion = async ({
   placementYear,
   mergePlacementByType,
   excludedQuestionIds = [],
+  excludedQuestionTexts = [],
   roundQuestionCount = null,
 }) => {
+  const { excludedIdSet, excludedTextSet } = mergeInterviewQuestionExclusions(
+    {
+      excludedQuestionIds: normalizeExclusions(excludedQuestionIds),
+      excludedQuestionTexts: normalizeExclusions(excludedQuestionTexts),
+    },
+    {}
+  );
+
   try {
     const poolMinSize = getPoolMinSizeForRound(roundType, roundQuestionCount);
     const singleQuestionHrRound = isSingleQuestionHrRound(roundType, roundQuestionCount);
-    // Retrieval-first path: if curated question exists, use it.
+
     const seenQuestionsKey = buildSeenQuestionsKey(userId);
     const seenQuestionMembers = DISABLE_USER_SEEN_DEDUPE
       ? []
       : await getSetMembers(seenQuestionsKey);
     const { seenIdSet, seenTextSet } = parseSeenQuestionMembers(seenQuestionMembers);
-    const retrievalExclusions = Array.from(
-      new Set([
-        ...normalizeExclusions(excludedQuestionIds),
-        ...Array.from(seenIdSet),
-      ])
-    );
 
-    const retrieved = await retrieveQuestion({
-      company: companyContext?.name || companyContext?.companyName || "",
-      roundType,
-      difficulty,
-      excludedQuestionIds: retrievalExclusions,
-    });
-    if (retrieved?.question) {
-      console.log("[generateQuestion] Retrieved curated question");
-      const retrievedToken =
-        buildSeenTokenFromQuestionId(retrieved.questionId) ||
-        buildSeenTokenFromQuestionText(retrieved.question);
-      if (retrievedToken && !DISABLE_USER_SEEN_DEDUPE) {
-        await addToSet(seenQuestionsKey, retrievedToken, USER_SEEN_TTL_SECONDS);
-      }
+    const retrievalExclusions = Array.from(new Set([...excludedIdSet, ...seenIdSet]));
+    const poolTextExclusion = new Set([...excludedTextSet, ...seenTextSet]);
+    const doNotRepeatTexts = [...excludedTextSet];
+
+    const buildPayloadFromRetrieved = (retrieved) => {
       let strat = inferEvaluationStrategyForRound(roundType, retrieved.evaluationStrategy);
       const tests = Array.isArray(retrieved.testCases) ? retrieved.testCases : [];
       const dsaMeta = retrieved.metadata?.dsaMetadata || {};
@@ -886,6 +899,38 @@ export const generateQuestion = async ({
         resolvedDsaMetadata:
           strat === "code_execution" ? cloneSerializable(dsaMeta) || {} : undefined,
       };
+    };
+
+    const recordSeenForPick = async (payload) => {
+      const retrievedToken =
+        buildSeenTokenFromQuestionId(payload?.questionId) ||
+        buildSeenTokenFromQuestionText(payload?.question);
+      if (retrievedToken && !DISABLE_USER_SEEN_DEDUPE) {
+        await addToSet(seenQuestionsKey, retrievedToken, USER_SEEN_TTL_SECONDS);
+      }
+    };
+
+    // Retrieval-first path: if curated question exists, use it.
+    const retrieved = await retrieveQuestion({
+      company: companyContext?.name || companyContext?.companyName || "",
+      roundType,
+      difficulty,
+      excludedQuestionIds: retrievalExclusions,
+    });
+    if (retrieved?.question) {
+      if (isInterviewQuestionExcluded(retrieved, excludedIdSet, excludedTextSet)) {
+        console.log(
+          "[generateQuestion] Skipping bank row — already used in this session (text or id)"
+        );
+      } else {
+        console.log("[generateQuestion] Retrieved curated question");
+        const bankPayload = buildPayloadFromRetrieved(retrieved);
+        if (bankPayload.generationError) {
+          return bankPayload;
+        }
+        await recordSeenForPick(bankPayload);
+        return bankPayload;
+      }
     }
 
     if (inferEvaluationStrategyForRound(roundType, "") === "code_execution") {
@@ -943,7 +988,6 @@ export const generateQuestion = async ({
       mergePlacementByType,
     });
     let questionPool = normalizeQuestionPool(await getJSON(cacheKey));
-    const seenLookup = seenTextSet;
     if (questionPool.length > 0) {
       console.log("[generateQuestion] Cache hit: using Redis pool");
     } else {
@@ -951,10 +995,21 @@ export const generateQuestion = async ({
     }
     console.log(`[generateQuestion] Pool size after fetch: ${questionPool.length}`);
     console.log(
-      `[generateQuestion] Seen questions count: ${seenLookup.size} (dedupeEnabled=${!DISABLE_USER_SEEN_DEDUPE})`
+      `[generateQuestion] Session+redis text exclusions: ${poolTextExclusion.size} (dedupeEnabled=${!DISABLE_USER_SEEN_DEDUPE})`
     );
 
-    const refillQuestionPool = async (currentPool, requestedCount = poolMinSize) => {
+    const filterPoolByExclusions = (pool) =>
+      (Array.isArray(pool) ? pool : []).filter((item) => {
+        const text = normalizeQuestionTextKey(item?.question);
+        if (!text) return false;
+        return !poolTextExclusion.has(text);
+      });
+
+    const refillQuestionPool = async (
+      currentPool,
+      requestedCount = poolMinSize,
+      repeatTextsForPrompt = doNotRepeatTexts
+    ) => {
       try {
         const llmRequestCount = singleQuestionHrRound && !hasPreviousAnswer ? 1 : requestedCount;
         console.log(
@@ -975,6 +1030,7 @@ export const generateQuestion = async ({
           condensedHistory,
           requestedCount: llmRequestCount,
           singleQuestionHrRound,
+          doNotRepeatQuestionTexts: repeatTextsForPrompt,
         });
         const llmText = await callLLM(messages);
         const parsed = parseJSONResponse(llmText);
@@ -1013,26 +1069,33 @@ export const generateQuestion = async ({
       questionPool = await refillQuestionPool(questionPool, requestedCount);
     }
 
-    let availableQuestions = questionPool.filter(
-      (item) => !seenLookup.has(item.question.toLowerCase())
-    );
+    let availableQuestions = filterPoolByExclusions(questionPool);
     console.log(
       `[generateQuestion] Available unseen questions: ${availableQuestions.length}`
     );
 
     if (availableQuestions.length === 0) {
       console.log("[generateQuestion] No unseen questions left, refilling pool...");
-      questionPool = await refillQuestionPool(questionPool, poolMinSize);
-      availableQuestions = questionPool.filter(
-        (item) => !seenLookup.has(item.question.toLowerCase())
-      );
+      questionPool = await refillQuestionPool(questionPool, poolMinSize, doNotRepeatTexts);
+      availableQuestions = filterPoolByExclusions(questionPool);
       console.log(
         `[generateQuestion] Available unseen questions after refill: ${availableQuestions.length}`
       );
     }
 
-    const picked = getRandomItem(availableQuestions);
-    const selectedQuestion =
+    let picked = getRandomItem(availableQuestions);
+
+    if (
+      picked &&
+      isInterviewQuestionExcluded(picked, excludedIdSet, excludedTextSet)
+    ) {
+      console.warn("[generateQuestion] Picked duplicate from pool — refilling once");
+      questionPool = await refillQuestionPool(questionPool, poolMinSize, doNotRepeatTexts);
+      availableQuestions = filterPoolByExclusions(questionPool);
+      picked = getRandomItem(availableQuestions);
+    }
+
+    let selectedQuestion =
       picked && picked.question
         ? {
             question: picked.question,
@@ -1054,6 +1117,30 @@ export const generateQuestion = async ({
             roundAbout,
             difficulty,
           });
+
+    if (
+      isInterviewQuestionExcluded(
+        { question: selectedQuestion.question, questionId: picked?.questionId },
+        excludedIdSet,
+        excludedTextSet
+      )
+    ) {
+      console.error("[generateQuestion] Could not produce a new question for this session");
+      return {
+        generationError: {
+          code: "QUESTION_POOL_EXHAUSTED",
+          message:
+            "No new interview questions are available for this round right now. Try a different plan or add more questions to the bank.",
+        },
+        question: "",
+        questionUrl: "",
+        expectedAnswerMode: inferAnswerModeFromRoundType(roundType),
+        expectedPoints: [],
+        questionId: "",
+        evaluationStrategy: inferEvaluationStrategyForRound(roundType, ""),
+        supportedCodingLanguages: [],
+      };
+    }
 
     if (picked && picked.question) {
       console.log("[generateQuestion] Recording selected question in seen set");
@@ -1126,11 +1213,34 @@ export const generateQuestion = async ({
         supportedCodingLanguages: [],
       };
     }
-    return buildBasicFallbackQuestion({
+    const fallback = buildBasicFallbackQuestion({
       roundType,
       roundAbout,
       difficulty,
     });
+    if (
+      isInterviewQuestionExcluded(
+        { question: fallback.question, questionId: "" },
+        excludedIdSet,
+        excludedTextSet
+      )
+    ) {
+      return {
+        generationError: {
+          code: "QUESTION_POOL_EXHAUSTED",
+          message:
+            "No new interview questions are available for this round right now. Try a different plan or add more questions to the bank.",
+        },
+        question: "",
+        questionUrl: "",
+        expectedAnswerMode: inferAnswerModeFromRoundType(roundType),
+        expectedPoints: [],
+        questionId: "",
+        evaluationStrategy: inferEvaluationStrategyForRound(roundType, ""),
+        supportedCodingLanguages: [],
+      };
+    }
+    return fallback;
   }
 };
 

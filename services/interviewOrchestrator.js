@@ -31,12 +31,19 @@ export async function handleEvaluationResult(session, evaluationResult) {
 
   // 3) Compute progression flags with safe index checks.
   const roundTypeLabel = String(currentRound?.type || "").trim();
-  const isDsaRound = roundTypeLabel.toUpperCase() === "DSA";
+  const roundTypeUpper = roundTypeLabel.toUpperCase();
+  const isDsaRound = roundTypeUpper === "DSA";
+  const isHrRound = roundTypeUpper === "HR";
   const rawPlanned = Math.max(
     1,
     Number(currentRound?.questionCount) || questions.length || 1
   );
-  const plannedQuestionCount = isDsaRound ? Math.min(3, rawPlanned) : rawPlanned;
+  let plannedQuestionCount = rawPlanned;
+  if (isDsaRound) {
+    plannedQuestionCount = Math.min(3, rawPlanned);
+  } else if (isHrRound) {
+    plannedQuestionCount = 1;
+  }
   const hasNextQuestion = currentQuestionIndex < plannedQuestionCount - 1;
   const isLastRound = currentRoundIndex >= rounds.length - 1;
 

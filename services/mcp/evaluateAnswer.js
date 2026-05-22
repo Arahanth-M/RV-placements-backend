@@ -59,6 +59,7 @@ export const evaluateAnswer = async ({ evaluationStrategy, ...payload }) => {
       return evaluateRubricLLM({
         ...payload,
         suppressLlm: Boolean(payload?.suppressLlm),
+        questionSource: payload?.questionSource ?? payload?.metadata?.questionSource ?? "",
       });
   }
 };

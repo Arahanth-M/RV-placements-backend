@@ -36,6 +36,7 @@ import {
   collectTopicsForCompletedCodingRound,
 } from "../services/interviewSessionService.js";
 import {
+  clampQuestionCountForRound,
   generateInterviewPlanFromCustomRounds,
 } from "../services/interviewEngine.js";
 import { interviewQueue } from "../services/queues/interviewQueue.js";
@@ -557,6 +558,11 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
     });
   } catch (error) {
     console.error("❌ Error starting interview:", error.message);
+    if (error?.name === "ValidationError") {
+      return res.status(400).json({
+        error: error.message || "Invalid interview session data.",
+      });
+    }
     return res.status(500).json({ error: "Failed to start interview" });
   }
 });
@@ -1227,30 +1233,20 @@ router.get("/interview-status/:sessionId", async (req, res) => {
 
     const roundsQuestionSummary = rounds.map((r, idx) => {
       const roundNumber = typeof r.roundNumber === "number" ? r.roundNumber : idx + 1;
-      let questionCount =
-        typeof r.questionCount === "number" && Number.isFinite(r.questionCount)
-          ? Math.round(r.questionCount)
-          : null;
       const slots = Array.isArray(r.questions) ? r.questions.length : 0;
-      if (questionCount == null || questionCount < 1) {
-        questionCount = Math.max(slots, 3);
-      }
-      questionCount = Math.min(5, Math.max(3, questionCount));
-      if (isDsaInterviewRoundType(r.type)) {
-        questionCount = Math.min(3, questionCount);
-      }
+      const questionCount = clampQuestionCountForRound(r.type, r.questionCount, slots);
       return { roundNumber, questionCount };
     });
 
-    const questionsPlannedThisRoundRaw =
-      typeof currentRoundDoc?.questionCount === "number" &&
-      Number.isFinite(currentRoundDoc.questionCount)
-        ? Math.min(5, Math.max(3, Math.round(currentRoundDoc.questionCount)))
-        : roundsQuestionSummary[currentRoundIndex]?.questionCount ??
-          Math.max(Array.isArray(currentRoundDoc?.questions) ? currentRoundDoc.questions.length : 0, 3);
-    const questionsPlannedThisRound = isDsaInterviewRoundType(currentRoundDoc?.type)
-      ? Math.min(3, questionsPlannedThisRoundRaw)
-      : questionsPlannedThisRoundRaw;
+    const currentRoundSlots = Array.isArray(currentRoundDoc?.questions)
+      ? currentRoundDoc.questions.length
+      : 0;
+    const questionsPlannedThisRound = clampQuestionCountForRound(
+      currentRoundDoc?.type,
+      currentRoundDoc?.questionCount ??
+        roundsQuestionSummary[currentRoundIndex]?.questionCount,
+      currentRoundSlots
+    );
 
     const currentQuestionNumberWithinRound = currentQuestionIndex + 1;
 

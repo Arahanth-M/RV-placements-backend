@@ -55,7 +55,9 @@ const { normalizeExpectedPoints, getAdaptiveFollowUp } = await import(
   "../../services/mcp/generateQuestion.js"
 );
 const { resolveRoundAbout } = await import("../../config/interviewRoundFocus.js");
-const { inferQuestionCount } = await import("../../services/interviewEngine.js");
+const { inferQuestionCount, clampQuestionCountForRound } = await import(
+  "../../services/interviewEngine.js"
+);
 const { evaluateAnswer } = await import("../../services/mcp/evaluateAnswer.js");
 
 describe("AI interview scoring helpers", () => {
@@ -230,5 +232,12 @@ describe("AI interview scoring helpers", () => {
   it("HR rounds plan for a single question to limit token usage", () => {
     expect(inferQuestionCount("HR")).toBe(1);
     expect(inferQuestionCount("DSA")).toBe(3);
+  });
+
+  it("clampQuestionCountForRound keeps HR at one question", () => {
+    expect(clampQuestionCountForRound("HR", 3, 0)).toBe(1);
+    expect(clampQuestionCountForRound("HR", null, 0)).toBe(1);
+    expect(clampQuestionCountForRound("SQL", 99, 0)).toBe(4);
+    expect(clampQuestionCountForRound("DSA", 5, 0)).toBe(3);
   });
 });

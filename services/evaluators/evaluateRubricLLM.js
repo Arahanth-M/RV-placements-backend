@@ -2,8 +2,18 @@ import { getEmbedding, cosineSimilarity } from "../../utils/embedding.js";
 import { callLLM } from "../llmClient.js";
 import { parseJSONResponse } from "../../utils/parseJSONResponse.js";
 import { logInterviewDsaLlmDebug } from "../interviewDebugLog.js";
+import {
+  applyLlmGeneratedDeterministicOverrides,
+  applyLlmGeneratedVerdictAndFactualityCaps,
+  clampLlmSubscoresForGenerated,
+  deriveStrictVerdictForGenerated,
+  isLlmGeneratedQuestionSource,
+  LLM_GENERATED_EMPTY_MUST_HAVE_COVERAGE,
+} from "./llmGeneratedQuestionScoring.js";
 
 const TOOL_EVAL_MODEL = process.env.GROQ_TOOL_MODEL || "llama-3.1-8b-instant";
+const LLM_GENERATED_GRADING_MODEL =
+  process.env.GROQ_GENERATED_GRADING_MODEL || process.env.GROQ_TOOL_MODEL || "llama-3.1-8b-instant";
 const SCORING_VERSION = "v3-rubric-strict";
 const RUBRIC_MATCH_THRESHOLD = 0.72;
 const RUBRIC_PARTIAL_THRESHOLD = 0.55;
@@ -156,8 +166,9 @@ const clarityScore = (text) => {
   return 0.45;
 };
 
-const buildRubricBuckets = (rubricPoints) => {
+const buildRubricBuckets = (rubricPoints, { mustHaveCoverageWhenEmpty = 1 } = {}) => {
   const points = Array.isArray(rubricPoints) ? rubricPoints : [];
+  const emptyMustHaveDefault = clamp01(mustHaveCoverageWhenEmpty);
   const matchedRubricPoints = [];
   const missingRubricPoints = [];
   const criticalMisses = [];
@@ -208,7 +219,7 @@ const buildRubricBuckets = (rubricPoints) => {
     mustHaveCoverage:
       mustHavePoints.length > 0
         ? matchedMustHavePoints.length / mustHavePoints.length
-        : 1,
+        : emptyMustHaveDefault,
     categoryScores: averagedCategories,
   };
 };
@@ -471,11 +482,13 @@ const buildLLMGradingPrompt = ({
   llmReasoning,
   rubricPoints,
   baseSubscores,
+  strictGenerated = false,
 }) => [
   {
     role: "system",
-    content:
-      "You are a strict but fair interview grader. Return strict JSON only. Judge the answer against the rubric. Be precise and concise—no filler, praise, or generic coaching. Do not invent rubric points or give credit without evidence in the answer.",
+    content: strictGenerated
+      ? "You are a strict technical interview grader for LLM-authored questions. Factual correctness matters more than fluency or confidence. Return strict JSON only. If the answer is factually wrong, incomplete, or mostly off-target, verdict MUST be incorrect and subscores must be <= 0.3. Do not award rubric credit without clear evidence in the answer text. No praise or filler."
+      : "You are a strict but fair interview grader. Return strict JSON only. Judge the answer against the rubric. Be precise and concise—no filler, praise, or generic coaching. Do not invent rubric points or give credit without evidence in the answer.",
   },
   {
     role: "user",
@@ -483,11 +496,24 @@ const buildLLMGradingPrompt = ({
 Candidate Answer: ${trimForPrompt(answer, MAX_PROMPT_ANSWER_CHARS)}
 Question Type: ${type}
 Company Context: ${JSON.stringify(compactCompanyContextForPrompt(companyContext))}
-Reference Reasoning: ${trimForPrompt(llmReasoning, MAX_PROMPT_REASONING_CHARS)}
+${
+  strictGenerated
+    ? "Reference Reasoning: (not used — judge only the candidate answer and rubric; do not assume facts not stated in the answer.)"
+    : `Reference Reasoning: ${trimForPrompt(llmReasoning, MAX_PROMPT_REASONING_CHARS)}`
+}
 Rubric Points: ${JSON.stringify(
       sanitizeRubricForPrompt(rubricPoints)
     )}
 Current Deterministic Subscores: ${JSON.stringify(baseSubscores)}
+${
+  strictGenerated
+    ? `
+Strict rules for this generated question:
+- Topical similarity or buzzwords alone are NOT sufficient for "correct" or high subscores.
+- matchedRubricPoints must only list rubric items clearly supported by the answer.
+- If the answer contradicts the question or core rubric, verdict must be incorrect.`
+    : ""
+}
 
 Return STRICT JSON:
 {
@@ -505,6 +531,43 @@ Return STRICT JSON:
 }`,
   },
 ];
+
+const assessGeneratedQuestionFactuality = async ({ question, answer, type }) => {
+  try {
+    const parsed = parseJSONResponse(
+      await callLLM(
+        [
+          {
+            role: "system",
+            content:
+              "You judge factual correctness only. Return strict JSON. Be strict: vague or wrong answers are not factually correct.",
+          },
+          {
+            role: "user",
+            content: `Question (${type}): ${trimForPrompt(question, MAX_PROMPT_QUESTION_CHARS)}
+Candidate answer: ${trimForPrompt(answer, MAX_PROMPT_ANSWER_CHARS)}
+
+Is this answer factually correct and materially responsive to the question?
+- "factuallyCorrect": true only if core claims are correct for the question.
+- topical fluff with errors => false
+- empty or evasive => false
+
+Return JSON: { "factuallyCorrect": true|false, "confidence": 0.0, "reason": "one short sentence" }`,
+          },
+        ],
+        { model: LLM_GENERATED_GRADING_MODEL }
+      )
+    );
+    const factuallyCorrect = parsed?.factuallyCorrect === true;
+    return {
+      factuallyCorrect,
+      confidence: clamp01(parsed?.confidence ?? 0.6),
+      reason: toSafeString(parsed?.reason),
+    };
+  } catch {
+    return { factuallyCorrect: null, confidence: 0, reason: "" };
+  }
+};
 
 const shouldUseLLMGrader = ({
   rubricPointCount,
@@ -537,9 +600,12 @@ export const evaluateRubricLLM = async ({
   expectedPoints = [],
   /** When true (e.g. DSA / coding rounds), skip all callLLM grading; deterministic + embeddings only. */
   suppressLlm = false,
+  /** "generated" | "retrieved" — strict scoring applies only to generated. */
+  questionSource = "",
 }) => {
   const safeAnswer = toSafeString(answer);
   const safeQuestion = toSafeString(question);
+  const isLlmGenerated = isLlmGeneratedQuestionSource(questionSource);
   const rubricPoints = Array.isArray(expectedPoints) ? expectedPoints : [];
   const type = detectQuestionType(safeQuestion, rubricPoints);
   const expectedAnswerMode =
@@ -617,11 +683,30 @@ export const evaluateRubricLLM = async ({
         : 0,
   }));
 
-  const rubricSummary = buildRubricBuckets(rubricWithSimilarity);
+  const rubricSummary = buildRubricBuckets(rubricWithSimilarity, {
+    mustHaveCoverageWhenEmpty: isLlmGenerated
+      ? LLM_GENERATED_EMPTY_MUST_HAVE_COVERAGE
+      : 1,
+  });
   const clarity = clarityScore(safeAnswer);
   const structure = detectStructure(safeAnswer);
   const wordCount = tokenize(safeAnswer).length;
-  const relevance = clamp01(0.55 * questionRelevance + 0.45 * rubricSummary.coverage);
+  const relevance = isLlmGenerated
+    ? clamp01(0.35 * questionRelevance + 0.35 * rubricSummary.coverage)
+    : clamp01(0.55 * questionRelevance + 0.45 * rubricSummary.coverage);
+
+  let factuality = { factuallyCorrect: null, confidence: 0, reason: "" };
+  if (isLlmGenerated && !suppressLlm && safeAnswer) {
+    factuality = await assessGeneratedQuestionFactuality({
+      question: safeQuestion,
+      answer: safeAnswer,
+      type,
+    });
+    logInterviewDsaLlmDebug("rubric_eval_generated_factuality", {
+      factuallyCorrect: factuality.factuallyCorrect,
+      confidence: factuality.confidence,
+    });
+  }
   const baseSubscores = buildBaseSubscores({
     type,
     answer: safeAnswer,
@@ -645,17 +730,20 @@ export const evaluateRubricLLM = async ({
 
   const useLLMGrader =
     !suppressLlm &&
-    shouldUseLLMGrader({
-      rubricPointCount: rubricPoints.length,
-      wordCount,
-      relevance,
-      mustHaveCoverage: rubricSummary.mustHaveCoverage,
-      deterministicScore,
-    });
+    (isLlmGenerated && rubricPoints.length > 0
+      ? true
+      : shouldUseLLMGrader({
+          rubricPointCount: rubricPoints.length,
+          wordCount,
+          relevance,
+          mustHaveCoverage: rubricSummary.mustHaveCoverage,
+          deterministicScore,
+        }));
 
   logInterviewDsaLlmDebug("rubric_eval_llm_gate", {
     suppressLlm,
     useLLMGrader,
+    isLlmGenerated,
     detectedQuestionType: type,
     rubricPointCount: rubricPoints.length,
     wordCount,
@@ -663,15 +751,19 @@ export const evaluateRubricLLM = async ({
   });
 
   if (useLLMGrader) {
-    const cacheKey = makeLLMCacheKey({
-      question: safeQuestion,
-      answer: safeAnswer,
-      type,
-      rubricPoints,
-    });
+    const cacheKey = [
+      makeLLMCacheKey({
+        question: safeQuestion,
+        answer: safeAnswer,
+        type,
+        rubricPoints,
+      }),
+      isLlmGenerated ? "gen-strict-v1" : "bank",
+    ].join("::");
     const cached = LLM_CACHE_ENABLED ? llmGradeCache.get(cacheKey) : null;
 
     try {
+      const gradingModel = isLlmGenerated ? LLM_GENERATED_GRADING_MODEL : TOOL_EVAL_MODEL;
       const parsedEval = cached
         ? cached
         : parseJSONResponse(
@@ -681,11 +773,12 @@ export const evaluateRubricLLM = async ({
                 answer: safeAnswer,
                 type,
                 companyContext,
-                llmReasoning,
+                llmReasoning: isLlmGenerated ? "" : llmReasoning,
                 rubricPoints,
                 baseSubscores,
+                strictGenerated: isLlmGenerated,
               }),
-              { model: TOOL_EVAL_MODEL }
+              { model: gradingModel }
             )
           );
 
@@ -708,7 +801,7 @@ export const evaluateRubricLLM = async ({
       llmMissing = Array.isArray(parsedEval?.missingRubricPoints)
         ? parsedEval.missingRubricPoints.map((item) => toSafeString(item)).filter(Boolean)
         : [];
-      llmSubscores =
+      const rawLlmSubscores =
         parsedEval?.subscores && typeof parsedEval.subscores === "object"
           ? Object.fromEntries(
               Object.entries(parsedEval.subscores)
@@ -716,22 +809,40 @@ export const evaluateRubricLLM = async ({
                 .filter(([, value]) => Number.isFinite(value))
             )
           : {};
+      llmSubscores = isLlmGenerated
+        ? clampLlmSubscoresForGenerated(rawLlmSubscores)
+        : rawLlmSubscores;
+
+      if (isLlmGenerated && factuality.factuallyCorrect === false) {
+        llmVerdict = "incorrect";
+        llmSubscores = clampLlmSubscoresForGenerated(llmSubscores);
+      }
     } catch (error) {
       // Deterministic path remains the primary fallback.
     }
   }
 
+  if (isLlmGenerated && factuality.factuallyCorrect === false && !useLLMGrader) {
+    llmVerdict = "incorrect";
+  }
+
   const mergedSubscores = { ...baseSubscores };
+  const llmBlendWeight = isLlmGenerated ? 0.15 : 0.35;
+  const detBlendWeight = 1 - llmBlendWeight;
   for (const [key, value] of Object.entries(llmSubscores)) {
     if (key in mergedSubscores) {
-      mergedSubscores[key] = clamp01(0.65 * mergedSubscores[key] + 0.35 * value);
+      mergedSubscores[key] = clamp01(
+        detBlendWeight * mergedSubscores[key] + llmBlendWeight * value
+      );
     }
   }
 
   let normalizedScore = combineWeightedScore(weights, mergedSubscores);
 
-  if (llmVerdict === "correct") normalizedScore += 0.03;
-  if (llmVerdict === "incorrect") normalizedScore -= 0.16;
+  if (!isLlmGenerated) {
+    if (llmVerdict === "correct") normalizedScore += 0.03;
+    if (llmVerdict === "incorrect") normalizedScore -= 0.16;
+  }
   if (wordCount <= 4) normalizedScore = Math.min(normalizedScore, 0.18);
   if (rubricSummary.mustHaveCoverage < 0.67) normalizedScore *= 0.74;
   if (rubricSummary.mustHaveCoverage < 0.5) normalizedScore *= 0.58;
@@ -746,22 +857,52 @@ export const evaluateRubricLLM = async ({
   }
 
   normalizedScore = clamp01(normalizedScore);
-  llmVerdict = deriveStrictVerdict({
-    llmVerdict,
-    relevance,
-    mustHaveCoverage: rubricSummary.mustHaveCoverage,
-    criticalMisses: rubricSummary.criticalMisses,
-    normalizedScore,
-    wordCount,
-  });
-  const finalScore = Math.max(1, Math.min(10, Math.round(normalizedScore * 10)));
 
-  const matchedRubricPoints = Array.from(
-    new Set([...rubricSummary.matchedRubricPoints, ...llmMatched])
-  );
-  const missingRubricPoints = Array.from(
-    new Set([...rubricSummary.missingRubricPoints, ...llmMissing])
-  );
+  if (isLlmGenerated) {
+    normalizedScore = applyLlmGeneratedDeterministicOverrides(
+      rubricSummary,
+      relevance,
+      normalizedScore
+    );
+    llmVerdict = deriveStrictVerdictForGenerated({
+      llmVerdict,
+      relevance,
+      mustHaveCoverage: rubricSummary.mustHaveCoverage,
+      criticalMisses: rubricSummary.criticalMisses,
+      normalizedScore,
+      wordCount,
+      factuallyCorrect: factuality.factuallyCorrect,
+    });
+  } else {
+    llmVerdict = deriveStrictVerdict({
+      llmVerdict,
+      relevance,
+      mustHaveCoverage: rubricSummary.mustHaveCoverage,
+      criticalMisses: rubricSummary.criticalMisses,
+      normalizedScore,
+      wordCount,
+    });
+  }
+
+  let finalScore = Math.max(1, Math.min(10, Math.round(normalizedScore * 10)));
+
+  if (isLlmGenerated) {
+    const capped = applyLlmGeneratedVerdictAndFactualityCaps(
+      llmVerdict,
+      normalizedScore,
+      factuality
+    );
+    llmVerdict = capped.verdict;
+    normalizedScore = capped.normalizedScore;
+    finalScore = capped.finalScore;
+  }
+
+  const matchedRubricPoints = isLlmGenerated
+    ? [...rubricSummary.matchedRubricPoints]
+    : Array.from(new Set([...rubricSummary.matchedRubricPoints, ...llmMatched]));
+  const missingRubricPoints = isLlmGenerated
+    ? [...rubricSummary.missingRubricPoints]
+    : Array.from(new Set([...rubricSummary.missingRubricPoints, ...llmMissing]));
   const confidence = clamp01(
     0.5 * llmConfidence +
       0.2 * (rubricPoints.length > 0 ? 1 : 0.4) +
@@ -803,6 +944,13 @@ export const evaluateRubricLLM = async ({
       missingRubricPoints,
       criticalMisses: rubricSummary.criticalMisses,
       subscores: mergedSubscores,
+      ...(isLlmGenerated
+        ? {
+            llmGeneratedStrictScoring: true,
+            factualityCheck: factuality.factuallyCorrect,
+            factualityReason: factuality.reason || undefined,
+          }
+        : {}),
     },
   };
 };

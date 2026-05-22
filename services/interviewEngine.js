@@ -58,6 +58,23 @@ export const inferQuestionCount = (roundType) => {
   return 3;
 };
 
+/** Clamp stored/planned question count for a round type (HR min 1, SQL max 4, etc.). */
+export const clampQuestionCountForRound = (roundType, questionCount, slots = 0) => {
+  const planned = inferQuestionCount(roundType || "");
+  let count =
+    typeof questionCount === "number" && Number.isFinite(questionCount)
+      ? Math.round(questionCount)
+      : null;
+  if (count == null || count < 1) {
+    count = Math.max(slots, planned);
+  }
+  count = Math.min(planned, Math.max(1, count));
+  if (roundType === "DSA") {
+    count = Math.min(3, count);
+  }
+  return count;
+};
+
 const normalizeCustomRoundType = (value) => {
   const safe = toSafeString(value);
   return INTERVIEW_ALLOWED_ROUND_TYPES.includes(safe) ? safe : "DSA";

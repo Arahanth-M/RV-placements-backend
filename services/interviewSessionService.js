@@ -11,6 +11,7 @@ import {
 } from "./companyService.js";
 import { getCompanyContext } from "./mcp/getCompanyContext.js";
 import { generateQuestion, normalizeExpectedPoints } from "./mcp/generateQuestion.js";
+import { collectSessionQuestionExclusions } from "./interviewQuestionExclusions.js";
 import { generateRoundFeedback as generateRoundFeedbackMCP } from "./mcp/generateRoundFeedback.js";
 import { generateRoundFeedbackLLM } from "./mcp/generateRoundFeedbackLLM.js";
 import { roundTypeImpliesCodeExecutionInterview } from "./interviewCodeGradingGuards.js";
@@ -342,6 +343,7 @@ export const startRound = async (sessionId) => {
   // 3) Call MCP generateQuestion with companyContext + round context
   const companyData = (await resolveInterviewMergedCompanyForSession(session)) ?? null;
   const companyContext = await getCompanyContext(companyData || {});
+  const sessionExclusions = collectSessionQuestionExclusions(session);
   const gen = await generateQuestion({
     userId: String(session.userId || ""),
     companyContext,
@@ -358,6 +360,8 @@ export const startRound = async (sessionId) => {
     placementCluster: session.placementCluster,
     placementYear: session.placementYear,
     mergePlacementByType: session.mergePlacementByType === true,
+    excludedQuestionIds: sessionExclusions.excludedQuestionIds,
+    excludedQuestionTexts: sessionExclusions.excludedQuestionTexts,
   });
 
   if (gen?.generationError) {

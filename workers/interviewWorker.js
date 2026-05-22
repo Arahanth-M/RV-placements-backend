@@ -21,6 +21,7 @@ import {
   generateRoundFeedback as generateRoundFeedbackForRound,
   resolveInterviewMergedCompanyForSession,
 } from "../services/interviewSessionService.js";
+import { collectSessionQuestionExclusions } from "../services/interviewQuestionExclusions.js";
 import { generateFinalReport } from "../services/interviewEngine.js";
 import { callLLM } from "../services/llmClient.js";
 import { getCompanyContext } from "../services/mcp/getCompanyContext.js";
@@ -53,6 +54,9 @@ const toClientStatus = (state) =>
   state === INTERVIEW_STATES.INTERVIEW_COMPLETE ? "completed" : "in_progress";
 const toClientInterviewStatus = (state) =>
   state === INTERVIEW_STATES.INTERVIEW_COMPLETE ? "COMPLETED" : "IN_PROGRESS";
+
+const toSafeString = (value) =>
+  typeof value === "string" && value.trim() ? value.trim() : "";
 
 /** Reserved for tests / future wiring. */
 export const interviewWorkerDeps = {
@@ -170,8 +174,13 @@ async function processEvaluateAnswerJob(sessionId, answer, options = {}) {
     willCallPreEvalReasoningLlm: !suppressInterviewLlm,
     currentQuestionIndex,
   });
+  const questionSource =
+    toSafeString(questionSlot?.sourceType) ||
+    (toSafeString(questionSlot?.questionId) ? "retrieved" : "generated");
+  const isLlmGeneratedQuestion = questionSource === "generated";
+
   let llmReasoning = "";
-  if (!suppressInterviewLlm) {
+  if (!suppressInterviewLlm && !isLlmGeneratedQuestion) {
     const reasoningMessages = [
       {
         role: "system",
@@ -320,6 +329,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       suppressLlm: suppressInterviewLlm,
       expectedPoints: questionObj?.expectedPoints,
       evaluationStrategy: effectiveEvaluationStrategy,
+      questionSource,
       language: codingLanguage,
       testCases: executionTestCases,
       functionSignature,
@@ -328,6 +338,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
         functionSignature,
         sqlMetadata,
         questionId: questionIdHint || questionMetadataDoc?.questionId || "",
+        questionSource,
       },
     });
     logInterviewDsaLlmDebug("submit_answer_evaluated", {
@@ -424,14 +435,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       .concat(Number.isFinite(Number(evaluation.score)) ? [Number(evaluation.score)] : [])
       .slice(-2);
 
-    const excludedQuestionIds = [
-      ...new Set(
-        (Array.isArray(currentRound.questions) ? currentRound.questions : [])
-          .slice(0, currentQuestionIndex + 1)
-          .map((slot) => String(slot?.questionId || "").trim())
-          .filter(Boolean)
-      ),
-    ];
+    const sessionExclusions = collectSessionQuestionExclusions(session);
 
     const gen = await generateQuestion({
       userId: String(session.userId || ""),
@@ -455,7 +459,8 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       placementCluster: session.placementCluster,
       placementYear: session.placementYear,
       mergePlacementByType: session.mergePlacementByType === true,
-      excludedQuestionIds,
+      excludedQuestionIds: sessionExclusions.excludedQuestionIds,
+      excludedQuestionTexts: sessionExclusions.excludedQuestionTexts,
     });
 
     if (gen.generationError) {
@@ -523,6 +528,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
     currentRound.questions[currentQuestionIndex] = {
       question: currentQuestion,
       questionId: currentQuestionEntry?.questionId,
+      sourceType: currentQuestionEntry?.questionId ? "retrieved" : "generated",
       evaluationStrategy: currentQuestionEntry?.evaluationStrategy,
       supportedCodingLanguages: Array.isArray(currentQuestionEntry?.supportedCodingLanguages)
         ? currentQuestionEntry.supportedCodingLanguages
