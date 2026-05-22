@@ -18,7 +18,7 @@ const DETAIL_CLUSTER_SLUGS = ["_", "cs", "ec", "me", "chem"];
  * Bump when cached GET /companies/:id payload shape changes so stale Redis rows are not reused.
  * @see placementDetailHeadlineType, placementContext merge selection, date_of_visit coalesce, placementCluster
  */
-export const COMPANY_DETAIL_CACHE_SCHEMA = "v15";
+export const COMPANY_DETAIL_CACHE_SCHEMA = "v17";
 
 /**
  * @param {unknown} raw — req.query.placementContext or equivalent

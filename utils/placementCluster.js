@@ -1,3 +1,13 @@
+/** Hub keys used for `?cluster=` filters and per-cluster placement settings. */
+export const PLACEMENT_HUB_CLUSTER_KEYS = Object.freeze(["cs", "ec", "me", "chem"]);
+
+export const PLACEMENT_HUB_CLUSTER_LABELS = Object.freeze({
+  cs: "Computer Science & Engineering",
+  ec: "Electronics & Communication",
+  me: "Mechanical Engineering",
+  chem: "Chemical Sciences (CH / Civil / BT)",
+});
+
  /**
  * Placement hub cluster: query params and visit `company_visits.cluster` routing.
  *
@@ -32,6 +42,19 @@ export function normalizePlacementClusterQuery(raw) {
  * @param {unknown} raw — visit.cluster on company_visits
  * @returns {string}
  */
+/** Map SPC / PPO student branch code → placement hub key (cs | ec | me | chem). */
+export function placementHubClusterFromPpoBranchCode(branchCodeRaw) {
+  const bc = String(branchCodeRaw ?? "")
+    .trim()
+    .toLowerCase();
+  if (!bc) return null;
+  if (["cd", "cy", "ise", "cse", "aiml"].includes(bc)) return "cs";
+  if (["ece", "ete", "eie", "eee"].includes(bc)) return "ec";
+  if (["ase", "iem", "me"].includes(bc)) return "me";
+  if (["bt", "ch", "civil"].includes(bc)) return "chem";
+  return null;
+}
+
 export function clusterKeyFromPlacementVisitClusterField(raw) {
   const v = String(raw ?? "").trim().toLowerCase();
   if (!v) return "cs";

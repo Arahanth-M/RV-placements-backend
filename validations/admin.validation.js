@@ -1,6 +1,29 @@
 import Joi from "joi";
 import { COMPANY_VISIT_CLUSTER_CANONICAL } from "../utils/companyVisitClusterCanonical.js";
+import { PLACEMENT_HUB_CLUSTER_KEYS } from "../utils/placementCluster.js";
+import { PLACEMENT_OPEN_DREAM_SETTING_YEARS } from "../utils/placementYears.js";
 import { PPO_BRANCH_CODES_ARRAY } from "../utils/ppoBranchCodes.js";
+
+const openDreamMinLpaField = Joi.number().min(0).max(200);
+
+const openDreamClusterMapSchema = Joi.object(
+  Object.fromEntries(
+    PLACEMENT_HUB_CLUSTER_KEYS.map((key) => [key, openDreamMinLpaField.optional()])
+  )
+).min(1);
+
+export const adminPlacementHubSettingsSchema = Joi.object({
+  openDreamMinLpaByYear: Joi.object(
+    Object.fromEntries(
+      PLACEMENT_OPEN_DREAM_SETTING_YEARS.map((year) => [
+        String(year),
+        openDreamClusterMapSchema.optional(),
+      ])
+    )
+  )
+    .min(1)
+    .required(),
+}).required();
 
 const textBlock = Joi.string().max(50000);
 

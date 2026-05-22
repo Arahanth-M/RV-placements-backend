@@ -7,6 +7,7 @@ import mongoose from "mongoose";
 import CompanyStatic from "../models/CompanyStatic.js";
 import CompanyVisit from "../models/CompanyVisit.js";
 import { attachPlacementCategoryToCompany } from "../utils/ctcCategory.js";
+import { loadPlacementHubSettingsCache } from "./placementHubSettingsService.js";
 import {
   buildCategoryPreviewResponse,
   companyHasAnyYearSummerInternshipListingFromVisits,
@@ -32,10 +33,21 @@ import {
 import {
   clusterKeyFromPlacementVisitClusterField,
   normalizePlacementClusterQuery,
+  placementHubClusterFromPpoBranchCode,
 } from "../utils/placementCluster.js";
 import { PPO_BRANCH_CODES, PPO_BRANCH_CODES_ARRAY } from "../utils/ppoBranchCodes.js";
 import escapeRegexLiteral from "../utils/regexEscape.js";
 import { invalidateCompanyDetailCache } from "./companyDetailCache.js";
+import {
+  collapseRoleCtcKeyAliases,
+  mergeSpcOfferIntoVisitRoles,
+} from "./spcCompensationMerge.js";
+import {
+  scopeVisitsByBranchCluster,
+  spcVisitScopeErrorMessage,
+} from "./spcVisitScope.js";
+
+export { mergeSpcOfferIntoVisitRoles } from "./spcCompensationMerge.js";
 
 export { COMPANY_DETAIL_VISIT_YEARS } from "../utils/placementYears.js";
 
@@ -649,7 +661,7 @@ export function normalizeRoleStipendFields(role) {
   else if (Number.isFinite(hoistedInternship)) stip = hoistedInternship;
   else if (Number.isFinite(hoistedStipend)) stip = hoistedStipend;
 
-  r.ctc = nextCtc;
+  r.ctc = collapseRoleCtcKeyAliases(nextCtc);
   if (Number.isFinite(stip)) r.internshipStipend = stip;
   else delete r.internshipStipend;
 
@@ -1557,7 +1569,8 @@ export async function resolveApprovedVisitForSpcPlacementOffer(
   companyId,
   yearRaw,
   typeOfOfferRaw,
-  placementContextRaw
+  placementContextRaw,
+  branchCodeRaw = null
 ) {
   const cid = toObjectId(companyId);
   if (!cid) {
@@ -1573,12 +1586,18 @@ export async function resolveApprovedVisitForSpcPlacementOffer(
     };
   }
 
-  const candidates = await fetchApprovedVisitsForCompanyDetailYear(cid, year);
-  if (!candidates.length) {
+  const candidatesRaw = await fetchApprovedVisitsForCompanyDetailYear(cid, year);
+  const branchStrict = Boolean(String(branchCodeRaw || "").trim());
+  const { visits: candidates, strictMiss } = scopeVisitsByBranchCluster(
+    candidatesRaw,
+    branchCodeRaw,
+    { strict: branchStrict }
+  );
+  if (strictMiss || !candidates.length) {
     return {
       ok: false,
-      reason: "no_approved_visit",
-      message: "No approved visit for this company and placement year.",
+      reason: strictMiss ? "no_cluster_visit" : "no_approved_visit",
+      message: spcVisitScopeErrorMessage(year, branchCodeRaw),
     };
   }
 
@@ -1601,7 +1620,7 @@ export async function resolveApprovedVisitForSpcPlacementOffer(
       ok: false,
       reason: "no_matching_visit",
       message:
-        "No approved visit matches the selected offer type for this placement hub and year. Check that the visit type matches the offer (e.g. FTE vs Internship(PPO)).",
+        "No approved visit matches the selected offer type for this placement hub and year. Check that the visit type matches the offer in the company card (e.g. FTE, Internship(PPO)).If it is changed kindly update in the company card and come back to submit the placement details.",
     };
   }
 
@@ -1611,9 +1630,22 @@ export async function resolveApprovedVisitForSpcPlacementOffer(
 /**
  * @param {"placement_got_in"|"ppo_branch"} statsTarget
  */
-async function findApprovedVisitForSpcWrite(companyId, yearRaw, placementContextRaw, statsTarget) {
-  const candidates = await fetchApprovedVisitsForCompanyDetailYear(companyId, yearRaw);
-  if (!candidates.length) return null;
+async function findApprovedVisitForSpcWrite(
+  companyId,
+  yearRaw,
+  placementContextRaw,
+  statsTarget,
+  branchCodeRaw = null
+) {
+  const candidatesRaw = await fetchApprovedVisitsForCompanyDetailYear(companyId, yearRaw);
+  if (!candidatesRaw.length) return null;
+  const branchStrict = Boolean(String(branchCodeRaw || "").trim());
+  const { visits: candidates, strictMiss } = scopeVisitsByBranchCluster(
+    candidatesRaw,
+    branchCodeRaw,
+    { strict: branchStrict }
+  );
+  if (strictMiss || !candidates.length) return null;
   const ctx = normalizePlacementContextParam(placementContextRaw);
   return pickVisitCandidateForSpcAnchor(candidates, ctx, statsTarget);
 }
@@ -1807,6 +1839,7 @@ export async function getCompanyDetailLegacyMergedById(
   companyVisitIdHint = null,
   placementClusterRaw = null
 ) {
+  await loadPlacementHubSettingsCache();
   const ctx = normalizePlacementContextParam(placementContextRaw);
   const clusterFilter = normalizePlacementClusterQuery(placementClusterRaw);
   const _id = toObjectId(id);
@@ -1855,7 +1888,8 @@ export async function getCompanyDetailLegacyMergedById(
       scopedApprovedVisits,
       visitPlain,
       placementYear,
-      ctx
+      ctx,
+      clusterKeyFromPlacementVisitClusterField(visitApproved?.cluster)
     );
     if (headline) merged.placementDetailHeadlineType = headline;
     merged.placementDreamTierVisitMissingForYear =
@@ -1918,6 +1952,7 @@ export async function getCompanyDetailLegacyMergedById(
 export async function listApprovedCompaniesLegacyMerged(
   placementYear = null
 ) {
+  await loadPlacementHubSettingsCache();
   const pipeline = [
     {
       $match: {
@@ -2051,7 +2086,8 @@ export async function listApprovedCompaniesLegacyMerged(
       const placementMeta = getListPlacementCategoryMetaFromVisits(
         scopedVisits,
         visitWithPlainRoleCtc(visit),
-        placementYear
+        placementYear,
+        clusterKey
       );
       const {
         dreamDisplayType: placementDreamDisplayType,
@@ -2086,6 +2122,7 @@ export async function listApprovedCompaniesLegacyMerged(
  * @returns {Promise<Record<string, unknown>[]>}
  */
 async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
+  await loadPlacementHubSettingsCache();
   const pipeline = [
     {
       $match: {
@@ -2157,10 +2194,18 @@ async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
         ? placementSummerInternshipForListingYear
         : hasSummerInternshipListingVisitForYear(allVisits, listingYearNorm);
 
+    const clusterKey = clusterKeyFromPlacementVisitClusterField(primary?.cluster);
+    const clusterScopedVisits = allVisits.filter(
+      (v) => clusterKeyFromPlacementVisitClusterField(v?.cluster) === clusterKey
+    );
+    const scopedForCategory =
+      clusterScopedVisits.length > 0 ? clusterScopedVisits : allVisits;
+
     const placementMeta = getListPlacementCategoryMetaFromVisits(
-      allVisits,
+      scopedForCategory,
       primaryVisit,
-      placementYear
+      placementYear,
+      clusterKey
     );
     const {
       dreamDisplayType: placementDreamDisplayType,
@@ -2653,6 +2698,82 @@ export async function suggestCompaniesForSpc(query, limitRaw = 15) {
   return rows.map((r) => ({ id: String(r._id), name: String(r?.name || "") }));
 }
 
+/** Only the synthetic fallback row is hidden from the SPC role dropdown (TBD/TBA stay selectable). */
+function shouldOmitRoleFromSpcFormDropdown(name) {
+  const n = String(name || "").trim();
+  if (!n) return true;
+  return String(n).trim().toLowerCase() === "placement details";
+}
+
+/** @param {string[]} names */
+function sortSpcFormRoleNames(names) {
+  return [...names].sort((a, b) => {
+    const aTbd = String(a).trim().toLowerCase() === "tbd";
+    const bTbd = String(b).trim().toLowerCase() === "tbd";
+    if (aTbd && !bTbd) return -1;
+    if (bTbd && !aTbd) return 1;
+    return a.localeCompare(b, undefined, { sensitivity: "base" });
+  });
+}
+
+/**
+ * Role titles from the approved visit SPC writes to (company + year + placement hub).
+ * When `branchCode` is set, prefers the visit row for that branch's hub (cs / ec / me / chem).
+ * Includes TBD/TBA when present; always offers TBD if not already on the visit.
+ * @param {unknown} companyId
+ * @param {unknown} yearRaw
+ * @param {unknown} placementContextRaw
+ * @param {unknown} [branchCodeRaw]
+ * @returns {Promise<{ roles: string[] }>}
+ */
+export async function getSpcCompanyRoleNamesForForm(
+  companyId,
+  yearRaw,
+  placementContextRaw = null,
+  branchCodeRaw = null
+) {
+  const cid =
+    companyId instanceof mongoose.Types.ObjectId
+      ? companyId
+      : mongoose.Types.ObjectId.isValid(String(companyId || ""))
+        ? new mongoose.Types.ObjectId(String(companyId))
+        : null;
+  if (!cid) return { roles: [] };
+
+  const candidatesRaw = await fetchApprovedVisitsForCompanyDetailYear(cid, yearRaw);
+  const branchStrict = Boolean(String(branchCodeRaw || "").trim());
+  const { visits: pool, strictMiss } = scopeVisitsByBranchCluster(
+    candidatesRaw,
+    branchCodeRaw,
+    { strict: branchStrict }
+  );
+  if (strictMiss || !pool.length) return { roles: [] };
+
+  const ctx = normalizePlacementContextParam(placementContextRaw);
+  const visit = pickVisitCandidateForSpcAnchor(pool, ctx, "placement_got_in");
+  const visitRoles = visitWithPlainRoleCtc(visit)?.roles;
+
+  /** @type {string[]} */
+  const names = [];
+  const seen = new Set();
+  if (Array.isArray(visitRoles)) {
+    for (const row of visitRoles) {
+      if (!row || typeof row !== "object") continue;
+      const name = String(row.roleName ?? row.name ?? "").trim();
+      if (shouldOmitRoleFromSpcFormDropdown(name)) continue;
+      const key = name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      names.push(name);
+    }
+  }
+  if (!seen.has("tbd")) {
+    seen.add("tbd");
+    names.push("TBD");
+  }
+  return { roles: sortSpcFormRoleNames(names) };
+}
+
 /**
  * Recompute derived PPO conversion scalars from normalized branch rows (same rules as admin PUT stats).
  * @param {{ branchCode: string, gotIn: number, converted: number, convertedNotApplicable: boolean }[]} normalized
@@ -2705,145 +2826,6 @@ export function mapPlacementTypeOfOfferToSpcConversionType(typeOfOfferRaw) {
   return "";
 }
 
-/** @param {unknown} ctc */
-function plainCtcFromRole(ctc) {
-  if (!ctc || typeof ctc !== "object") return {};
-  if (ctc instanceof Map) return Object.fromEntries(ctc);
-  return { ...ctc };
-}
-
-function roleNamesMatch(a, b) {
-  return String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
-}
-
-/** Fallback role row created when SPC omits role name — removed once a concrete role is submitted. */
-const SPC_SYNTHETIC_ROLE_FALLBACK = "Placement details";
-
-/** Role titles treated as placeholders; may be rewritten when SPC sends a concrete role + compensation. */
-function isSpcPlaceholderRoleName(name) {
-  const n = String(name || "").trim().toLowerCase();
-  if (!n) return false;
-  if (roleNamesMatch(name, SPC_SYNTHETIC_ROLE_FALLBACK)) return true;
-  return n === "tbd" || n === "tba";
-}
-
-/**
- * Upsert compensation strings into visit `roles[]` (aligned with admin roles shape: roleName + ctc map).
- * When the user supplies a concrete `roleName`, upserts that row (or rewrites the first TBD/TBA/Placement-details
- * placeholder row to that name) and drops leftover placeholder rows so compensation does not duplicate.
- * When `roleName` is omitted but compensation is present: updates **every** non–"Placement details" role with
- * the same figures; if none exist, upserts "Placement details" only.
- * For an existing role, **replaces** `ctc` with this submission's keys only (no merge with legacy visit CTC).
- * Stipend strings become top-level numeric `internshipStipend` only — never `ctc.Stipend`. Preserves prior
- * `internshipStipend` when this submit omits stipend or the stipend text does not parse as a number.
- * @param {unknown[]} existingRoles
- * @param {{ roleName?: string, ctcStr?: string, baseStr?: string, stipendStr?: string }} patch
- */
-export function mergeSpcOfferIntoVisitRoles(existingRoles, patch) {
-  /** @type {{ roleName: string, ctc: Record<string, unknown>, internshipStipend?: number }[]} */
-  const roles = [];
-  if (Array.isArray(existingRoles)) {
-    for (const r of existingRoles) {
-      if (!r || typeof r !== "object") continue;
-      const roleName = String(r.roleName ?? r.name ?? "").trim() || "Role";
-      const normalized = normalizeRoleStipendFields({
-        ...r,
-        roleName,
-      });
-      /** @type {{ roleName: string, ctc: Record<string, unknown>, internshipStipend?: number }} */
-      const entry = {
-        roleName: String(normalized.roleName || roleName).trim() || "Role",
-        ctc:
-          normalized.ctc && typeof normalized.ctc === "object"
-            ? /** @type {Record<string, unknown>} */ ({ ...normalized.ctc })
-            : {},
-      };
-      const st = Number(normalized.internshipStipend);
-      if (Number.isFinite(st)) entry.internshipStipend = st;
-      roles.push(entry);
-    }
-  }
-
-  const ctcStr = String(patch.ctcStr ?? "").trim();
-  const baseStr = String(patch.baseStr ?? "").trim();
-  const stipStr = String(patch.stipendStr ?? "").trim();
-  const roleTrim = String(patch.roleName ?? "").trim().slice(0, 200);
-  const hasComp = Boolean(ctcStr || baseStr || stipStr);
-  if (!hasComp) return roles;
-
-  const concreteRoles = roles.filter(
-    (r) => !roleNamesMatch(r.roleName, SPC_SYNTHETIC_ROLE_FALLBACK)
-  );
-
-  /** @type {Record<string, string>} */
-  const nextCtcPatch = {};
-  if (ctcStr) nextCtcPatch.CTC = ctcStr;
-  if (baseStr) nextCtcPatch.Base = baseStr;
-
-  const stipNum = stipStr ? stipendSubmissionStringToNumber(stipStr) : undefined;
-
-  /** @param {{ roleName: string, ctc: Record<string, unknown>, internshipStipend?: number }} prev */
-  function applyPatchToRole(prev) {
-    /** @type {{ roleName: string, ctc: Record<string, string>, internshipStipend?: number }} */
-    const nextEntry = {
-      roleName: prev.roleName,
-      ctc: { ...nextCtcPatch },
-    };
-    if (stipNum !== undefined) {
-      nextEntry.internshipStipend = stipNum;
-    } else {
-      const prevStipNum = Number(prev.internshipStipend);
-      if (Number.isFinite(prevStipNum)) nextEntry.internshipStipend = prevStipNum;
-    }
-    return nextEntry;
-  }
-
-  if (roleTrim) {
-    let idx = roles.findIndex((r) => roleNamesMatch(r.roleName, roleTrim));
-    if (idx >= 0) {
-      roles[idx] = applyPatchToRole(roles[idx]);
-    } else {
-      const phIdx = roles.findIndex((r) => isSpcPlaceholderRoleName(r.roleName));
-      if (phIdx >= 0) {
-        const patched = applyPatchToRole(roles[phIdx]);
-        patched.roleName = roleTrim;
-        roles[phIdx] = patched;
-      } else {
-        roles.push({
-          roleName: roleTrim,
-          ctc: nextCtcPatch,
-          ...(stipNum !== undefined ? { internshipStipend: stipNum } : {}),
-        });
-      }
-    }
-    if (!roleNamesMatch(roleTrim, SPC_SYNTHETIC_ROLE_FALLBACK)) {
-      return roles.filter(
-        (row) =>
-          roleNamesMatch(row.roleName, roleTrim) || !isSpcPlaceholderRoleName(row.roleName)
-      );
-    }
-    return roles;
-  }
-
-  if (concreteRoles.length > 0) {
-    return roles
-      .filter((r) => !roleNamesMatch(r.roleName, SPC_SYNTHETIC_ROLE_FALLBACK))
-      .map((prev) => applyPatchToRole(prev));
-  }
-
-  const idxPd = roles.findIndex((r) => roleNamesMatch(r.roleName, SPC_SYNTHETIC_ROLE_FALLBACK));
-  if (idxPd >= 0) {
-    roles[idxPd] = applyPatchToRole(roles[idxPd]);
-    return roles;
-  }
-  roles.push({
-    roleName: SPC_SYNTHETIC_ROLE_FALLBACK,
-    ctc: nextCtcPatch,
-    ...(stipNum !== undefined ? { internshipStipend: stipNum } : {}),
-  });
-  return roles;
-}
-
 /**
  * Build dynamic visit patch from SPC conversion-details body (conversion type + optional role/compensation).
  * @param {unknown[]} existingMergedRoles — merged.roles from anchored visit
@@ -2861,7 +2843,7 @@ export function buildSpcConversionVisitPatch(existingMergedRoles, fields) {
   const roleTrim = String(fields?.role ?? "").trim();
   const hasComp = Boolean(ctcStr || baseStr || stipStr);
 
-  if (hasComp) {
+  if (hasComp || roleTrim) {
     patch.roles = mergeSpcOfferIntoVisitRoles(existingMergedRoles || [], {
       roleName: roleTrim,
       ctcStr,
@@ -2885,10 +2867,22 @@ export async function syncAnchoredVisitSpcConversionFields(
   const cid = toObjectId(companyId);
   if (!cid) return { ok: false, reason: "invalid_company" };
   const year = normalizeCompanyDetailYear(placementYear);
+  const branchForScope =
+    options?.branchCode != null && String(options.branchCode).trim() !== ""
+      ? String(options.branchCode).trim().toLowerCase()
+      : options?.branchCodeRaw != null && String(options.branchCodeRaw).trim() !== ""
+        ? String(options.branchCodeRaw).trim().toLowerCase()
+        : null;
   const visitHint =
     options?.resolvedVisit && options.resolvedVisit._id
       ? /** @type {Record<string, unknown>} */ (options.resolvedVisit)
-      : await findApprovedVisitForSpcWrite(cid, year, placementListContextRaw, "placement_got_in");
+      : await findApprovedVisitForSpcWrite(
+          cid,
+          year,
+          placementListContextRaw,
+          "placement_got_in",
+          branchForScope
+        );
   const staticRow = await CompanyStatic.findById(cid).lean();
   if (!visitHint?._id || !staticRow) return { ok: false, reason: "visit_not_found" };
   const merged = mergeToLegacyShape(staticRow, visitHint);
@@ -2945,7 +2939,7 @@ export async function incrementPpoBranchGotInForAnchoredVisit(
   const visitHint =
     options?.resolvedVisit && options.resolvedVisit._id
       ? /** @type {Record<string, unknown>} */ (options.resolvedVisit)
-      : await findApprovedVisitForSpcWrite(cid, year, listCtx, "ppo_branch");
+      : await findApprovedVisitForSpcWrite(cid, year, listCtx, "ppo_branch", code);
   const staticRow = await CompanyStatic.findById(cid).lean();
   if (!visitHint?._id || !staticRow) {
     return { ok: false, reason: "visit_not_found" };
@@ -3044,7 +3038,13 @@ export async function incrementPlacementAndPpoConvertedForSpcConversionDetails(
   const visitHint =
     options?.resolvedVisit && options.resolvedVisit._id
       ? /** @type {Record<string, unknown>} */ (options.resolvedVisit)
-      : await findApprovedVisitForSpcWrite(cid, year, placementListContextRaw, "placement_got_in");
+      : await findApprovedVisitForSpcWrite(
+          cid,
+          year,
+          placementListContextRaw,
+          "placement_got_in",
+          code
+        );
   const staticRow = await CompanyStatic.findById(cid).lean();
   if (!visitHint?._id || !staticRow) {
     return { ok: false, reason: "visit_not_found" };
@@ -3144,7 +3144,13 @@ export async function incrementPlacementGotInBranchForAnchoredVisit(
   const visitHint =
     options?.resolvedVisit && options.resolvedVisit._id
       ? /** @type {Record<string, unknown>} */ (options.resolvedVisit)
-      : await findApprovedVisitForSpcWrite(cid, year, placementListContextRaw, "placement_got_in");
+      : await findApprovedVisitForSpcWrite(
+          cid,
+          year,
+          placementListContextRaw,
+          "placement_got_in",
+          code
+        );
   const staticRow = await CompanyStatic.findById(cid).lean();
   if (!visitHint?._id || !staticRow) {
     return { ok: false, reason: "visit_not_found" };

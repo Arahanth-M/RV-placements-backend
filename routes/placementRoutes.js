@@ -7,6 +7,7 @@ import CompanyStatic from "../models/CompanyStatic.js";
 import {
   getCompanyMergedForAdminById,
   suggestCompaniesForSpc,
+  getSpcCompanyRoleNamesForForm,
   incrementPpoBranchGotInForAnchoredVisit,
   incrementPlacementGotInBranchForAnchoredVisit,
   mapPlacementTypeOfOfferToSpcConversionType,
@@ -23,6 +24,7 @@ import {
   placementDataSchema,
   spcConversionDetailsSchema,
   spcCompanySuggestQuerySchema,
+  spcCompanyRolesQuerySchema,
   spcSubmitPlacementSchema,
   spcUpdatePlacementSchema,
 } from "../validations/placement.validation.js";
@@ -292,6 +294,28 @@ router.get(
   }
 );
 
+router.get(
+  "/spc/company-roles",
+  authJWT,
+  requireSPC,
+  validateRequest({ querySchema: spcCompanyRolesQuerySchema }),
+  async (req, res) => {
+    try {
+      const { companyId, placementYear, placementContext, branchCode } = req.query;
+      const result = await getSpcCompanyRoleNamesForForm(
+        companyId,
+        placementYear,
+        placementContext,
+        branchCode
+      );
+      return res.json(result);
+    } catch (error) {
+      console.error("❌ Error in SPC company roles:", error.message);
+      return res.status(500).json({ message: "Server error" });
+    }
+  }
+);
+
 router.put(
   "/spc/placements/:placementId",
   authJWT,
@@ -394,6 +418,8 @@ router.put(
 
       await PlacementData.findByIdAndUpdate(placementId, payload);
 
+      const updatedPlacement = await PlacementData.findById(placementId).lean();
+
       const nextCompanyIdRaw =
         payload.companyId !== undefined ? payload.companyId : placement.companyId;
       const nextCompanyId = nextCompanyIdRaw ? String(nextCompanyIdRaw) : "";
@@ -432,7 +458,8 @@ router.put(
               previousCompanyId,
               Number(previousPlacementYear),
               previousTypeOfOffer,
-              null
+              null,
+              previousBranchCode
             );
             if (oldResolved.ok) {
               const decOld = isPpoOfferType(previousTypeOfOffer)
@@ -465,7 +492,8 @@ router.put(
               nextCompanyId,
               Number(nextPlacementYear),
               nextTypeOfOffer,
-              null
+              null,
+              nextBranchCode
             );
             if (nextResolved.ok) {
               const incNext = isPpoOfferType(nextTypeOfOffer)
@@ -492,6 +520,80 @@ router.put(
               console.warn("SPC placement edit: new company visit resolution failed:", nextResolved.message);
             }
           }
+        }
+      }
+
+      const roleOrCompTouched =
+        payload.role !== undefined ||
+        payload.ctc !== undefined ||
+        payload.base !== undefined ||
+        payload.stipend !== undefined ||
+        payload.ppoConversionType !== undefined ||
+        payload["6-months-internship-stipend"] !== undefined;
+
+      if (
+        roleOrCompTouched &&
+        updatedPlacement &&
+        nextCompanyId &&
+        PPO_BRANCH_CODES.has(nextBranchCode) &&
+        Number.isInteger(Number(nextPlacementYear))
+      ) {
+        let resolvedVisitResult = await resolveApprovedVisitForSpcPlacementOffer(
+          nextCompanyId,
+          Number(nextPlacementYear),
+          nextTypeOfOffer,
+          null,
+          nextBranchCode
+        );
+        if (!resolvedVisitResult.ok) {
+          const ppoAnchor = await resolveApprovedVisitForSpcPlacementOffer(
+            nextCompanyId,
+            Number(nextPlacementYear),
+            "Internship(PPO)",
+            null,
+            nextBranchCode
+          );
+          if (ppoAnchor.ok) {
+            resolvedVisitResult = ppoAnchor;
+          }
+        }
+        if (resolvedVisitResult.ok) {
+          const ppoConvLabel = String(updatedPlacement.ppoConversionType || "").trim();
+          const convType = mapPlacementTypeOfOfferToSpcConversionType(ppoConvLabel);
+          const roleTrim = String(updatedPlacement.role ?? "").trim();
+          const ctcTrim = String(updatedPlacement.ctc ?? "").trim();
+          const baseTrim = String(updatedPlacement.base ?? "").trim();
+          const sixMonthStip = String(
+            updatedPlacement["6-months-internship-stipend"] ?? ""
+          ).trim();
+          /** @type {{ conversionType?: string, role?: string, ctc?: string, base?: string, stipend?: string }} */
+          const visitSyncFields = {
+            role: roleTrim,
+            ctc: ctcTrim,
+            base: baseTrim,
+            stipend:
+              convType === "fte_internship"
+                ? sixMonthStip
+                : String(updatedPlacement.stipend ?? "").trim(),
+          };
+          if (convType) {
+            visitSyncFields.conversionType = convType;
+          }
+          const visitSync = await syncAnchoredVisitSpcConversionFields(
+            nextCompanyId,
+            Number(nextPlacementYear),
+            visitSyncFields,
+            null,
+            { resolvedVisit: resolvedVisitResult.visit, branchCode: nextBranchCode }
+          );
+          if (!visitSync.ok) {
+            console.warn("SPC placement edit: visit role/comp sync failed:", visitSync.reason);
+          }
+        } else {
+          console.warn(
+            "SPC placement edit: visit resolution for role/comp sync failed:",
+            resolvedVisitResult.message
+          );
         }
       }
 
@@ -603,7 +705,8 @@ router.post(
         String(cid),
         placementYear,
         typeOfOffer,
-        placementCtxForVisit
+        placementCtxForVisit,
+        branchLower
       );
       // FTE / Internship+FTE rows may be absent while an on-campus PPO visit row holds the same cycle.
       if (!resolvedVisitResult.ok) {
@@ -611,7 +714,8 @@ router.post(
           String(cid),
           placementYear,
           "Internship(PPO)",
-          placementCtxForVisit
+          placementCtxForVisit,
+          branchLower
         );
         if (ppoAnchor.ok) {
           resolvedVisitResult = ppoAnchor;
@@ -753,7 +857,7 @@ router.post(
           placementYear,
           visitSyncFields,
           placementCtxForVisit,
-          { resolvedVisit }
+          { resolvedVisit, branchCode: branchLower }
         );
         if (!visitSync.ok) {
           console.warn("SPC conversion-details: visit extras sync failed:", visitSync.reason);
@@ -819,10 +923,18 @@ router.post(
     const branchOk = Boolean(branchCodeRaw && PPO_BRANCH_CODES.has(branchCodeRaw));
     const wantsVisitBump = Boolean(cid && yearOk && branchOk);
 
-    if (companyIdRaw && (!cid || !yearOk || !branchOk)) {
+    if (!cid || !yearOk || !branchOk) {
       return res.status(400).json({
         message:
-          "When company ID is provided, placementYear (2026–2028) and a valid branchCode are required to update visit stats.",
+          "Select a company from the suggestions list with a valid placement year and branch.",
+      });
+    }
+
+    const companyRowSubmit = await CompanyStatic.findById(cid).select("name").lean();
+    if (!companyRowSubmit?.name) {
+      return res.status(400).json({
+        message:
+          "This company is not in the list yet. Please wait for it to be added, then select it from the suggestions.",
       });
     }
 
@@ -880,7 +992,8 @@ router.post(
         companyIdRaw,
         placementYearNum,
         typeOfOffer,
-        placementCtxForVisit
+        placementCtxForVisit,
+        branchCodeRaw
       );
       if (!resolvedSubmit.ok) {
         return res.status(400).json({
@@ -893,11 +1006,12 @@ router.post(
 
       const placement = await PlacementData.create({
         studentId: student._id,
-        companyPlaced,
+        companyPlaced: String(companyRowSubmit.name).trim(),
         typeOfOffer,
         stipend,
         base,
         ctc,
+        role: roleRaw,
         companyId: cid,
         placementYear: placementYearNum,
         branchCode: branchCodeRaw,
@@ -952,7 +1066,7 @@ router.post(
         placementYearNum,
         visitSyncFields,
         placementCtxForVisit,
-        { resolvedVisit: resolvedVisitSubmit }
+        { resolvedVisit: resolvedVisitSubmit, branchCode: branchCodeRaw }
       );
       if (!visitSync.ok) {
         console.warn("SPC placement submit: visit compensation sync failed:", visitSync.reason);
@@ -989,6 +1103,7 @@ router.post(
       stipend,
       base,
       ctc,
+      role: roleRaw,
       createdBy,
     });
 

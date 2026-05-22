@@ -3,6 +3,7 @@ import {
   resolveStudentBatchColumnMap,
   validateStudentBatchRow,
   STUDENT_BATCH_HEADER_ALIASES,
+  STUDENT_BATCH_COLUMN_GUIDE,
 } from "../../services/studentBatchImportService.js";
 
 describe("studentBatchImportService", () => {
@@ -13,24 +14,26 @@ describe("studentBatchImportService", () => {
   });
 
   describe("resolveStudentBatchColumnMap", () => {
-    it("maps human headers to column indices", () => {
-      const header = ["Name", "Email ID", "USN", "Phone", "Branch"];
+    it("maps required headers to column indices", () => {
+      const header = ["Name", "Email ID", "USN"];
       const map = resolveStudentBatchColumnMap(header);
       expect(map.name).toBe(0);
       expect(map.email).toBe(1);
       expect(map.usn).toBe(2);
-      expect(map.phoneNumber).toBe(3);
-      expect(map.branch).toBe(4);
     });
 
     it("supports alternate labels", () => {
-      const header = ["Student Name", "Mail", "Reg No", "Mobile", "Department"];
+      const header = ["Student Name", "Mail", "Reg No"];
       const map = resolveStudentBatchColumnMap(header);
       expect(map.name).toBe(0);
       expect(map.email).toBe(1);
       expect(map.usn).toBe(2);
-      expect(map.phoneNumber).toBe(3);
-      expect(map.branch).toBe(4);
+    });
+
+    it("ignores extra columns such as phone or branch", () => {
+      const header = ["Name", "Email ID", "USN", "Phone", "Branch"];
+      const map = resolveStudentBatchColumnMap(header);
+      expect(map).toEqual({ name: 0, email: 1, usn: 2 });
     });
 
     it("throws when a required column is missing", () => {
@@ -52,10 +55,13 @@ describe("studentBatchImportService", () => {
     });
   });
 
-  it("documents at least one alias per schema field", () => {
-    for (const key of ["name", "email", "usn", "phoneNumber", "branch"]) {
+  it("documents only name, email, and usn for batch import", () => {
+    for (const key of ["name", "email", "usn"]) {
       expect(Array.isArray(STUDENT_BATCH_HEADER_ALIASES[key])).toBe(true);
       expect(STUDENT_BATCH_HEADER_ALIASES[key].length).toBeGreaterThan(0);
     }
+    expect(STUDENT_BATCH_HEADER_ALIASES.phoneNumber).toBeUndefined();
+    expect(STUDENT_BATCH_HEADER_ALIASES.branch).toBeUndefined();
+    expect(STUDENT_BATCH_COLUMN_GUIDE.map((c) => c.field)).toEqual(["name", "email", "usn"]);
   });
 });

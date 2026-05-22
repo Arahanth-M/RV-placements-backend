@@ -68,6 +68,11 @@ describe("ctcCategory", () => {
       expect(categorizeTotalRupees(OPEN_DREAM_MIN_RUPEES)).toBe(PLACEMENT_CATEGORY.OPEN_DREAM);
       expect(categorizeTotalRupees(2_000_000)).toBe(PLACEMENT_CATEGORY.OPEN_DREAM);
     });
+
+    it("respects custom cluster threshold", () => {
+      expect(categorizeTotalRupees(900_000, 800_000)).toBe(PLACEMENT_CATEGORY.OPEN_DREAM);
+      expect(categorizeTotalRupees(700_000, 800_000)).toBe(PLACEMENT_CATEGORY.DREAM);
+    });
   });
 
   describe("getCompanyPlacementMeta", () => {
