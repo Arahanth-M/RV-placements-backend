@@ -15,17 +15,15 @@ export const STUDENT_BATCH_HEADER_ALIASES = {
   name: ["name", "student name", "full name", "studentname"],
   email: ["email", "email id", "e-mail", "email address", "mail id", "mail", "e mail"],
   usn: ["usn", "registration number", "reg no", "reg. no", "reg number", "university seat number"],
-  phoneNumber: ["phone", "phone number", "mobile", "contact", "contact number", "mobile number", "tel"],
-  branch: ["branch", "department", "dept", "branch name"],
+
 };
 
 /** Admin-facing documentation (same order as typical template). */
 export const STUDENT_BATCH_COLUMN_GUIDE = [
   { labels: ["Name"], field: "name", required: true },
   { labels: ["Email", "Email ID"], field: "email", required: true },
-  { labels: ["USN", "Registration number"], field: "usn", required: true },
-  { labels: ["Phone", "Mobile"], field: "phoneNumber", required: false },
-  { labels: ["Branch", "Department"], field: "branch", required: false },
+  { labels: ["USN"], field: "usn", required: true },
+
 ];
 
 export function normalizeHeaderLabel(raw) {
@@ -50,7 +48,7 @@ const ALIAS_TO_FIELD = buildAliasToFieldMap();
 
 /**
  * Map header row (array of cell values) to field → column index.
- * @returns {Record<string, number>} indices for name, email, usn; phoneNumber/branch optional (-1 if absent)
+ * @returns {{ name: number, email: number, usn: number }} column indices for required fields
  */
 export function resolveStudentBatchColumnMap(headerRow) {
   if (!Array.isArray(headerRow) || headerRow.length === 0) {
@@ -77,16 +75,11 @@ export function resolveStudentBatchColumnMap(headerRow) {
     name: fieldToIndex.name,
     email: fieldToIndex.email,
     usn: fieldToIndex.usn,
-    phoneNumber: fieldToIndex.phoneNumber ?? -1,
-    branch: fieldToIndex.branch ?? -1,
   };
 }
 
 export function isDataRowBlank(row, colMap) {
-  const idxs = [colMap.name, colMap.email, colMap.usn];
-  if (colMap.phoneNumber >= 0) idxs.push(colMap.phoneNumber);
-  if (colMap.branch >= 0) idxs.push(colMap.branch);
-  for (const i of idxs) {
+  for (const i of [colMap.name, colMap.email, colMap.usn]) {
     const v = row[i];
     if (v != null && String(v).trim() !== "") return false;
   }
@@ -249,7 +242,7 @@ export async function importStudentsFromXlsxBuffer(buffer, StudentModel) {
 
   const failed = [];
   const skipped = [];
-  /** @type {{ excelRow: number, doc: { name: string, email: string, usn: string, phoneNumber: string, branch: string } }[]} */
+  /** @type {{ excelRow: number, doc: { name: string, email: string, usn: string } }[]} */
   const fileWinners = [];
 
   const seenEmail = new Map();
@@ -263,9 +256,6 @@ export async function importStudentsFromXlsxBuffer(buffer, StudentModel) {
     const name = cellAt(row, colMap.name);
     const emailRaw = cellAt(row, colMap.email).toLowerCase();
     const usn = cellAt(row, colMap.usn).toUpperCase();
-    const phoneNumber =
-      colMap.phoneNumber >= 0 ? cellAt(row, colMap.phoneNumber) : "";
-    const branch = colMap.branch >= 0 ? cellAt(row, colMap.branch) : "";
 
     const reasons = validateStudentBatchRow({ name, email: emailRaw, usn });
     if (reasons.length) {
@@ -297,8 +287,6 @@ export async function importStudentsFromXlsxBuffer(buffer, StudentModel) {
         name,
         email: emailRaw,
         usn,
-        phoneNumber,
-        branch,
       },
     });
   }

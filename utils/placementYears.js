@@ -7,8 +7,25 @@
  */
 export const COMPANY_DETAIL_VISIT_YEARS = Object.freeze([2026, 2027, 2028]);
 
+/** Legacy year-stats tables (2024/2025) + hub visit years — admin Open dream thresholds. */
+export const PLACEMENT_OPEN_DREAM_SETTING_YEARS = Object.freeze([
+  2024,
+  2025,
+  ...COMPANY_DETAIL_VISIT_YEARS,
+]);
+
 /** Default cycle when `year` is omitted on a visit or query normalizes invalid input. */
 export const COMPANY_VISIT_DEFAULT_YEAR = 2026;
+
+/**
+ * @param {unknown} raw
+ * @returns {number|undefined}
+ */
+export function normalizePlacementOpenDreamSettingYear(raw) {
+  const y = Number(raw);
+  if (!Number.isFinite(y)) return undefined;
+  return PLACEMENT_OPEN_DREAM_SETTING_YEARS.includes(y) ? y : undefined;
+}
 
 /**
  * Use in `$match` (and Mongoose `find`) so `company_visits.year` matches hub years even when

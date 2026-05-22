@@ -27,6 +27,7 @@ import {
   clusterKeyFromPlacementVisitClusterField,
   normalizePlacementClusterQuery,
 } from "../utils/placementCluster.js";
+import { getPlacementHubSettingsForApi } from "../services/placementHubSettingsService.js";
 import mongoose from "mongoose";
 import { getAuthUserModel } from "../utils/authUserModel.js";
 dotenv.config();
@@ -102,6 +103,17 @@ companyRouter.get("/", async (req, res) => {
     return res.json(list);
   } catch (e) {
     console.error("❌ Error fetching companies:", e.message);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+/** Per-cluster Open dream minimum LPA (admin-configurable; public read). */
+companyRouter.get("/placement-hub-settings", async (_req, res) => {
+  try {
+    const settings = await getPlacementHubSettingsForApi();
+    return res.json(settings);
+  } catch (e) {
+    console.error("❌ Error fetching placement hub settings:", e?.message);
     return res.status(500).json({ error: "Server error" });
   }
 });
@@ -245,7 +257,12 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
           placementVisitYear,
           placementYearsAvailable,
         };
-        return res.json(attachPlacementCategoryToCompany(withMeta));
+        return res.json(
+          attachPlacementCategoryToCompany(withMeta, {
+            clusterKey: placementClusterResolved ?? parsed?.cluster,
+            placementYear: placementVisitYear,
+          })
+        );
       } catch {
         // Bad cache payload — fall through to MongoDB
       }
@@ -316,14 +333,22 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
     delete companyObj.onlineQuestion_solution;
     delete companyObj.onlineQuestion_solutions;
 
-    const company = attachPlacementCategoryToCompany({
-      ...companyObj,
-      placementVisitYear,
-      placementYearsAvailable,
-      ...(visitForViews?._id
-        ? { placementCompanyVisitId: String(visitForViews._id) }
-        : {}),
-    });
+    const company = attachPlacementCategoryToCompany(
+      {
+        ...companyObj,
+        placementVisitYear,
+        placementYearsAvailable,
+        ...(visitForViews?._id
+          ? { placementCompanyVisitId: String(visitForViews._id) }
+          : {}),
+      },
+      {
+        clusterKey:
+          placementClusterResolved ??
+          clusterKeyFromPlacementVisitClusterField(companyObj?.cluster),
+        placementYear: placementVisitYear,
+      }
+    );
 
     if (key) {
       try {

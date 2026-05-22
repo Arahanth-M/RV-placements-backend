@@ -4,6 +4,8 @@
  */
 
 import { getCompanyPlacementMeta } from "./ctcCategory.js";
+import { getOpenDreamMinRupeesForClusterSync } from "../services/placementHubSettingsService.js";
+import { COMPANY_VISIT_DEFAULT_YEAR } from "./placementYears.js";
 import { COMPANY_DETAIL_VISIT_YEARS } from "./placementYears.js";
 
 const PLACEMENT_CATEGORY_OPEN_DREAM = "open dream";
@@ -230,13 +232,15 @@ function visitDisplayType(visit) {
 
 /**
  * @param {Record<string, unknown>[]} dreamTiers — non-empty
+ * @param {number} openDreamMinRupees
  * @returns {Record<string, unknown>}
  */
-function pickBestDreamTierVisitByCtc(dreamTiers) {
+function pickBestDreamTierVisitByCtc(dreamTiers, openDreamMinRupees) {
+  const metaOpts = { openDreamMinRupees };
   let bestIdx = 0;
-  let best = getCompanyPlacementMeta({ roles: dreamTiers[0].roles });
+  let best = getCompanyPlacementMeta({ roles: dreamTiers[0].roles }, metaOpts);
   for (let i = 1; i < dreamTiers.length; i++) {
-    const m = getCompanyPlacementMeta({ roles: dreamTiers[i].roles });
+    const m = getCompanyPlacementMeta({ roles: dreamTiers[i].roles }, metaOpts);
     if (m.totalCtcRupees > best.totalCtcRupees) {
       best = m;
       bestIdx = i;
@@ -248,13 +252,13 @@ function pickBestDreamTierVisitByCtc(dreamTiers) {
 /**
  * Dream/Open dream card subtitle source — matches hub-eligible rows but never strict Summer internship (`Internship(PPO)`).
  */
-function pickDreamHubSubtitleVisitAcrossYears(list) {
+function pickDreamHubSubtitleVisitAcrossYears(list, openDreamMinRupees) {
   if (!Array.isArray(list) || list.length === 0) return null;
   for (const y of COMPANY_DETAIL_VISIT_YEARS) {
     const scoped = list.filter(
       (v) => Number(v.year) === y && visitQualifiesDreamTierRow(v)
     );
-    if (scoped.length > 0) return pickBestDreamTierVisitByCtc(scoped);
+    if (scoped.length > 0) return pickBestDreamTierVisitByCtc(scoped, openDreamMinRupees);
     const hybrid = list.find(
       (v) =>
         Number(v.year) === y &&
@@ -327,24 +331,36 @@ export function getSummerPlacementPrefFromVisits(visits, preferredListingYear) {
  * @param {Record<string, unknown>[]|undefined} visits
  * @param {Record<string, unknown>|null|undefined} primaryVisit
  * @param {unknown} [preferredListingYear] — optional `?year=` when rendering lists (2026 / 2027)
+ * @param {unknown} [clusterKey] — hub cluster (`cs` / `ec` / `me` / `chem`) for Open dream LPA threshold
  */
 export function getListPlacementCategoryMetaFromVisits(
   visits,
   primaryVisit,
-  preferredListingYear
+  preferredListingYear,
+  clusterKey = "cs"
 ) {
   const list = Array.isArray(visits) ? visits : [];
+  const prefYear = normalizePlacementDetailYear(preferredListingYear);
+  const yearForThreshold =
+    prefYear ??
+    normalizePlacementDetailYear(primaryVisit?.year) ??
+    COMPANY_VISIT_DEFAULT_YEAR;
+  const openDreamMinRupees = getOpenDreamMinRupeesForClusterSync(
+    clusterKey,
+    yearForThreshold
+  );
+  const metaOpts = { openDreamMinRupees };
   const dreamTiers = list.filter((v) => visitQualifiesDreamTierRow(v));
 
-  const prefYear = normalizePlacementDetailYear(preferredListingYear);
-
   const bestGlobalVisit =
-    dreamTiers.length > 0 ? pickBestDreamTierVisitByCtc(dreamTiers) : null;
+    dreamTiers.length > 0
+      ? pickBestDreamTierVisitByCtc(dreamTiers, openDreamMinRupees)
+      : null;
 
   /** Category / bucket CTC stay driven by the best dream-tier package across years (existing behaviour). */
   const globalMeta = bestGlobalVisit
-    ? getCompanyPlacementMeta({ roles: bestGlobalVisit.roles })
-    : getCompanyPlacementMeta({ roles: primaryVisit?.roles });
+    ? getCompanyPlacementMeta({ roles: bestGlobalVisit.roles }, metaOpts)
+    : getCompanyPlacementMeta({ roles: primaryVisit?.roles }, metaOpts);
 
   /** Visit whose `type` string drives the Dream / Open dream card subtitle for this listing. */
   let displayVisit = null;
@@ -359,7 +375,7 @@ export function getListPlacementCategoryMetaFromVisits(
     for (const y of yearsToTry) {
       const scoped = dreamTiers.filter((v) => Number(v.year) === y);
       if (scoped.length > 0) {
-        displayVisit = pickBestDreamTierVisitByCtc(scoped);
+        displayVisit = pickBestDreamTierVisitByCtc(scoped, openDreamMinRupees);
         break;
       }
       const hybridVisit = list.find(
@@ -395,7 +411,7 @@ export function getListPlacementCategoryMetaFromVisits(
       primaryVisit &&
       !visitQualifiesSummerInternshipListingRow(primaryVisit)
         ? primaryVisit
-        : pickDreamHubSubtitleVisitAcrossYears(list);
+        : pickDreamHubSubtitleVisitAcrossYears(list, openDreamMinRupees);
     dreamDisplayType = subtitleVisit
       ? visitDisplayType(subtitleVisit)
       : undefined;
@@ -410,7 +426,7 @@ export function getListPlacementCategoryMetaFromVisits(
       primaryVisit &&
       !visitQualifiesSummerInternshipListingRow(primaryVisit)
         ? primaryVisit
-        : pickDreamHubSubtitleVisitAcrossYears(list);
+        : pickDreamHubSubtitleVisitAcrossYears(list, openDreamMinRupees);
     dreamDisplayType = subtitleVisit
       ? visitDisplayType(subtitleVisit)
       : undefined;
@@ -442,7 +458,8 @@ export function getCompanyDetailHeadlineTypeFromVisits(
   visits,
   visitForYear,
   placementYearRaw,
-  placementListContextRaw
+  placementListContextRaw,
+  clusterKey = "cs"
 ) {
   if (!visitForYear || typeof visitForYear !== "object") return undefined;
   const raw =
@@ -460,7 +477,8 @@ export function getCompanyDetailHeadlineTypeFromVisits(
   const meta = getListPlacementCategoryMetaFromVisits(
     visits,
     visitForYear,
-    pref
+    pref,
+    clusterKey
   );
   if (meta.dreamDisplayType && meta.dreamDetailYear === pref) {
     return meta.dreamDisplayType;

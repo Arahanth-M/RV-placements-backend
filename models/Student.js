@@ -20,16 +20,6 @@ const studentSchema = new mongoose.Schema(
       uppercase: true,
       required: true,
     },
-    phoneNumber: {
-      type: String,
-      trim: true,
-      default: "",
-    },
-    branch: {
-      type: String,
-      trim: true,
-      default: "",
-    },
     /** Event `ObjectId`s the student marked as registered on the Events page (self-service). */
     registeredEventIds: {
       type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Event" }],

@@ -1,3 +1,5 @@
+import { getOpenDreamMinRupeesForClusterSync } from "../services/placementHubSettingsService.js";
+
 /**
  * Placement tier helpers: unknown-shaped `ctc` objects on each role (Mixed map values).
  * All money is normalized to annual rupees; threshold 10 LPA == 1_000_000 INR.
@@ -87,8 +89,16 @@ export function sumCtcObjectToRupees(ctc) {
  * @param {number} totalRupees
  * @returns {typeof PLACEMENT_CATEGORY[keyof typeof PLACEMENT_CATEGORY]}
  */
-export function categorizeTotalRupees(totalRupees) {
-  if (!Number.isFinite(totalRupees) || totalRupees < OPEN_DREAM_MIN_RUPEES) {
+/**
+ * @param {number} totalRupees
+ * @param {number} [openDreamMinRupees] — cluster-specific threshold (defaults to 10 LPA)
+ */
+export function categorizeTotalRupees(totalRupees, openDreamMinRupees = OPEN_DREAM_MIN_RUPEES) {
+  const threshold =
+    Number.isFinite(openDreamMinRupees) && openDreamMinRupees >= 0
+      ? openDreamMinRupees
+      : OPEN_DREAM_MIN_RUPEES;
+  if (!Number.isFinite(totalRupees) || totalRupees < threshold) {
     return PLACEMENT_CATEGORY.DREAM;
   }
   return PLACEMENT_CATEGORY.OPEN_DREAM;
@@ -97,9 +107,11 @@ export function categorizeTotalRupees(totalRupees) {
 /**
  * Per-role total, then max across roles (best package sets company tier).
  * @param {{ roles?: Array<{ ctc?: unknown }> }|null|undefined} company
+ * @param {{ openDreamMinRupees?: number }} [options]
  * @returns {{ totalCtcRupees: number, category: string }}
  */
-export function getCompanyPlacementMeta(company) {
+export function getCompanyPlacementMeta(company, options = {}) {
+  const openDreamMinRupees = options.openDreamMinRupees;
   const roles = company?.roles;
   if (!Array.isArray(roles) || roles.length === 0) {
     return { totalCtcRupees: 0, category: PLACEMENT_CATEGORY.DREAM };
@@ -113,16 +125,29 @@ export function getCompanyPlacementMeta(company) {
 
   return {
     totalCtcRupees: maxRupees,
-    category: categorizeTotalRupees(maxRupees),
+    category: categorizeTotalRupees(maxRupees, openDreamMinRupees),
   };
 }
 
 /**
  * Attach category + total for API responses (additive fields).
  * @param {Record<string, unknown>} companyLeanOrDoc
+ * @param {{ clusterKey?: unknown, placementYear?: unknown }} [options]
  */
-export function attachPlacementCategoryToCompany(companyLeanOrDoc) {
-  const { totalCtcRupees, category } = getCompanyPlacementMeta(companyLeanOrDoc);
+export function attachPlacementCategoryToCompany(companyLeanOrDoc, options = {}) {
+  const clusterRaw =
+    options.clusterKey ?? companyLeanOrDoc?.cluster ?? companyLeanOrDoc?.placementListClusterKey;
+  const yearRaw =
+    options.placementYear ??
+    companyLeanOrDoc?.placementVisitYear ??
+    companyLeanOrDoc?.placementDreamDetailYear;
+  const openDreamMinRupees =
+    options.openDreamMinRupees != null
+      ? options.openDreamMinRupees
+      : getOpenDreamMinRupeesForClusterSync(clusterRaw, yearRaw);
+  const { totalCtcRupees, category } = getCompanyPlacementMeta(companyLeanOrDoc, {
+    openDreamMinRupees,
+  });
   return {
     ...companyLeanOrDoc,
     category,

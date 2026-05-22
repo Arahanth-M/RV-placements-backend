@@ -16,7 +16,12 @@ import {
   adminCompanyTotalGotInAdjustmentSchema,
   adminCompanyRolesSchema,
   adminCompanyGeneralSchema,
+  adminPlacementHubSettingsSchema,
 } from "../validations/admin.validation.js";
+import {
+  getPlacementHubSettingsForApi,
+  updatePlacementHubOpenDreamThresholds,
+} from "../services/placementHubSettingsService.js";
 import User from "../models/User.js";
 import User1 from "../models/User1.js";
 import Student from "../models/Student.js";
@@ -568,6 +573,32 @@ submissionModRouter.get("/submissions/:id", async (req, res) => {
 
 // Get dashboard stats (Redis-cached when REDIS_URL is set; invalidated on admin mutations)
 adminRouter.get("/stats", getAdminStats);
+
+adminRouter.get("/placement-hub-settings", async (_req, res) => {
+  try {
+    const settings = await getPlacementHubSettingsForApi();
+    return res.json(settings);
+  } catch (err) {
+    console.error("GET /api/admin/placement-hub-settings:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+adminRouter.put(
+  "/placement-hub-settings",
+  validateRequest(adminPlacementHubSettingsSchema),
+  async (req, res) => {
+    try {
+      const openDreamMinLpaByYear = await updatePlacementHubOpenDreamThresholds(
+        req.body.openDreamMinLpaByYear
+      );
+      return res.json({ openDreamMinLpaByYear });
+    } catch (err) {
+      console.error("PUT /api/admin/placement-hub-settings:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
 
 // AI polish for SPC/admin review — does not write to the database.
 submissionModRouter.post("/submissions/:id/enhance", async (req, res) => {
@@ -1974,17 +2005,16 @@ adminRouter.put(
         throw new Error(`Role at index ${index} is missing a valid roleName`);
       }
 
-      const internshipStipend =
-        role.internshipStipend !== undefined && role.internshipStipend !== null
-          ? Number(role.internshipStipend)
-          : undefined;
-      if (
-        internshipStipend !== undefined &&
-        (Number.isNaN(internshipStipend) || internshipStipend < 0)
-      ) {
-        throw new Error(
-          `Role "${roleName}": internshipStipend must be a non‑negative number`
-        );
+      const stipStr = String(role.internshipStipend ?? "").trim();
+      let internshipStipend;
+      if (stipStr && !/^n\/a$/i.test(stipStr)) {
+        const n = Number(stipStr.replace(/,/g, ""));
+        if (Number.isNaN(n) || n < 0) {
+          throw new Error(
+            `Role "${roleName}": internshipStipend must be a non‑negative number or N/A`
+          );
+        }
+        if (n > 0) internshipStipend = n;
       }
 
       const rawCtc = role.ctc && typeof role.ctc === "object" ? role.ctc : {};
