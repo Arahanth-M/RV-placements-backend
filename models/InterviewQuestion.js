@@ -160,8 +160,8 @@ interviewQuestionSchema.path("testCases").validate(function validateTestCases(va
   if (!Array.isArray(value) || value.length === 0) return false;
   const visible = value.filter((tc) => tc && tc.isHidden !== true);
   const hidden = value.filter((tc) => tc && tc.isHidden === true);
-  return visible.length >= 4 && hidden.length >= 4;
-}, "code_execution requires testCases: at least four visible (isHidden: false) and four hidden (isHidden: true).");
+  return visible.length >= 2 && hidden.length >= 2;
+}, "code_execution requires testCases: at least two visible (isHidden: false) and two hidden (isHidden: true).");
 
 interviewQuestionSchema.index({ companyTags: 1 });
 interviewQuestionSchema.index({ roundType: 1 });

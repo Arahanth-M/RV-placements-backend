@@ -21,6 +21,7 @@ import {
   sanitizeInput,
   USER_DEBUG_OUTPUT_MAX_BYTES,
 } from "./executionUtils.js";
+import { dedupeTestCases } from "../../utils/dedupeTestCases.js";
 
 const toSafeString = (value, fallback = "") =>
   typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -74,7 +75,7 @@ export const normalizeExecutionLanguage = (language) => {
 
 const normalizeTestCases = (testCases) => {
   if (!Array.isArray(testCases)) return [];
-  return testCases.map((testcase) => ({
+  return dedupeTestCases(testCases).map((testcase) => ({
     input: sanitizeInput(testcase?.input ?? null),
     expectedOutput: sanitizeInput(testcase?.expectedOutput ?? null),
     isHidden: Boolean(testcase?.isHidden),

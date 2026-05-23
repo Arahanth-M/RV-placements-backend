@@ -26,6 +26,7 @@ import {
   getSession,
   getSessionLean,
   getInProgressSession,
+  getInterviewStartEligibility,
   getUserSessionSummariesPaginated,
   getUserSessionDetail,
   getUserInterviewAnalytics,
@@ -42,6 +43,7 @@ import {
 import { interviewQueue } from "../services/queues/interviewQueue.js";
 import { EVALUATE_ANSWER } from "../services/queues/jobTypes.js";
 import { buildInterviewTips } from "../utils/interviewTips.js";
+import { dedupeTestCases } from "../utils/dedupeTestCases.js";
 import {
   mirrorLegacyAttemptsIntoSlot,
   normalizedQuestionAttempts,
@@ -61,6 +63,11 @@ import {
   clearInterviewProcessing,
 } from "../services/interviewCache.js";
 import { executeCode, normalizeExecutionLanguage } from "../services/codeExecution/executeCode.js";
+import { buildHiddenTestResultsForClient } from "../services/codeExecution/executionUtils.js";
+import {
+  INTERVIEW_LIMIT_REASON,
+  isOneInterviewPerUserEnabled,
+} from "../config/interviewLimits.js";
 
 const router = express.Router();
 router.use(authJWT);
@@ -70,8 +77,25 @@ router.use(authorize(["student", "admin", "spc"]));
 const getAuthenticatedUserId = (req) => String(req.user?.userId || "").trim();
 const isSessionOwner = (session, userId) => String(session?.userId || "") === userId;
 
+const getAuthenticatedUserRole = (req) =>
+  req.user?.role || (req.user?.isAdminSession ? "admin" : "student");
+
+const isInterviewLimitBypassRole = (req) => {
+  if (req.user?.isAdminSession === true) return true;
+  return getAuthenticatedUserRole(req) === "admin";
+};
+
 /** DSA rounds never show or plan more than three questions (legacy sessions may still store a higher count). */
 const isDsaInterviewRoundType = (t) => String(t || "").trim().toUpperCase() === "DSA";
+
+const visibleTestCasesFromDoc = (testCases) =>
+  dedupeTestCases(Array.isArray(testCases) ? testCases : [])
+    .filter((testcase) => testcase?.isHidden !== true)
+    .map((testcase) => ({
+      input: testcase?.input ?? null,
+      expectedOutput: testcase?.expectedOutput ?? null,
+      weight: Number(testcase?.weight) || 1,
+    }));
 
 const toClientStatus = (state) =>
   state === INTERVIEW_STATES.INTERVIEW_COMPLETE ? "completed" : "in_progress";
@@ -103,6 +127,8 @@ const buildLastCodeExecutionSummary = (evaluationTrace) => {
   if (!ex || typeof ex !== "object") return null;
   const totalCount = Number(ex.totalCount);
   if (!Number.isFinite(totalCount) || totalCount < 0) return null;
+  const hiddenTotalCount = Number(ex.hiddenTotalCount) || 0;
+  const hiddenPassedCount = Number(ex.hiddenPassedCount) || 0;
   return {
     status: String(ex.status || ""),
     totalCount,
@@ -110,8 +136,13 @@ const buildLastCodeExecutionSummary = (evaluationTrace) => {
     failedCount: Number(ex.failedCount) || 0,
     visibleTotalCount: Number(ex.visibleTotalCount) || 0,
     visiblePassedCount: Number(ex.visiblePassedCount) || 0,
-    hiddenTotalCount: Number(ex.hiddenTotalCount) || 0,
-    hiddenPassedCount: Number(ex.hiddenPassedCount) || 0,
+    hiddenTotalCount,
+    hiddenPassedCount,
+    hiddenTestResults: buildHiddenTestResultsForClient({
+      ...ex,
+      hiddenTotalCount,
+      hiddenPassedCount,
+    }),
     userDebugOutput: typeof ex.userDebugOutput === "string" ? ex.userDebugOutput : "",
   };
 };
@@ -225,7 +256,6 @@ const latencyWindows = {
 };
 const previewCooldownBySessionUser = new Map();
 const PREVIEW_COOLDOWN_MS = 2000;
-const PREVIEW_RUN_LIMIT_PER_QUESTION = 3;
 const PREVIEW_QUESTION_LOOKUP_CANDIDATE_LIMIT = 2000;
 
 const toSafeString = (value, fallback = "") =>
@@ -439,6 +469,23 @@ router.get("/visit-options/:companyId", async (req, res) => {
   }
 });
 
+router.get("/eligibility", async (req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const bypassLimit = !isOneInterviewPerUserEnabled() || isInterviewLimitBypassRole(req);
+    const eligibility = await getInterviewStartEligibility(userId, { bypassLimit });
+
+    return res.json(eligibility);
+  } catch (error) {
+    console.error("❌ Error fetching interview eligibility:", error.message);
+    return res.status(500).json({ error: "Failed to fetch interview eligibility" });
+  }
+});
+
 router.post("/start-interview", validateRequest(interviewStartSchema), async (req, res) => {
   try {
     const {
@@ -453,6 +500,17 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
 
     if (!userId) {
       return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    if (isOneInterviewPerUserEnabled() && !isInterviewLimitBypassRole(req)) {
+      const eligibility = await getInterviewStartEligibility(userId);
+      if (!eligibility.canStart) {
+        return res.status(403).json({
+          code: eligibility.reason || INTERVIEW_LIMIT_REASON,
+          error: eligibility.message || "Interview limit reached.",
+          completedCount: eligibility.completedCount,
+        });
+      }
     }
 
     if (!companyId) {
@@ -824,14 +882,6 @@ router.post("/run-preview", validateRequest(interviewRunPreviewSchema), async (r
       return res.status(400).json({ success: false, message: "No active question available." });
     }
 
-    const runCount = Number(questionSlot.previewRunCount) || 0;
-    if (runCount >= PREVIEW_RUN_LIMIT_PER_QUESTION) {
-      return res.status(429).json({
-        success: false,
-        message: "Preview run limit reached for this question.",
-      });
-    }
-
     const strategy = String(
       questionSlot.evaluationStrategy ||
         (String(language || "").toLowerCase() === "sql" ? "rubric_llm" : "code_execution")
@@ -904,9 +954,7 @@ router.post("/run-preview", validateRequest(interviewRunPreviewSchema), async (r
 
     let executionPayload;
     if (strategy === "code_execution") {
-      const visibleTestCases = (Array.isArray(questionDoc.testCases) ? questionDoc.testCases : []).filter(
-        (testcase) => testcase?.isHidden !== true
-      );
+      const visibleTestCases = visibleTestCasesFromDoc(questionDoc.testCases);
       console.log(
         "[previewQuestionLookup] run-preview: resolved coding question",
         buildPreviewLookupLogContext({
@@ -967,33 +1015,14 @@ router.post("/run-preview", validateRequest(interviewRunPreviewSchema), async (r
     }
 
     const previewPath = `rounds.${currentRoundIndex}.questions.${currentQuestionIndex}.previewRunCount`;
-    const runCountFilter =
-      runCount === 0
-        ? {
-            $or: [{ [previewPath]: 0 }, { [previewPath]: { $exists: false } }],
-          }
-        : { [previewPath]: runCount };
-    const updateResult = await mongoose.connection.collection("interviewsessions").updateOne(
-      {
-        _id: session._id,
-        ...runCountFilter,
-      },
-      {
-        $inc: { [previewPath]: 1 },
-      }
+    await mongoose.connection.collection("interviewsessions").updateOne(
+      { _id: session._id },
+      { $inc: { [previewPath]: 1 } }
     );
-    if (!updateResult?.matchedCount) {
-      return res.status(409).json({
-        success: false,
-        message: "Preview run state changed. Please retry.",
-      });
-    }
 
-    const remainingRuns = Math.max(0, PREVIEW_RUN_LIMIT_PER_QUESTION - (runCount + 1));
     console.log("[runPreview] completed", {
       sessionId,
       questionId: questionDoc?.questionId || "",
-      remainingRuns,
       strategy,
       status: executionPayload?.status,
     });
@@ -1005,7 +1034,7 @@ router.post("/run-preview", validateRequest(interviewRunPreviewSchema), async (r
 
     return res.json({
       success: true,
-      remainingRuns,
+      remainingRuns: null,
       execution: {
         status: executionPayload?.status,
         error: typeof executionPayload?.error === "string" ? executionPayload.error : "",
@@ -1137,20 +1166,12 @@ router.get("/interview-status/:sessionId", async (req, res) => {
         }
       );
     }
-    const visibleTestCases = Array.isArray(previewQuestionDoc?.testCases)
-      ? previewQuestionDoc.testCases
-          .filter((testcase) => testcase?.isHidden !== true)
-          .map((testcase) => ({
-            input: testcase?.input ?? null,
-            expectedOutput: testcase?.expectedOutput ?? null,
-            weight: Number(testcase?.weight) || 1,
-          }))
-      : [];
+    const visibleTestCases = visibleTestCasesFromDoc(previewQuestionDoc?.testCases);
     const questionUrl =
       String(slotNow?.questionUrl || "").trim() ||
       String(previewQuestionDoc?.url || "").trim();
     const previewRunCount = Number(slotNow?.previewRunCount) || 0;
-    const previewRunsRemaining = Math.max(0, PREVIEW_RUN_LIMIT_PER_QUESTION - previewRunCount);
+    const previewRunsRemaining = null;
     const previewSqlContext = null;
 
     const sessionInterviewStatus = session.state;
