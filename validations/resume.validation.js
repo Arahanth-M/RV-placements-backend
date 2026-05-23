@@ -3,7 +3,7 @@ import Joi from "joi";
 const TEMPLATE_IDS = ["standard_ats", "iiitv_latex_style"];
 
 const text = (max) => Joi.string().trim().max(max).allow("");
-const requiredText = (min, max) => Joi.string().trim().min(min).max(max).required();
+const skillItem = Joi.string().trim().min(1).max(80);
 
 const bulletSchema = Joi.object({
   text: text(250),
@@ -64,7 +64,7 @@ const resumePayloadSchema = Joi.object({
     .default("standard_ats"),
   personal: personalSchema.default({}),
   education: Joi.array().items(educationSchema).max(8).default([]),
-  skills: Joi.array().items(requiredText(1, 80)).max(40).default([]),
+  skills: Joi.array().items(skillItem).max(40).default([]),
   projects: Joi.array().items(projectSchema).max(12).default([]),
   experience: Joi.array().items(experienceSchema).max(10).default([]),
   certifications: Joi.array().items(certificationSchema).max(15).default([]),
@@ -77,7 +77,11 @@ export const resumeDraftSaveSchema = Joi.object({
 }).unknown(false);
 
 export const resumeExportSchema = Joi.object({
-  payload: resumePayloadSchema.required(),
+  payload: resumePayloadSchema
+    .keys({
+      skills: Joi.array().items(skillItem).min(1).max(40).required(),
+    })
+    .required(),
 }).unknown(false);
 
 export const allowedResumeTemplates = TEMPLATE_IDS;

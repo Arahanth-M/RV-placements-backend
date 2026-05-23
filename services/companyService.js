@@ -1346,17 +1346,19 @@ export async function findAnyLatestVisitForCompanyYear(
 ) {
   const match = buildCompanyVisitCompanyYearMatch(companyId, year);
   if (!match) return null;
-  const one = await CompanyVisit.find(match)
+  const candidatesRaw = await CompanyVisit.find(match)
     .sort({ migratedAt: -1, _id: -1 })
-    .limit(1)
     .lean();
-  if (!one.length) return null;
+  if (!candidatesRaw.length) return null;
   const clusterFilter = normalizePlacementClusterQuery(placementClusterRaw);
-  if (!clusterFilter) return one[0] ?? null;
-  const scoped = one.filter(
-    (v) => clusterKeyFromPlacementVisitClusterField(v?.cluster) === clusterFilter
-  );
-  return scoped[0] ?? null;
+  const scopedRaw =
+    clusterFilter == null
+      ? candidatesRaw
+      : candidatesRaw.filter(
+          (v) => clusterKeyFromPlacementVisitClusterField(v?.cluster) === clusterFilter
+        );
+  if (!scopedRaw.length) return null;
+  return visitWithPlainRoleCtc(scopedRaw[0]);
 }
 
 /** @param {Record<string, unknown>} visit */
@@ -2276,7 +2278,8 @@ export async function getCompanyMergedForAdminById(
   id,
   placementYear = COMPANY_VISIT_YEAR,
   placementListContext = null,
-  companyVisitIdHint = null
+  companyVisitIdHint = null,
+  placementClusterRaw = null
 ) {
   const _id = toObjectId(id);
   if (!_id) {
@@ -2287,6 +2290,7 @@ export async function getCompanyMergedForAdminById(
     return { merged: null, staticRow: null, visit: null };
   }
   const year = normalizeCompanyDetailYear(placementYear);
+  const clusterFilter = normalizePlacementClusterQuery(placementClusterRaw);
   const visitHintOid = toObjectId(companyVisitIdHint);
   let visit = null;
   if (visitHintOid) {
@@ -2294,7 +2298,9 @@ export async function getCompanyMergedForAdminById(
     if (
       hit &&
       visitEffectiveMatchYear(hit) === year &&
-      visitRowBelongsToCompanyStatic(hit, staticRow)
+      visitRowBelongsToCompanyStatic(hit, staticRow) &&
+      (!clusterFilter ||
+        clusterKeyFromPlacementVisitClusterField(hit?.cluster) === clusterFilter)
     ) {
       visit = visitWithPlainRoleCtc(hit);
     }
@@ -2306,8 +2312,13 @@ export async function getCompanyMergedForAdminById(
         : null;
     visit =
       ctxTrim != null
-        ? await findAnyLatestVisitForCompanyYearMatchingContext(_id, year, ctxTrim)
-        : await findAnyLatestVisitForCompanyYear(_id, year);
+        ? await findAnyLatestVisitForCompanyYearMatchingContext(
+            _id,
+            year,
+            ctxTrim,
+            placementClusterRaw
+          )
+        : await findAnyLatestVisitForCompanyYear(_id, year, placementClusterRaw);
   }
   const mustDoTopicVisitsByCompany = await fetchMustDoTopicVisitsByCompany([_id]);
   const mustDoTopicVisits = mustDoTopicVisitsByCompany.get(String(_id)) ?? [];
@@ -2841,9 +2852,15 @@ export function buildSpcConversionVisitPatch(existingMergedRoles, fields) {
   const baseStr = String(fields?.base ?? "").trim();
   const stipStr = String(fields?.stipend ?? "").trim();
   const roleTrim = String(fields?.role ?? "").trim();
-  const hasComp = Boolean(ctcStr || baseStr || stipStr);
+  const hasComp =
+    Boolean(roleTrim) ||
+    Boolean(
+      (ctcStr && !/^(tbd|tba|n\/a|na)$/i.test(ctcStr)) ||
+        (baseStr && !/^(tbd|tba|n\/a|na)$/i.test(baseStr)) ||
+        (stipStr && !/^(tbd|tba|n\/a|na)$/i.test(stipStr))
+    );
 
-  if (hasComp || roleTrim) {
+  if (hasComp) {
     patch.roles = mergeSpcOfferIntoVisitRoles(existingMergedRoles || [], {
       roleName: roleTrim,
       ctcStr,
@@ -2880,7 +2897,7 @@ export async function syncAnchoredVisitSpcConversionFields(
           cid,
           year,
           placementListContextRaw,
-          "placement_got_in",
+          "ppo_branch",
           branchForScope
         );
   const staticRow = await CompanyStatic.findById(cid).lean();
@@ -2892,6 +2909,34 @@ export async function syncAnchoredVisitSpcConversionFields(
 
   await updateCompanyVisit(cid, patch, year, visitHint);
   return { ok: true };
+}
+
+/**
+ * Whether SPC conversion submit should increment `ppoBranchStats[].converted` for this branch.
+ * True when the placement row never had a conversion type, or the visit still shows got-in but zero converted
+ * (e.g. conversion type was set via edit form without bumping stats).
+ * @param {Record<string, unknown>|null|undefined} existingPlacement
+ * @param {Record<string, unknown>|null|undefined} mergedVisitLegacy — output of {@link mergeToLegacyShape}
+ * @param {unknown} branchCodeRaw
+ */
+export function shouldIncrementPpoConvertedForSpcConversion(
+  existingPlacement,
+  mergedVisitLegacy,
+  branchCodeRaw
+) {
+  const code = String(branchCodeRaw || "").trim().toLowerCase();
+  if (!PPO_BRANCH_CODES.has(code)) return false;
+  if (!String(existingPlacement?.ppoConversionType || "").trim()) return true;
+
+  const rows = Array.isArray(mergedVisitLegacy?.ppoBranchStats)
+    ? mergedVisitLegacy.ppoBranchStats
+    : [];
+  const row = rows.find((r) => String(r?.branchCode || "").trim().toLowerCase() === code);
+  if (!row) return true;
+  if (Boolean(row.convertedNotApplicable)) return false;
+  const gotIn = Math.max(0, Number.parseInt(String(row.gotIn ?? 0), 10)) || 0;
+  const converted = Math.max(0, Number.parseInt(String(row.converted ?? 0), 10)) || 0;
+  return gotIn > 0 && converted === 0;
 }
 
 /**
@@ -2926,7 +2971,9 @@ export async function incrementPpoBranchGotInForAnchoredVisit(
   const cd = Number(convertedDelta);
   const dOk = Number.isFinite(d) && d !== 0;
   const cdOk = Number.isFinite(cd) && cd !== 0;
-  if (!dOk && !cdOk) {
+  const spc = options?.spcConversion;
+  const hasSpcPatch = spc && typeof spc === "object";
+  if (!dOk && !cdOk && !hasSpcPatch) {
     return { ok: false, reason: "invalid_delta" };
   }
 
@@ -2979,12 +3026,13 @@ export async function incrementPpoBranchGotInForAnchoredVisit(
   const aggregates = recomputePpoConversionAggregatesFromNormalized(normalized);
 
   /** @type {Record<string, unknown>} */
-  const payload = {
-    ppoBranchStats: normalized,
-    ...aggregates,
-  };
-  const spc = options?.spcConversion;
-  if (spc && typeof spc === "object") {
+  /** @type {Record<string, unknown>} */
+  const payload = {};
+  if (dOk || cdOk) {
+    payload.ppoBranchStats = normalized;
+    Object.assign(payload, aggregates);
+  }
+  if (hasSpcPatch) {
     const visitPatch = buildSpcConversionVisitPatch(merged.roles || [], spc);
     if (visitPatch.ppoConversionType) payload.ppoConversionType = visitPatch.ppoConversionType;
     if (visitPatch.roles) payload.roles = visitPatch.roles;
@@ -3526,7 +3574,8 @@ export async function persistMergedCompany(
   mergedPayload,
   placementYear = COMPANY_VISIT_YEAR,
   placementListContext = null,
-  companyVisitIdHint = null
+  companyVisitIdHint = null,
+  placementClusterRaw = null
 ) {
   await updateCompanyStatic(companyId, mergedPayload);
   await ensureAdminVisitForYear(companyId, placementYear);
@@ -3534,7 +3583,8 @@ export async function persistMergedCompany(
     companyId,
     placementYear,
     placementListContext,
-    companyVisitIdHint
+    companyVisitIdHint,
+    placementClusterRaw
   );
   await updateCompanyVisit(companyId, mergedPayload, placementYear, visit);
 }

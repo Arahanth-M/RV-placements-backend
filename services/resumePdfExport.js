@@ -13,18 +13,30 @@ const CONTENT_WIDTH = PAGE_SIZE[0] - MARGIN_X * 2;
 
 const IIITV = "iiitv_latex_style";
 
+function splitLongToken(token, maxChars) {
+  const value = String(token || "");
+  if (value.length <= maxChars) return [value];
+  const chunks = [];
+  for (let i = 0; i < value.length; i += maxChars) {
+    chunks.push(value.slice(i, i + maxChars));
+  }
+  return chunks;
+}
+
 function wrapText(text, maxChars = 96) {
   const words = String(text || "").trim().split(/\s+/).filter(Boolean);
   if (!words.length) return [];
   const lines = [];
   let current = "";
   for (const word of words) {
-    const next = current ? `${current} ${word}` : word;
-    if (next.length > maxChars) {
-      if (current) lines.push(current);
-      current = word;
-    } else {
-      current = next;
+    for (const chunk of splitLongToken(word, maxChars)) {
+      const next = current ? `${current} ${chunk}` : chunk;
+      if (next.length > maxChars) {
+        if (current) lines.push(current);
+        current = chunk;
+      } else {
+        current = next;
+      }
     }
   }
   if (current) lines.push(current);

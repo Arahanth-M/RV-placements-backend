@@ -11,8 +11,9 @@ import {
   incrementPpoBranchGotInForAnchoredVisit,
   incrementPlacementGotInBranchForAnchoredVisit,
   mapPlacementTypeOfOfferToSpcConversionType,
+  mergeToLegacyShape,
   resolveApprovedVisitForSpcPlacementOffer,
-  syncAnchoredVisitSpcConversionFields,
+  shouldIncrementPpoConvertedForSpcConversion,
 } from "../services/companyService.js";
 import { COMPANY_DETAIL_VISIT_YEARS } from "../utils/placementYears.js";
 import { PPO_BRANCH_CODES } from "../utils/ppoBranchCodes.js";
@@ -803,8 +804,15 @@ router.post(
         });
       }
 
-      const firstTimeConversionForThisRecord = !String(existing.ppoConversionType || "").trim();
-      const shouldIncrementConvertedOnly = Boolean(firstTimeConversionForThisRecord);
+      const staticRowForVisit = await CompanyStatic.findById(cid).lean();
+      const mergedVisitLegacy = staticRowForVisit
+        ? mergeToLegacyShape(staticRowForVisit, resolvedVisit)
+        : null;
+      const shouldBumpConverted = shouldIncrementPpoConvertedForSpcConversion(
+        existing,
+        mergedVisitLegacy,
+        branchLower
+      );
       const stipendVal =
         conversionType === "fte_internship"
           ? stipendInput
@@ -830,41 +838,21 @@ router.post(
         createdBy,
       });
 
-      let incVisitOk = true;
-      if (shouldIncrementConvertedOnly) {
-        const inc = await incrementPpoBranchGotInForAnchoredVisit(
-          companyId,
-          placementYear,
-          branchCode,
-          0,
-          1,
-          {
-            placementListContext: placementCtxForVisit,
-            resolvedVisit,
-            spcConversion: visitSyncFields,
-          }
-        );
-        incVisitOk = inc.ok;
-        if (!incVisitOk) {
-          console.warn(
-            "SPC conversion-details: PPO converted increment failed:",
-            inc.reason
-          );
+      const inc = await incrementPpoBranchGotInForAnchoredVisit(
+        companyId,
+        placementYear,
+        branchCode,
+        0,
+        shouldBumpConverted ? 1 : 0,
+        {
+          placementListContext: placementCtxForVisit,
+          resolvedVisit,
+          spcConversion: visitSyncFields,
+          branchCode: branchLower,
         }
-      } else {
-        const visitSync = await syncAnchoredVisitSpcConversionFields(
-          companyId,
-          placementYear,
-          visitSyncFields,
-          placementCtxForVisit,
-          { resolvedVisit, branchCode: branchLower }
-        );
-        if (!visitSync.ok) {
-          console.warn("SPC conversion-details: visit extras sync failed:", visitSync.reason);
-        }
-      }
-
-      if (!incVisitOk) {
+      );
+      if (!inc.ok) {
+        console.warn("SPC conversion-details: visit PPO stats/roles sync failed:", inc.reason);
         return res.status(500).json({
           message: "Failed to update company visit PPO conversion stats",
         });
@@ -877,7 +865,7 @@ router.post(
       ]);
 
       return res.json({
-        message: shouldIncrementConvertedOnly ? "Conversion details saved" : "Conversion details updated",
+        message: shouldBumpConverted ? "Conversion details saved" : "Conversion details updated",
         studentId: student._id,
         placementId: existing._id,
         ppoBranchConvertedIncremented: shouldIncrementConvertedOnly,

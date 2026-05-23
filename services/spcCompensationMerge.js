@@ -1,14 +1,14 @@
 /**
  * LMPP Type-1 style merge: SPC compensation into visit `roles[]` with TBD-aware
- * field merge and close/far numeric comparison.
+ * field merge and close/far numeric comparison (±5 LPA).
  */
 import { parseCtcStringToRupees, RUPEES_PER_LPA } from "../utils/ctcCategory.js";
 
-/** Within 10% or ₹5 LPA — same package band. */
-export const SPC_COMP_CLOSE_RELATIVE = 0.1;
+/** Within ±5 LPA — same package band (LMPP spec). */
 export const SPC_COMP_CLOSE_ABSOLUTE_RUPEES = 5 * RUPEES_PER_LPA;
 
-const PLACEMENT_DETAILS_FALLBACK = "Placement details";
+/** @deprecated Use absolute 5 LPA band only; kept for tests that import the name. */
+export const SPC_COMP_CLOSE_RELATIVE = 0.1;
 
 /** @param {unknown} name */
 export function isSpcRolePlaceholderName(name) {
@@ -56,10 +56,26 @@ export function classifyCompensationValue(raw) {
  * @param {number} b
  */
 export function compensationRupeesClose(a, b) {
-  const diff = Math.abs(a - b);
-  const denom = Math.max(Math.abs(a), Math.abs(b), 1);
+  return Math.abs(a - b) <= SPC_COMP_CLOSE_ABSOLUTE_RUPEES;
+}
+
+/**
+ * Submitted value is "close" to existing when existing is blank/TBD or within ±5 LPA.
+ * @param {unknown} existingRaw
+ * @param {unknown} submittedRaw
+ */
+export function compensationValuesClose(existingRaw, submittedRaw) {
+  if (isCompensationPlaceholder(submittedRaw)) return false;
+  if (isCompensationPlaceholder(existingRaw) || !String(existingRaw ?? "").trim()) {
+    return true;
+  }
+  const ex = classifyCompensationValue(existingRaw);
+  const sub = classifyCompensationValue(submittedRaw);
+  if (ex.kind === "numeric" && sub.kind === "numeric") {
+    return compensationRupeesClose(ex.rupees, sub.rupees);
+  }
   return (
-    diff <= SPC_COMP_CLOSE_ABSOLUTE_RUPEES || diff / denom <= SPC_COMP_CLOSE_RELATIVE
+    String(existingRaw).trim().toLowerCase() === String(submittedRaw).trim().toLowerCase()
   );
 }
 
@@ -148,46 +164,124 @@ export function collapseRoleCtcKeyAliases(ctc) {
 
 /**
  * @param {{ roleName: string, ctc: Record<string, unknown>, internshipStipend?: number }} role
- * @param {{ ctcStr?: string, baseStr?: string, stipendStr?: string }} comp
+ * @param {"ctc"|"base"|"stipend"} kind
  */
-function roleHasCloseCompensation(role, comp) {
+function getRoleCompField(role, kind) {
+  const ctc = role.ctc && typeof role.ctc === "object" ? role.ctc : {};
+  if (kind === "ctc") return ctc.CTC ?? ctc.Ctc ?? ctc.ctc;
+  if (kind === "base") return ctc.Base ?? ctc.base;
+  return role.internshipStipend;
+}
+
+/**
+ * @param {{ roleName: string, ctc: Record<string, unknown>, internshipStipend?: number }} role
+ */
+function roleHasNumericCompensation(role) {
   const ctc = role.ctc && typeof role.ctc === "object" ? role.ctc : {};
   const ctcEx = ctc.CTC ?? ctc.Ctc ?? ctc.ctc;
   const baseEx = ctc.Base ?? ctc.base;
+  if (classifyCompensationValue(ctcEx).kind === "numeric") return true;
+  if (classifyCompensationValue(baseEx).kind === "numeric") return true;
+  const st = Number(role.internshipStipend);
+  return Number.isFinite(st) && st > 0;
+}
 
-  if (
-    !isCompensationPlaceholder(comp.ctcStr) &&
-    classifyCompensationValue(ctcEx).kind === "numeric" &&
-    classifyCompensationValue(comp.ctcStr).kind === "numeric" &&
-    compensationRupeesClose(
-      /** @type {{ kind: "numeric", rupees: number }} */ (classifyCompensationValue(ctcEx)).rupees,
-      /** @type {{ kind: "numeric", rupees: number }} */ (classifyCompensationValue(comp.ctcStr)).rupees
-    )
-  ) {
-    return true;
+/**
+ * True when every submitted numeric field is within ±5 LPA of some numeric value already on the card.
+ * (TBD/blank on the card does not count as "already added" for distance.)
+ * @param {{ roleName: string, ctc: Record<string, unknown>, internshipStipend?: number }}[] roles
+ * @param {{ ctcStr?: string, baseStr?: string, stipendStr?: string }} comp
+ */
+export function submissionCloseToVisitCompensation(roles, comp) {
+  /** @type {{ kind: "ctc"|"base"|"stipend", submitted: string }[]} */
+  const fields = [];
+  if (!isCompensationPlaceholder(comp.ctcStr)) {
+    fields.push({ kind: "ctc", submitted: String(comp.ctcStr).trim() });
   }
-  if (
-    !isCompensationPlaceholder(comp.baseStr) &&
-    classifyCompensationValue(baseEx).kind === "numeric" &&
-    classifyCompensationValue(comp.baseStr).kind === "numeric" &&
-    compensationRupeesClose(
-      /** @type {{ kind: "numeric", rupees: number }} */ (classifyCompensationValue(baseEx)).rupees,
-      /** @type {{ kind: "numeric", rupees: number }} */ (classifyCompensationValue(comp.baseStr)).rupees
-    )
-  ) {
-    return true;
+  if (!isCompensationPlaceholder(comp.baseStr)) {
+    fields.push({ kind: "base", submitted: String(comp.baseStr).trim() });
   }
-  const stipNum = stipendToNumber(comp.stipendStr);
-  const prevStip = Number(role.internshipStipend);
-  if (
-    stipNum !== undefined &&
-    Number.isFinite(prevStip) &&
-    prevStip > 0 &&
-    compensationRupeesClose(prevStip, stipNum)
-  ) {
-    return true;
+  if (!isCompensationPlaceholder(comp.stipendStr)) {
+    fields.push({ kind: "stipend", submitted: String(comp.stipendStr).trim() });
   }
-  return false;
+  if (fields.length === 0) return true;
+
+  const hasNumericOnCard = roles.some((r) => roleHasNumericCompensation(r));
+  if (!hasNumericOnCard) return false;
+
+  for (const { kind, submitted } of fields) {
+    const sub = classifyCompensationValue(submitted);
+    if (sub.kind !== "numeric") continue;
+
+    let closeForField = false;
+    for (const role of roles) {
+      if (kind === "stipend") {
+        const stipNum = stipendToNumber(submitted);
+        if (stipNum === undefined) continue;
+        const prev = Number(role.internshipStipend);
+        if (Number.isFinite(prev) && prev > 0 && compensationRupeesClose(prev, stipNum)) {
+          closeForField = true;
+          break;
+        }
+      } else {
+        const ex = getRoleCompField(role, kind);
+        const exKind = classifyCompensationValue(ex);
+        if (
+          exKind.kind === "numeric" &&
+          compensationRupeesClose(exKind.rupees, sub.rupees)
+        ) {
+          closeForField = true;
+          break;
+        }
+      }
+    }
+    if (!closeForField) return false;
+  }
+  return true;
+}
+
+/**
+ * Merge into a placeholder row when existing fields are blank/TBD (fill) or numerically close on that row.
+ * @param {{ roleName: string, ctc: Record<string, unknown>, internshipStipend?: number }} row
+ * @param {{ ctcStr?: string, baseStr?: string, stipendStr?: string }} comp
+ */
+function placeholderRowAcceptsMerge(row, comp) {
+  if (!hasAnyCompensation(comp)) return false;
+
+  /** @type {{ kind: "ctc"|"base"|"stipend", submitted: string }[]} */
+  const fields = [];
+  if (!isCompensationPlaceholder(comp.ctcStr)) {
+    fields.push({ kind: "ctc", submitted: String(comp.ctcStr).trim() });
+  }
+  if (!isCompensationPlaceholder(comp.baseStr)) {
+    fields.push({ kind: "base", submitted: String(comp.baseStr).trim() });
+  }
+  if (!isCompensationPlaceholder(comp.stipendStr)) {
+    fields.push({ kind: "stipend", submitted: String(comp.stipendStr).trim() });
+  }
+
+  for (const { kind, submitted } of fields) {
+    if (kind === "stipend") {
+      const stipNum = stipendToNumber(submitted);
+      if (stipNum === undefined) continue;
+      const prev = Number(row.internshipStipend);
+      if (!Number.isFinite(prev) || prev <= 0) continue;
+      const sub = classifyCompensationValue(submitted);
+      if (sub.kind === "numeric" && !compensationRupeesClose(prev, stipNum)) {
+        return false;
+      }
+      continue;
+    }
+    const ex = getRoleCompField(row, kind);
+    if (!compensationValuesClose(ex, submitted)) {
+      const exKind = classifyCompensationValue(ex);
+      const subKind = classifyCompensationValue(submitted);
+      if (exKind.kind === "numeric" && subKind.kind === "numeric") {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 /**
@@ -245,6 +339,17 @@ function dropPlaceholderRolesExcept(roles, concreteRoleName) {
 }
 
 /**
+ * @param {{ roleName: string, ctc: Record<string, unknown>, internshipStipend?: number }}[] roles
+ * @param {string} roleTrim
+ */
+function hasOtherConcreteRole(roles, roleTrim) {
+  return roles.some(
+    (r) =>
+      !isSpcRolePlaceholderName(r.roleName) && !roleNamesMatch(r.roleName, roleTrim)
+  );
+}
+
+/**
  * @param {unknown[]} existingRoles
  * @param {{ roleName?: string, ctcStr?: string, baseStr?: string, stipendStr?: string }} patch
  * @returns {Array<{ roleName: string, ctc: Record<string, unknown>, internshipStipend?: number }>}
@@ -282,7 +387,7 @@ export function mergeSpcOfferIntoVisitRoles(existingRoles, patch) {
     return roles;
   }
 
-  // Role name only (no compensation sent)
+  // Role name only (no compensation sent) — cases 1/4 with TBD comp fields
   if (!anyComp && roleTrim && !roleIsPlaceholder) {
     let idx = roles.findIndex((r) => roleNamesMatch(r.roleName, roleTrim));
     if (idx < 0) {
@@ -297,73 +402,47 @@ export function mergeSpcOfferIntoVisitRoles(existingRoles, patch) {
   }
   if (!anyComp) return roles;
 
-  // Case 2 / 5: exact role name match → field-level merge
+  const phIdx = roles.findIndex((r) => isSpcRolePlaceholderName(r.roleName));
+  const compCloseToNumericOnCard = submissionCloseToVisitCompensation(roles, comp);
+  const numericOnCard = roles.some((r) => roleHasNumericCompensation(r));
+
+  // Case 3 (and case 6 partial): TBD role + some real compensation
+  if (roleIsPlaceholder) {
+    if (phIdx >= 0 && placeholderRowAcceptsMerge(roles[phIdx], comp)) {
+      roles[phIdx] = mergeIntoRole(roles[phIdx], comp, { roleName: "TBD" });
+    } else {
+      roles.push(newRoleFromComp("TBD", comp));
+    }
+    return roles;
+  }
+
+  // Case 2 / 5: exact concrete role name match → field-level merge
   const exactIdx = roleTrim
     ? roles.findIndex((r) => roleNamesMatch(r.roleName, roleTrim))
     : -1;
   if (exactIdx >= 0) {
     roles[exactIdx] = mergeIntoRole(roles[exactIdx], comp);
-    if (!roleIsPlaceholder) {
-      return dropPlaceholderRolesExcept(roles, roleTrim);
-    }
-    return roles;
+    return dropPlaceholderRolesExcept(roles, roleTrim);
   }
 
-  const closeIdx = roles.findIndex(
-    (r) => !isSpcRolePlaceholderName(r.roleName) && roleHasCloseCompensation(r, comp)
-  );
-  const phIdx = roles.findIndex((r) => isSpcRolePlaceholderName(r.roleName));
-
-  // Case 3: TBD role + some real comp
-  if (roleIsPlaceholder) {
-    if (closeIdx >= 0) {
-      roles[closeIdx] = mergeIntoRole(roles[closeIdx], comp);
-      return roles;
-    }
-    if (phIdx >= 0) {
-      if (roleHasCloseCompensation(roles[phIdx], comp) || !hasAnyCompensation(comp)) {
-        roles[phIdx] = mergeIntoRole(roles[phIdx], comp, { roleName: "TBD" });
-        return roles;
-      }
-      roles.push({
-        roleName: "TBD",
-        ctc: buildCtcFromComp(comp),
-        ...(stipendToNumber(comp.stipendStr) !== undefined
-          ? { internshipStipend: stipendToNumber(comp.stipendStr) }
-          : {}),
-      });
-      return roles;
-    }
-    roles.push({
-      roleName: "TBD",
-      ctc: buildCtcFromComp(comp),
-      ...(stipendToNumber(comp.stipendStr) !== undefined
-        ? { internshipStipend: stipendToNumber(comp.stipendStr) }
-        : {}),
-    });
-    return roles;
-  }
-
-  // Case 1 / 4: concrete new role
-  if (closeIdx >= 0) {
-    roles[closeIdx] = mergeIntoRole(roles[closeIdx], comp, {
-      roleName: roleTrim || roles[closeIdx].roleName,
-    });
-    return dropPlaceholderRolesExcept(roles, roleTrim || roles[closeIdx].roleName);
-  }
-
-  if (phIdx >= 0) {
-    if (roleHasCloseCompensation(roles[phIdx], comp) || allCompensationPlaceholder(comp)) {
-      roles[phIdx] = mergeIntoRole(roles[phIdx], comp, { roleName: roleTrim });
-      return dropPlaceholderRolesExcept(roles, roleTrim);
-    }
-    // Too far from TBD row → append (Case 1 far)
+  // Cases 1 & 4: concrete new role
+  if (hasOtherConcreteRole(roles, roleTrim)) {
     roles.push(newRoleFromComp(roleTrim, comp));
+    return roles;
+  }
+
+  if (
+    phIdx >= 0 &&
+    (placeholderRowAcceptsMerge(roles[phIdx], comp) ||
+      (!numericOnCard && hasAnyCompensation(comp)) ||
+      compCloseToNumericOnCard)
+  ) {
+    roles[phIdx] = mergeIntoRole(roles[phIdx], comp, { roleName: roleTrim });
     return dropPlaceholderRolesExcept(roles, roleTrim);
   }
 
   roles.push(newRoleFromComp(roleTrim, comp));
-  return dropPlaceholderRolesExcept(roles, roleTrim);
+  return roles;
 }
 
 /**

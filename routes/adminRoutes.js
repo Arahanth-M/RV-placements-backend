@@ -38,6 +38,7 @@ import {
 import { invalidateSpcMyRecordsCacheByEmail } from "../services/spcMyRecordsCache.js";
 import { getStudentPlacementStats } from "../services/studentPlacementStatsCache.js";
 import { invalidateCompanyDetailCache } from "../services/companyDetailCache.js";
+import { normalizePlacementClusterQuery } from "../utils/placementCluster.js";
 
 async function invalidateSubmitterListCaches(submission) {
   const email = submitterEmailFromSubmission(submission);
@@ -163,7 +164,16 @@ function adminStatsVisitResolutionArgs(req) {
   const vidRaw = req.query?.companyVisitId;
   const companyVisitIdHint =
     vidRaw != null && String(vidRaw).trim() !== "" ? String(vidRaw).trim() : null;
-  return { placementListContext, companyVisitIdHint };
+  const placementCluster = normalizePlacementClusterQuery(req.query?.placementCluster);
+  return { placementListContext, companyVisitIdHint, placementCluster };
+}
+
+/** Placement year + visit row for admin company edits (year / hub / visit id from query). */
+function adminVisitContextFromReq(req) {
+  const y = adminVisitYearFromQuery(req);
+  const { placementListContext, companyVisitIdHint, placementCluster } =
+    adminStatsVisitResolutionArgs(req);
+  return { y, placementListContext, companyVisitIdHint, placementCluster };
 }
 
 /** Placement-year filter for admin company listing (`?year=2026|2027|all`). */
@@ -698,13 +708,15 @@ submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
         : null;
 
     const companyVisitIdHint = submission.companyVisitId ?? null;
+    const placementClusterForSub = normalizePlacementClusterQuery(submission.cluster);
 
     await ensureAdminVisitForYear(submission.companyId, placementYear);
     const loadedForSub = await getCompanyMergedForAdminById(
       String(submission.companyId),
       placementYear,
       placementListContext,
-      companyVisitIdHint
+      companyVisitIdHint,
+      placementClusterForSub
     );
     if (!loadedForSub?.staticRow || !loadedForSub.merged) {
       return res.status(404).json({ error: "Company not found" });
@@ -1142,7 +1154,8 @@ submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
         merged,
         placementYear,
         placementListContext,
-        companyVisitIdHint
+        companyVisitIdHint,
+        placementClusterForSub
       );
       console.log("✅ Company updated successfully:", submission.companyId);
 
@@ -1150,7 +1163,8 @@ submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
         String(submission.companyId),
         placementYear,
         placementListContext,
-        companyVisitIdHint
+        companyVisitIdHint,
+        placementClusterForSub
       );
       const visitIdAfter = afterPersist?.visit?._id;
       if (visitIdAfter) {
@@ -1241,7 +1255,8 @@ submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
       String(submission.companyId),
       placementYear,
       placementListContext,
-      companyVisitIdHint
+      companyVisitIdHint,
+      placementClusterForSub
     );
     const companyOut = reloadedSub?.merged
       ? companyToJsonSafePlainObject(reloadedSub.merged)
@@ -1469,8 +1484,14 @@ adminRouter.put(
   validateRequest(adminOaQuestionUpdateSchema),
   async (req, res) => {
   try {
-    const y = adminVisitYearFromQuery(req);
-    const loaded = await getCompanyMergedForAdminById(req.params.id, y);
+    const { y, placementListContext, companyVisitIdHint, placementCluster } = adminVisitContextFromReq(req);
+    const loaded = await getCompanyMergedForAdminById(
+      req.params.id,
+      y,
+      placementListContext,
+      companyVisitIdHint,
+      placementCluster
+    );
     if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
     const merged = { ...loaded.merged };
     const index = parseInt(req.params.index, 10);
@@ -1491,8 +1512,23 @@ adminRouter.put(
       merged.onlineQuestions_solution[index] = sanitizeText(solution);
     }
     await ensureAdminVisitForYear(req.params.id, y);
-    await persistMergedCompany(req.params.id, merged, y);
-    const out = (await getCompanyMergedForAdminById(req.params.id, y))?.merged;
+    await persistMergedCompany(
+      req.params.id,
+      merged,
+      y,
+      placementListContext,
+      companyVisitIdHint,
+      placementCluster
+    );
+    const out = (
+      await getCompanyMergedForAdminById(
+        req.params.id,
+        y,
+        placementListContext,
+        companyVisitIdHint,
+        placementCluster
+      )
+    )?.merged;
     res.json({ message: "OA question updated", company: out });
   } catch (error) {
     console.error("❌ Error updating OA question:", error.message);
@@ -1505,8 +1541,14 @@ adminRouter.put(
 
 adminRouter.delete("/companies/:id/oa-questions/:index", async (req, res) => {
   try {
-    const y = adminVisitYearFromQuery(req);
-    const loaded = await getCompanyMergedForAdminById(req.params.id, y);
+    const { y, placementListContext, companyVisitIdHint, placementCluster } = adminVisitContextFromReq(req);
+    const loaded = await getCompanyMergedForAdminById(
+      req.params.id,
+      y,
+      placementListContext,
+      companyVisitIdHint,
+      placementCluster
+    );
     if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
     const merged = JSON.parse(JSON.stringify(loaded.merged));
     const index = parseInt(req.params.index, 10);
@@ -1520,8 +1562,23 @@ adminRouter.delete("/companies/:id/oa-questions/:index", async (req, res) => {
       merged.onlineQuestions_solution.splice(index, 1);
     }
     await ensureAdminVisitForYear(req.params.id, y);
-    await persistMergedCompany(req.params.id, merged, y);
-    const out = (await getCompanyMergedForAdminById(req.params.id, y))?.merged;
+    await persistMergedCompany(
+      req.params.id,
+      merged,
+      y,
+      placementListContext,
+      companyVisitIdHint,
+      placementCluster
+    );
+    const out = (
+      await getCompanyMergedForAdminById(
+        req.params.id,
+        y,
+        placementListContext,
+        companyVisitIdHint,
+        placementCluster
+      )
+    )?.merged;
     res.json({ message: "OA question deleted", company: out });
   } catch (error) {
     console.error("❌ Error deleting OA question:", error.message);
@@ -1534,8 +1591,14 @@ adminRouter.put(
   validateRequest(adminInterviewQuestionUpdateSchema),
   async (req, res) => {
   try {
-    const y = adminVisitYearFromQuery(req);
-    const loaded = await getCompanyMergedForAdminById(req.params.id, y);
+    const { y, placementListContext, companyVisitIdHint, placementCluster } = adminVisitContextFromReq(req);
+    const loaded = await getCompanyMergedForAdminById(
+      req.params.id,
+      y,
+      placementListContext,
+      companyVisitIdHint,
+      placementCluster
+    );
     if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
     const merged = JSON.parse(JSON.stringify(loaded.merged));
     const index = parseInt(req.params.index, 10);
@@ -1556,8 +1619,23 @@ adminRouter.put(
       merged.interviewQuestions_solution[index] = sanitizeText(solution);
     }
     await ensureAdminVisitForYear(req.params.id, y);
-    await persistMergedCompany(req.params.id, merged, y);
-    const out = (await getCompanyMergedForAdminById(req.params.id, y))?.merged;
+    await persistMergedCompany(
+      req.params.id,
+      merged,
+      y,
+      placementListContext,
+      companyVisitIdHint,
+      placementCluster
+    );
+    const out = (
+      await getCompanyMergedForAdminById(
+        req.params.id,
+        y,
+        placementListContext,
+        companyVisitIdHint,
+        placementCluster
+      )
+    )?.merged;
     res.json({ message: "Interview question updated", company: out });
   } catch (error) {
     console.error("❌ Error updating interview question:", error.message);
@@ -1570,8 +1648,14 @@ adminRouter.put(
 
 adminRouter.delete("/companies/:id/interview-questions/:index", async (req, res) => {
   try {
-    const y = adminVisitYearFromQuery(req);
-    const loaded = await getCompanyMergedForAdminById(req.params.id, y);
+    const { y, placementListContext, companyVisitIdHint, placementCluster } = adminVisitContextFromReq(req);
+    const loaded = await getCompanyMergedForAdminById(
+      req.params.id,
+      y,
+      placementListContext,
+      companyVisitIdHint,
+      placementCluster
+    );
     if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
     const merged = JSON.parse(JSON.stringify(loaded.merged));
     const index = parseInt(req.params.index, 10);
@@ -1585,8 +1669,23 @@ adminRouter.delete("/companies/:id/interview-questions/:index", async (req, res)
       merged.interviewQuestions_solution.splice(index, 1);
     }
     await ensureAdminVisitForYear(req.params.id, y);
-    await persistMergedCompany(req.params.id, merged, y);
-    const out = (await getCompanyMergedForAdminById(req.params.id, y))?.merged;
+    await persistMergedCompany(
+      req.params.id,
+      merged,
+      y,
+      placementListContext,
+      companyVisitIdHint,
+      placementCluster
+    );
+    const out = (
+      await getCompanyMergedForAdminById(
+        req.params.id,
+        y,
+        placementListContext,
+        companyVisitIdHint,
+        placementCluster
+      )
+    )?.merged;
     res.json({ message: "Interview question deleted", company: out });
   } catch (error) {
     console.error("❌ Error deleting interview question:", error.message);
@@ -1599,8 +1698,14 @@ adminRouter.put(
   validateRequest(adminInterviewProcessUpdateSchema),
   async (req, res) => {
   try {
-    const y = adminVisitYearFromQuery(req);
-    const loaded = await getCompanyMergedForAdminById(req.params.id, y);
+    const { y, placementListContext, companyVisitIdHint, placementCluster } = adminVisitContextFromReq(req);
+    const loaded = await getCompanyMergedForAdminById(
+      req.params.id,
+      y,
+      placementListContext,
+      companyVisitIdHint,
+      placementCluster
+    );
     if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
     const merged = JSON.parse(JSON.stringify(loaded.merged));
     const index = parseInt(req.params.index, 10);
@@ -1622,8 +1727,23 @@ adminRouter.put(
     merged.interviewProcess = [...arr];
     merged.interviewProcess[index] = newEntry;
     await ensureAdminVisitForYear(req.params.id, y);
-    await persistMergedCompany(req.params.id, merged, y);
-    const out = (await getCompanyMergedForAdminById(req.params.id, y))?.merged;
+    await persistMergedCompany(
+      req.params.id,
+      merged,
+      y,
+      placementListContext,
+      companyVisitIdHint,
+      placementCluster
+    );
+    const out = (
+      await getCompanyMergedForAdminById(
+        req.params.id,
+        y,
+        placementListContext,
+        companyVisitIdHint,
+        placementCluster
+      )
+    )?.merged;
     res.json({ message: "Interview process updated", company: out });
   } catch (error) {
     console.error("❌ Error updating interview process:", error.message);
@@ -1636,8 +1756,14 @@ adminRouter.put(
 
 adminRouter.delete("/companies/:id/interview-process/:index", async (req, res) => {
   try {
-    const y = adminVisitYearFromQuery(req);
-    const loaded = await getCompanyMergedForAdminById(req.params.id, y);
+    const { y, placementListContext, companyVisitIdHint, placementCluster } = adminVisitContextFromReq(req);
+    const loaded = await getCompanyMergedForAdminById(
+      req.params.id,
+      y,
+      placementListContext,
+      companyVisitIdHint,
+      placementCluster
+    );
     if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
     const merged = JSON.parse(JSON.stringify(loaded.merged));
     const index = parseInt(req.params.index, 10);
@@ -1647,8 +1773,23 @@ adminRouter.delete("/companies/:id/interview-process/:index", async (req, res) =
     merged.interviewProcess = [...merged.interviewProcess];
     merged.interviewProcess.splice(index, 1);
     await ensureAdminVisitForYear(req.params.id, y);
-    await persistMergedCompany(req.params.id, merged, y);
-    const out = (await getCompanyMergedForAdminById(req.params.id, y))?.merged;
+    await persistMergedCompany(
+      req.params.id,
+      merged,
+      y,
+      placementListContext,
+      companyVisitIdHint,
+      placementCluster
+    );
+    const out = (
+      await getCompanyMergedForAdminById(
+        req.params.id,
+        y,
+        placementListContext,
+        companyVisitIdHint,
+        placementCluster
+      )
+    )?.merged;
     res.json({ message: "Interview process entry deleted", company: out });
   } catch (error) {
     console.error("❌ Error deleting interview process:", error.message);
@@ -1662,13 +1803,14 @@ adminRouter.put(
   async (req, res) => {
     try {
       const y = adminVisitYearFromQuery(req);
-      const { placementListContext, companyVisitIdHint } =
+      const { placementListContext, companyVisitIdHint, placementCluster } =
         adminStatsVisitResolutionArgs(req);
       const loaded = await getCompanyMergedForAdminById(
         req.params.id,
         y,
         placementListContext,
-        companyVisitIdHint
+        companyVisitIdHint,
+        placementCluster
       );
       if (!loaded?.merged || !loaded?.visit) {
         return res.status(404).json({ error: "Company visit not found" });
@@ -1701,7 +1843,8 @@ adminRouter.put(
           req.params.id,
           y,
           placementListContext,
-          companyVisitIdHint
+          companyVisitIdHint,
+          placementCluster
         )
       )?.merged;
       res.json({ message: "Must do topic updated", company: out });
@@ -1726,7 +1869,8 @@ adminRouter.delete("/companies/:id/must-do-topics/:index", async (req, res) => {
       req.params.id,
       y,
       placementListContext,
-      companyVisitIdHint
+      companyVisitIdHint,
+      placementCluster
     );
     if (!loaded?.merged || !loaded?.visit) {
       return res.status(404).json({ error: "Company visit not found" });
@@ -1756,7 +1900,8 @@ adminRouter.delete("/companies/:id/must-do-topics/:index", async (req, res) => {
         req.params.id,
         y,
         placementListContext,
-        companyVisitIdHint
+        companyVisitIdHint,
+        placementCluster
       )
     )?.merged;
     res.json({ message: "Must do topic deleted", company: out });
@@ -1773,7 +1918,7 @@ adminRouter.put(
   async (req, res) => {
   try {
     const y = adminVisitYearFromQuery(req);
-    const { placementListContext, companyVisitIdHint } = adminStatsVisitResolutionArgs(req);
+    const { placementListContext, companyVisitIdHint, placementCluster } = adminStatsVisitResolutionArgs(req);
     const staticRow = await CompanyStatic.findById(req.params.id).lean();
     if (!staticRow) return res.status(404).json({ error: "Company not found" });
     const {
@@ -1910,7 +2055,8 @@ adminRouter.put(
             req.params.id,
             y,
             placementListContext,
-            companyVisitIdHint
+            companyVisitIdHint,
+            placementCluster
           ))?.merged || null;
       }
       const gotIn =
@@ -1935,14 +2081,16 @@ adminRouter.put(
       req.params.id,
       y,
       placementListContext,
-      companyVisitIdHint
+      companyVisitIdHint,
+      placementCluster
     );
     await updateCompanyVisit(req.params.id, payload, y, statsVisitCtx?.visit);
     const out = (await getCompanyMergedForAdminById(
       req.params.id,
       y,
       placementListContext,
-      companyVisitIdHint
+      companyVisitIdHint,
+      placementCluster
     ))?.merged;
     res.json({ message: "Stats updated", company: out });
   } catch (error) {
@@ -1957,14 +2105,15 @@ adminRouter.patch(
   async (req, res) => {
     try {
       const y = adminVisitYearFromQuery(req);
-      const { placementListContext, companyVisitIdHint } = adminStatsVisitResolutionArgs(req);
+      const { placementListContext, companyVisitIdHint, placementCluster } = adminStatsVisitResolutionArgs(req);
       const delta = Number(req.body?.delta);
       await ensureAdminVisitForYear(req.params.id, y);
       const statsVisitCtx = await getCompanyMergedForAdminById(
         req.params.id,
         y,
         placementListContext,
-        companyVisitIdHint
+        companyVisitIdHint,
+        placementCluster
       );
       const gotInDoc = await adjustVisitTotalGotIn(req.params.id, delta, y, statsVisitCtx?.visit);
       if (!gotInDoc) {
@@ -1992,7 +2141,7 @@ adminRouter.put(
   validateRequest(adminCompanyRolesSchema),
   async (req, res) => {
   try {
-    const y = adminVisitYearFromQuery(req);
+    const { y, placementListContext, companyVisitIdHint, placementCluster } = adminVisitContextFromReq(req);
     const { roles } = req.body || {};
     if (!Array.isArray(roles)) {
       return res.status(400).json({ error: "roles must be an array" });
@@ -2045,9 +2194,21 @@ adminRouter.put(
       return res.status(404).json({ error: "Company not found" });
     }
     await ensureAdminVisitForYear(req.params.id, y);
-    const rolesVisitCtx = await getCompanyMergedForAdminById(req.params.id, y);
+    const rolesVisitCtx = await getCompanyMergedForAdminById(
+      req.params.id,
+      y,
+      placementListContext,
+      companyVisitIdHint,
+      placementCluster
+    );
     await updateCompanyVisit(req.params.id, { roles: normalizedRoles }, y, rolesVisitCtx?.visit);
-    const loaded = await getCompanyMergedForAdminById(req.params.id, y);
+    const loaded = await getCompanyMergedForAdminById(
+      req.params.id,
+      y,
+      placementListContext,
+      companyVisitIdHint,
+      placementCluster
+    );
     const rolesAfterUpdate = loaded?.merged?.roles || [];
     const rolesResponse = (rolesAfterUpdate || []).map((role) => ({
       ...role,
@@ -2070,7 +2231,7 @@ adminRouter.put(
   validateRequest(adminCompanyGeneralSchema),
   async (req, res) => {
   try {
-    const y = adminVisitYearFromQuery(req);
+    const { y, placementListContext, companyVisitIdHint, placementCluster } = adminVisitContextFromReq(req);
     const { eligibility, business_model, type, offCampus, date_of_visit, cluster } =
       req.body || {};
 
@@ -2091,8 +2252,23 @@ adminRouter.put(
       return res.status(404).json({ error: "Company not found" });
     }
     await ensureAdminVisitForYear(req.params.id, y);
-    await persistMergedCompany(req.params.id, updateData, y);
-    const out = (await getCompanyMergedForAdminById(req.params.id, y))?.merged;
+    await persistMergedCompany(
+      req.params.id,
+      updateData,
+      y,
+      placementListContext,
+      companyVisitIdHint,
+      placementCluster
+    );
+    const out = (
+      await getCompanyMergedForAdminById(
+        req.params.id,
+        y,
+        placementListContext,
+        companyVisitIdHint,
+        placementCluster
+      )
+    )?.merged;
 
     res.json({ message: "Company general info updated successfully", company: out });
   } catch (error) {

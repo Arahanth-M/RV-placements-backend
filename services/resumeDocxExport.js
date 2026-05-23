@@ -3,6 +3,7 @@ import {
   BorderStyle,
   Document,
   ExternalHyperlink,
+  ImageRun,
   Packer,
   Paragraph,
   TabStopType,
@@ -14,8 +15,10 @@ import {
   WidthType,
   convertInchesToTwip,
 } from "docx";
+import { loadResumeContactIconBuffers } from "./resumeContactIcons.js";
 
 const LINK_COLOR = "0563C1";
+const CONTACT_ICON_PX = 11;
 
 const IIITV = "iiitv_latex_style";
 const SERIF = "Times New Roman";
@@ -133,7 +136,27 @@ function paragraphFromChildren(children, spacing = { after: 60 }) {
   return new Paragraph({ children, spacing });
 }
 
-function buildStandardContactParagraph(personal) {
+function contactIconRun(iconBuffers, iconKey) {
+  const data = iconBuffers?.[iconKey];
+  if (!data) return null;
+  return new ImageRun({
+    type: "png",
+    data,
+    transformation: {
+      width: CONTACT_ICON_PX,
+      height: CONTACT_ICON_PX,
+    },
+  });
+}
+
+function appendContactIcon(children, iconBuffers, iconKey) {
+  const icon = contactIconRun(iconBuffers, iconKey);
+  if (!icon) return;
+  children.push(icon);
+  children.push(textRun(" ", { size: BODY_SIZE }));
+}
+
+function buildStandardContactParagraph(personal, iconBuffers = {}) {
   const children = [];
   const addSeparator = () => {
     if (children.length) children.push(textRun("  |  ", { size: BODY_SIZE }));
@@ -141,23 +164,27 @@ function buildStandardContactParagraph(personal) {
 
   if (personal.phone) {
     addSeparator();
+    appendContactIcon(children, iconBuffers, "phone");
     children.push(textRun(personal.phone, { size: BODY_SIZE }));
   }
   if (personal.email) {
     const email = String(personal.email).trim();
     if (email) {
       addSeparator();
+      appendContactIcon(children, iconBuffers, "email");
       children.push(hyperlinkRun(email, normalizeEmailUrl(email), { size: BODY_SIZE }));
     }
   }
   const linkedinUrl = normalizeWebUrl(personal.linkedin);
   if (linkedinUrl) {
     addSeparator();
+    appendContactIcon(children, iconBuffers, "linkedin");
     children.push(hyperlinkRun("LinkedIn", linkedinUrl, { size: BODY_SIZE }));
   }
   const githubUrl = normalizeWebUrl(personal.github);
   if (githubUrl) {
     addSeparator();
+    appendContactIcon(children, iconBuffers, "github");
     children.push(hyperlinkRun("GitHub", githubUrl, { size: BODY_SIZE }));
   }
 
@@ -232,7 +259,7 @@ function bulletParagraph(text) {
   });
 }
 
-function buildStandardDocFromResume(payload = {}) {
+function buildStandardDocFromResume(payload = {}, iconBuffers = {}) {
   const personal = payload.personal || {};
   const education = payload.education || [];
   const experience = payload.experience || [];
@@ -260,7 +287,7 @@ function buildStandardDocFromResume(payload = {}) {
     );
   }
 
-  const contactParagraph = buildStandardContactParagraph(personal);
+  const contactParagraph = buildStandardContactParagraph(personal, iconBuffers);
   if (contactParagraph) sections.push(contactParagraph);
 
   if (personal.summary) {
@@ -387,7 +414,7 @@ function rightAlignedParagraph(children) {
   });
 }
 
-function buildIIITVHeaderTable(personal) {
+function buildIIITVHeaderTable(personal, iconBuffers = {}) {
   const leftParas = [
     new Paragraph({
       children: [textRun(personal.fullName || "Your Name", { bold: true, size: NAME_SIZE })],
@@ -403,23 +430,30 @@ function buildIIITVHeaderTable(personal) {
     );
   }
 
+  const rightContactRow = (iconKey, ...runs) => {
+    const children = [];
+    appendContactIcon(children, iconBuffers, iconKey);
+    children.push(...runs);
+    return rightAlignedParagraph(children);
+  };
+
   const rightParas = [];
   if (personal.phone) {
-    rightParas.push(rightAlignedParagraph([textRun(personal.phone, { size: BODY_SIZE })]));
+    rightParas.push(rightContactRow("phone", textRun(personal.phone, { size: BODY_SIZE })));
   }
   if (personal.email) {
     const email = String(personal.email).trim();
     rightParas.push(
-      rightAlignedParagraph([hyperlinkRun(email, normalizeEmailUrl(email))])
+      rightContactRow("email", hyperlinkRun(email, normalizeEmailUrl(email)))
     );
   }
   const linkedinUrl = normalizeWebUrl(personal.linkedin);
   if (linkedinUrl) {
-    rightParas.push(rightAlignedParagraph([hyperlinkRun("LinkedIn", linkedinUrl)]));
+    rightParas.push(rightContactRow("linkedin", hyperlinkRun("LinkedIn", linkedinUrl)));
   }
   const githubUrl = normalizeWebUrl(personal.github);
   if (githubUrl) {
-    rightParas.push(rightAlignedParagraph([hyperlinkRun("GitHub", githubUrl)]));
+    rightParas.push(rightContactRow("github", hyperlinkRun("GitHub", githubUrl)));
   }
   if (!rightParas.length) {
     rightParas.push(new Paragraph({ children: [textRun("")] }));
@@ -447,7 +481,7 @@ function buildIIITVHeaderTable(personal) {
   });
 }
 
-function buildIIITVDocFromResume(payload = {}) {
+function buildIIITVDocFromResume(payload = {}, iconBuffers = {}) {
   const personal = payload.personal || {};
   const education = payload.education || [];
   const experience = payload.experience || [];
@@ -457,7 +491,7 @@ function buildIIITVDocFromResume(payload = {}) {
   const achievements = payload.achievements || [];
   const sections = [];
 
-  sections.push(buildIIITVHeaderTable(personal));
+  sections.push(buildIIITVHeaderTable(personal, iconBuffers));
   sections.push(new Paragraph({ children: [textRun("")], spacing: { after: 120 } }));
 
   if (personal.summary) {
@@ -550,9 +584,12 @@ function buildIIITVDocFromResume(payload = {}) {
 
 export async function buildDocxBufferFromResume(payload = {}) {
   try {
+    const iconBuffers = await loadResumeContactIconBuffers();
     const templateId = String(payload.templateId || "standard_ats").trim();
     const doc =
-      templateId === IIITV ? buildIIITVDocFromResume(payload) : buildStandardDocFromResume(payload);
+      templateId === IIITV
+        ? buildIIITVDocFromResume(payload, iconBuffers)
+        : buildStandardDocFromResume(payload, iconBuffers);
     return await Packer.toBuffer(doc);
   } catch (error) {
     console.error("[resume] docx generation error", error);
