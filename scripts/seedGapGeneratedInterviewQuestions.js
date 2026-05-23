@@ -23,6 +23,7 @@ import CompanyStatic from "../models/CompanyStatic.js";
 import InterviewQuestion from "../models/InterviewQuestion.js";
 import { buildSeedIndexes, PREV_CODING_GAP_GENERATED_SEEDS } from "../services/prevCodingImport/buildSeedIndex.js";
 import { findSeedForMappedRow, mapPrevCodingRow } from "../services/prevCodingImport/mapPrevCodingRow.js";
+import { dedupeTestCases } from "../utils/dedupeTestCases.js";
 
 dotenv.config();
 
@@ -135,7 +136,13 @@ async function main() {
     ]);
     if (companyTags.length > 0) taggedCount += 1;
 
-    const doc = { ...row, url: resolveQuestionUrl(row), companyTags };
+    const rawCases = Array.isArray(row.testCases) ? row.testCases : [];
+    const doc = {
+      ...row,
+      url: resolveQuestionUrl(row),
+      companyTags,
+      testCases: dedupeTestCases(rawCases),
+    };
 
     try {
       const model = new InterviewQuestion(doc);

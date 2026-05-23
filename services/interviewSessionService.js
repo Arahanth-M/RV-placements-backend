@@ -19,6 +19,10 @@ import { logInterviewDsaLlmDebug, tailId } from "./interviewDebugLog.js";
 import { computeDsaRoundQuestionBuckets } from "../utils/interviewQuestionAttempts.js";
 import { INTERVIEW_STATES } from "./interviewStateMachine.js";
 import {
+  INTERVIEW_LIMIT_REASON,
+  INTERVIEW_LIMIT_REACHED_MESSAGE,
+} from "../config/interviewLimits.js";
+import {
   getCachedInterviewAnalytics,
   setCachedInterviewAnalytics,
 } from "./interviewCache.js";
@@ -250,6 +254,57 @@ export const getInProgressSession = async (
     placementYear: year,
     mergePlacementByType: { $ne: true },
   }).sort({ updatedAt: -1 });
+};
+
+export const countCompletedInterviewsForUser = async (userId) => {
+  const id = String(userId || "").trim();
+  if (!id) return 0;
+  return InterviewSession.countDocuments({
+    userId: id,
+    state: INTERVIEW_STATES.INTERVIEW_COMPLETE,
+  });
+};
+
+/**
+ * @param {string} userId
+ * @param {{ bypassLimit?: boolean }} [options]
+ */
+export const getInterviewStartEligibility = async (userId, options = {}) => {
+  const id = String(userId || "").trim();
+  if (!id) {
+    return {
+      canStart: false,
+      reason: "UNAUTHORIZED",
+      completedCount: 0,
+      message: "",
+    };
+  }
+
+  const completedCount = await countCompletedInterviewsForUser(id);
+  if (options.bypassLimit) {
+    return {
+      canStart: true,
+      reason: null,
+      completedCount,
+      message: "",
+    };
+  }
+
+  if (completedCount >= 1) {
+    return {
+      canStart: false,
+      reason: INTERVIEW_LIMIT_REASON,
+      completedCount,
+      message: INTERVIEW_LIMIT_REACHED_MESSAGE,
+    };
+  }
+
+  return {
+    canStart: true,
+    reason: null,
+    completedCount,
+    message: "",
+  };
 };
 
 export const getUserSessions = async (userId) => {

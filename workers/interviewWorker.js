@@ -43,6 +43,7 @@ import {
   normalizedQuestionAttempts,
   resolvedQuestionScore,
 } from "../utils/interviewQuestionAttempts.js";
+import { dedupeTestCases } from "../utils/dedupeTestCases.js";
 import InterviewQuestion from "../models/InterviewQuestion.js";
 import { normalizeExecutionLanguage } from "../services/codeExecution/executeCode.js";
 
@@ -259,8 +260,9 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
     const fromBankCases = Array.isArray(questionMetadataDoc?.testCases)
       ? questionMetadataDoc.testCases
       : [];
-    const executionTestCases =
-      resolvedSlotCases.length > 0 ? resolvedSlotCases : fromBankCases;
+    const executionTestCases = dedupeTestCases(
+      resolvedSlotCases.length > 0 ? resolvedSlotCases : fromBankCases
+    );
 
     const functionSignature =
       (resolvedSlotCases.length > 0 && String(resolvedSlotMeta?.functionSignature || "").trim()) ||

@@ -1,5 +1,9 @@
 import { executeCode, normalizeExecutionLanguage } from "../codeExecution/executeCode.js";
 import {
+  buildHiddenTestResultsFromRows,
+  normalizeIsHidden,
+} from "../codeExecution/executionUtils.js";
+import {
   EXECUTION_COMPILATION_ERROR,
   EXECUTION_ERROR,
   EXECUTION_RUNTIME_ERROR,
@@ -131,7 +135,7 @@ export const evaluateCodeExecution = async (payload) => {
       : passRate
   );
   const visibleTotalCount = Array.isArray(executionResult?.results)
-    ? executionResult.results.filter((item) => item?.isHidden !== true).length
+    ? executionResult.results.filter((item) => normalizeIsHidden(item?.isHidden) !== true).length
     : Math.max(0, totalCount);
   const hiddenTotalCount = Math.max(0, totalCount - visibleTotalCount);
 
@@ -219,6 +223,16 @@ export const evaluateCodeExecution = async (payload) => {
         }))
     : [];
 
+  const normalizedResultRows = Array.isArray(executionResult?.results)
+    ? executionResult.results.map((item) => ({
+        isHidden: normalizeIsHidden(item?.isHidden),
+        passed: Boolean(item?.passed),
+      }))
+    : [];
+
+  /** Per hidden testcase pass/fail for post-submit UI (no inputs/outputs — cases stay hidden). */
+  const hiddenTestResults = buildHiddenTestResultsFromRows(normalizedResultRows);
+
   const executionIssueFeedback = executionFailureStatuses.has(executionResult?.status)
     ? `Execution issue (${executionResult?.status || "EXECUTION_ERROR"}): the submission did not complete sandboxed evaluation successfully.`
     : "";
@@ -268,6 +282,8 @@ export const evaluateCodeExecution = async (payload) => {
         executionTime: Number(executionResult?.executionTime) || 0,
         weightedPassRate,
         failedTests,
+        hiddenTestResults,
+        caseResults: normalizedResultRows,
         userDebugOutput:
           typeof executionResult?.userDebugOutput === "string" ? executionResult.userDebugOutput : "",
       },

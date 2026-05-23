@@ -1,6 +1,7 @@
 import InterviewQuestion from "../models/InterviewQuestion.js";
 import { normalizeExpectedPoints } from "./mcp/generateQuestion.js";
 import { bankDocSatisfiesCodeGrading, cloneSerializable } from "./interviewCodeGradingGuards.js";
+import { dedupeTestCases } from "../utils/dedupeTestCases.js";
 
 const toSafeString = (value, fallback = "") =>
   typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -157,7 +158,7 @@ export async function retrieveQuestion({
     expectedAnswerMode,
   });
 
-  const rawTests = Array.isArray(selected.testCases) ? selected.testCases : [];
+  const rawTests = dedupeTestCases(Array.isArray(selected.testCases) ? selected.testCases : []);
 
   return {
     question: toSafeString(selected.question),
