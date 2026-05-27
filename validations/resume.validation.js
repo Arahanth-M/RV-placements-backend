@@ -84,5 +84,9 @@ export const resumeExportSchema = Joi.object({
     .required(),
 }).unknown(false);
 
+export const resumeAnalyzeSchema = Joi.object({
+  payload: resumePayloadSchema.required(),
+}).unknown(false);
+
 export const allowedResumeTemplates = TEMPLATE_IDS;
 

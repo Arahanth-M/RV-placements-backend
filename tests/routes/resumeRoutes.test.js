@@ -26,4 +26,23 @@ describe("Resume routes auth", () => {
       .expect(401);
     expect(response.body).toHaveProperty("error");
   });
+
+  it("rejects unauthenticated analyze resume", async () => {
+    const response = await request(app)
+      .post("/api/resume/analyze")
+      .send({
+        payload: {
+          templateId: "standard_ats",
+          personal: {},
+          education: [],
+          skills: [],
+          projects: [],
+          experience: [],
+          certifications: [],
+          achievements: [],
+        },
+      })
+      .expect(401);
+    expect(response.body).toHaveProperty("error");
+  });
 });

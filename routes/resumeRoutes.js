@@ -7,76 +7,20 @@ import ResumeDraft from "../models/ResumeDraft.js";
 import {
   resumeDraftSaveSchema,
   resumeExportSchema,
+  resumeAnalyzeSchema,
 } from "../validations/resume.validation.js";
 import { buildPdfBufferFromResume } from "../services/resumePdfExport.js";
 import { buildDocxBufferFromResume } from "../services/resumeDocxExport.js";
+import { sanitizeResumePayload } from "../services/resume/sanitizeResumePayload.js";
+import { analyzeResume } from "../services/resume/analyze/index.js";
+import {
+  createAtsAnalysisCacheKey,
+  getCachedAtsAnalysis,
+  setCachedAtsAnalysis,
+} from "../services/resume/analyze/cache.js";
+import resumeAnalyzeLimiter from "../middleware/resumeAnalyzeLimiter.js";
 
 const router = express.Router();
-
-function sanitizeText(raw) {
-  if (raw == null) return "";
-  return String(raw).replace(/<[^>]*>/g, "").trim();
-}
-
-function sanitizeBulletList(items = []) {
-  return (Array.isArray(items) ? items : [])
-    .map((item) => ({ text: sanitizeText(item?.text) }))
-    .filter((item) => item.text.length > 0);
-}
-
-function sanitizeResumePayload(payload = {}) {
-  const cleaned = {
-    templateId: payload.templateId || "standard_ats",
-    personal: {
-      fullName: sanitizeText(payload.personal?.fullName),
-      email: sanitizeText(payload.personal?.email),
-      phone: sanitizeText(payload.personal?.phone),
-      location: sanitizeText(payload.personal?.location),
-      linkedin: sanitizeText(payload.personal?.linkedin),
-      github: sanitizeText(payload.personal?.github),
-      summary: sanitizeText(payload.personal?.summary),
-    },
-    education: (Array.isArray(payload.education) ? payload.education : []).map((item) => ({
-      institution: sanitizeText(item?.institution),
-      degree: sanitizeText(item?.degree),
-      field: sanitizeText(item?.field),
-      startDate: sanitizeText(item?.startDate),
-      endDate: sanitizeText(item?.endDate),
-      score: sanitizeText(item?.score),
-      location: sanitizeText(item?.location),
-    })),
-    skills: (Array.isArray(payload.skills) ? payload.skills : [])
-      .map((item) => sanitizeText(item))
-      .filter(Boolean),
-    projects: (Array.isArray(payload.projects) ? payload.projects : []).map((item) => ({
-      name: sanitizeText(item?.name),
-      techStack: sanitizeText(item?.techStack),
-      link: sanitizeText(item?.link),
-      startDate: sanitizeText(item?.startDate),
-      endDate: sanitizeText(item?.endDate),
-      bullets: sanitizeBulletList(item?.bullets),
-    })),
-    experience: (Array.isArray(payload.experience) ? payload.experience : []).map((item) => ({
-      company: sanitizeText(item?.company),
-      role: sanitizeText(item?.role),
-      techStack: sanitizeText(item?.techStack),
-      location: sanitizeText(item?.location),
-      startDate: sanitizeText(item?.startDate),
-      endDate: sanitizeText(item?.endDate),
-      bullets: sanitizeBulletList(item?.bullets),
-    })),
-    certifications: (Array.isArray(payload.certifications) ? payload.certifications : []).map((item) => ({
-      title: sanitizeText(item?.title),
-      link: sanitizeText(item?.link ?? item?.detail),
-    })),
-    achievements: (Array.isArray(payload.achievements) ? payload.achievements : []).map((item) => ({
-      title: sanitizeText(item?.title),
-      detail: sanitizeText(item?.detail),
-    })),
-  };
-
-  return cleaned;
-}
 
 function buildEmptyDraft() {
   return {
@@ -236,5 +180,60 @@ router.post("/export/docx", validateRequest(resumeExportSchema), async (req, res
     return res.status(500).json({ error: "Failed to export resume as Word document" });
   }
 });
+
+router.post(
+  "/analyze",
+  resumeAnalyzeLimiter,
+  validateRequest(resumeAnalyzeSchema),
+  async (req, res) => {
+  const startedAt = Date.now();
+  try {
+    const ownerEmail = String(req.user?.email || "").trim().toLowerCase();
+    if (!ownerEmail) return res.status(401).json({ error: "Unauthorized" });
+
+    const payload = sanitizeResumePayload(req.body.payload || {});
+    const cacheKey = createAtsAnalysisCacheKey({
+      sanitizedResumePayload: payload,
+    });
+
+    const cacheKeyHash = String(cacheKey || "").split(":").pop()?.slice(0, 12) || "";
+
+    let cachedAnalysis = null;
+    try {
+      cachedAnalysis = await getCachedAtsAnalysis(cacheKey);
+    } catch {
+      cachedAnalysis = null;
+    }
+
+    if (cachedAnalysis) {
+      console.info("[resume] analyzeCache", {
+        cache: "hit",
+        latencyMs: Date.now() - startedAt,
+        cacheKeyHash,
+      });
+      return res.json({ success: true, analysis: cachedAnalysis });
+    }
+
+    const analysis = analyzeResume(payload);
+
+    try {
+      await setCachedAtsAnalysis(cacheKey, analysis);
+    } catch {
+      // ignore: cache must never fail the request
+    }
+
+    console.info("[resume] analyzeCache", {
+      cache: "miss",
+      latencyMs: Date.now() - startedAt,
+      cacheKeyHash,
+    });
+
+    return res.json({ success: true, analysis });
+  } catch (error) {
+    console.error("[resume] analyze failed", error?.message || error);
+    return res.status(500).json({ error: "Failed to analyze resume" });
+  }
+  }
+);
 
 export default router;
