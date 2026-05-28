@@ -15,7 +15,7 @@ import {
   buildProfilePayloadFromStudentRecord,
   buildUsnLookupStudentPayload,
 } from "../services/studentProfileService.js";
-import { ADMIN_EMAIL } from "../config/constants.js";
+import { isAdminEmail } from "../config/constants.js";
 import validateRequest from "../middleware/validateRequest.js";
 import { profileCacheInvalidateSchema } from "../validations/student.validation.js";
 
@@ -93,7 +93,6 @@ router.get(
       }
 
       const email = (req.user.email || "").trim().toLowerCase();
-      const adminEmail = String(ADMIN_EMAIL || "").trim().toLowerCase();
       console.log(`👤 [Profile] Fetching for email: ${email}`);
 
       const cachedProfile = await getCachedStudentProfile(email);
@@ -108,7 +107,7 @@ router.get(
       if (!studentRecord) {
         console.log(`❓ [Profile] No student record for email: ${email}`);
 
-        if (email === adminEmail) {
+        if (isAdminEmail(email)) {
           return res.status(404).json({
             error: "Admin Profile Not Found",
             message:

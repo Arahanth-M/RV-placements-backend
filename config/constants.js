@@ -108,10 +108,32 @@ export const DEFAULT_PLATFORM_OWNER_EMAIL = "arahanthm.cs22@rvce.edu.in";
 export const ALLOWED_LOGIN_EMAIL =
   process.env.ALLOWED_LOGIN_EMAIL || DEFAULT_PLATFORM_OWNER_EMAIL;
 
-// Admin email: must match this address to complete /api/auth/google/admin OAuth (JWT gets isAdminSession).
-// Student OAuth uses /api/auth/google — same email, but isAdminSession is false.
-export const ADMIN_EMAIL =
-  process.env.ADMIN_EMAIL?.trim() || DEFAULT_PLATFORM_OWNER_EMAIL;
+/**
+ * Admin allowlist for /api/auth/google/admin (JWT gets isAdminSession).
+ * Set ADMIN_EMAILS (comma-separated) or legacy ADMIN_EMAIL (single).
+ * Example: ADMIN_EMAILS=one@rvce.edu.in,two@rvce.edu.in
+ */
+function parseAdminEmailsFromEnv() {
+  const raw =
+    process.env.ADMIN_EMAILS?.trim() ||
+    process.env.ADMIN_EMAIL?.trim() ||
+    DEFAULT_PLATFORM_OWNER_EMAIL;
+  const emails = raw
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+  return [...new Set(emails)];
+}
+
+export const ADMIN_EMAILS = parseAdminEmailsFromEnv();
+
+/** @deprecated Prefer ADMIN_EMAILS; first entry for backward-compatible imports. */
+export const ADMIN_EMAIL = ADMIN_EMAILS[0] || DEFAULT_PLATFORM_OWNER_EMAIL;
+
+export function isAdminEmail(email) {
+  const normalized = String(email || "").trim().toLowerCase();
+  return normalized.length > 0 && ADMIN_EMAILS.includes(normalized);
+}
 
 // Default values
 export const defaults = {

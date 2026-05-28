@@ -1,7 +1,7 @@
 import express from "express";
 import jwt from "jsonwebtoken";
 import passport from "passport";
-import { config, urls, messages, ADMIN_EMAIL } from "../config/constants.js";
+import { config, urls, messages, isAdminEmail } from "../config/constants.js";
 import authJWT from "../middleware/authJWT.js";
 import { buildJwtPayloadFromUser } from "../utils/jwtUserClaims.js";
 
@@ -154,7 +154,7 @@ router.get(
       const isSignup = flow === "signup";
 
       if (isAdminLogin) {
-        if (user.email?.toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
+        if (!isAdminEmail(user.email)) {
           return redirectToAuthCallback(req, res, "login=failed&reason=not_admin");
         }
       }
