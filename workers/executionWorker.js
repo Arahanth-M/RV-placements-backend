@@ -12,10 +12,11 @@ await connectDB(config.MONGO_URI);
 await connectRedis().catch(() => {});
 
 const connection = redisUrl ? { url: redisUrl } : {};
+const concurrency = Number(process.env.EXECUTION_CONCURRENCY || 1);
 
 console.log("[executionWorker] worker startup", {
   queue: EXECUTION_QUEUE,
-  concurrency: 1,
+  concurrency,
 });
 
 const processor = async (job) => {
@@ -53,7 +54,7 @@ const processor = async (job) => {
 
 export const executionWorker = new Worker(EXECUTION_QUEUE, processor, {
   connection,
-  concurrency: 1,
+  concurrency,
 });
 
 executionWorker.on("completed", (job) => {

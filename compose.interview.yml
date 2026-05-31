@@ -120,6 +120,7 @@ services:
       - EXECUTION_DOCKER_MEMORY=${EXECUTION_DOCKER_MEMORY:-512m}
       - EXECUTION_DOCKER_MEMORY_CPP=${EXECUTION_DOCKER_MEMORY_CPP:-1024m}
       - EXECUTION_DOCKER_CPUS=${EXECUTION_DOCKER_CPUS:-1}
+      - EXECUTION_CONCURRENCY=2
     depends_on:
       redis:
         condition: service_healthy
