@@ -48,6 +48,56 @@ export const sanitizeInput = (value) => {
   return value;
 };
 
+/**
+ * Per hidden testcase for post-submit UI (pass/fail only; no inputs/outputs).
+ * @param {Array<{ isHidden?: unknown, passed?: boolean }>} results
+ */
+export const buildHiddenTestResultsFromRows = (results = []) => {
+  const rows = Array.isArray(results) ? results : [];
+  const hidden = rows.filter((item) => normalizeIsHidden(item?.isHidden) === true);
+  return hidden.map((item, idx) => ({
+    caseNumber: idx + 1,
+    passed: Boolean(item?.passed),
+  }));
+};
+
+/**
+ * Resolve hidden testcase rows for API clients from execution trace (new + legacy).
+ */
+export const buildHiddenTestResultsForClient = (execution = {}) => {
+  if (!execution || typeof execution !== "object") return [];
+
+  const explicit = Array.isArray(execution.hiddenTestResults)
+    ? execution.hiddenTestResults
+        .filter((row) => row && typeof row === "object")
+        .map((row, idx) => ({
+          caseNumber: Number(row.caseNumber) > 0 ? Number(row.caseNumber) : idx + 1,
+          passed: Boolean(row.passed),
+        }))
+    : [];
+  if (explicit.length > 0) return explicit;
+
+  const caseResults = Array.isArray(execution.caseResults) ? execution.caseResults : [];
+  if (caseResults.length > 0) {
+    return buildHiddenTestResultsFromRows(caseResults);
+  }
+
+  const total = Math.max(0, Number(execution.hiddenTotalCount) || 0);
+  const passed = Math.max(0, Number(execution.hiddenPassedCount) || 0);
+  if (total <= 0) return [];
+
+  if (passed === total) {
+    return Array.from({ length: total }, (_, i) => ({ caseNumber: i + 1, passed: true }));
+  }
+  if (passed === 0) {
+    return Array.from({ length: total }, (_, i) => ({ caseNumber: i + 1, passed: false }));
+  }
+  return Array.from({ length: total }, (_, i) => ({
+    caseNumber: i + 1,
+    passed: i < passed,
+  }));
+};
+
 export const calculateExecutionSummary = (results = []) => {
   const rows = Array.isArray(results) ? results : [];
   const totalCount = rows.length;
@@ -116,6 +166,8 @@ export default {
   sanitizeInput,
   calculateExecutionSummary,
   normalizeIsHidden,
+  buildHiddenTestResultsFromRows,
+  buildHiddenTestResultsForClient,
   truncateUserDebugOutput,
   USER_DEBUG_OUTPUT_MAX_BYTES,
 };
