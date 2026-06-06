@@ -1,0 +1,182 @@
+{
+  "functionName": "max_profit",
+  "designClassName": "",
+  "testCases": [
+    {
+      "input": {
+        "prices": [
+          7,
+          1,
+          5,
+          3,
+          6,
+          4
+        ]
+      },
+      "expectedOutput": 5,
+      "isHidden": false,
+      "weight": 1
+    },
+    {
+      "input": {
+        "prices": [
+          7,
+          6,
+          4,
+          3,
+          1
+        ]
+      },
+      "expectedOutput": 0,
+      "isHidden": false,
+      "weight": 1
+    },
+    {
+      "input": {
+        "prices": [
+          1,
+          2
+        ]
+      },
+      "expectedOutput": 1,
+      "isHidden": true,
+      "weight": 1
+    },
+    {
+      "input": {
+        "prices": [
+          2,
+          4,
+          1
+        ]
+      },
+      "expectedOutput": 2,
+      "isHidden": true,
+      "weight": 1
+    },
+    {
+      "input": {
+        "prices": []
+      },
+      "expectedOutput": 0,
+      "isHidden": true,
+      "weight": 1
+    },
+    {
+      "input": {
+        "prices": [
+          5
+        ]
+      },
+      "expectedOutput": 0,
+      "isHidden": true,
+      "weight": 1
+    },
+    {
+      "input": {
+        "prices": [
+          3,
+          3,
+          3,
+          3
+        ]
+      },
+      "expectedOutput": 0,
+      "isHidden": true,
+      "weight": 1
+    },
+    {
+      "input": {
+        "prices": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      },
+      "expectedOutput": 4,
+      "isHidden": true,
+      "weight": 1
+    },
+    {
+      "input": {
+        "prices": [
+          1,
+          100
+        ]
+      },
+      "expectedOutput": 99,
+      "isHidden": true,
+      "weight": 1
+    },
+    {
+      "input": {
+        "prices": [
+          100,
+          1,
+          101
+        ]
+      },
+      "expectedOutput": 100,
+      "isHidden": true,
+      "weight": 1
+    },
+    {
+      "input": {
+        "prices": [
+          3,
+          1,
+          4,
+          1,
+          5,
+          9,
+          2,
+          6
+        ]
+      },
+      "expectedOutput": 8,
+      "isHidden": true,
+      "weight": 1
+    },
+    {
+      "input": {
+        "prices": [
+          2,
+          1,
+          2,
+          1,
+          2
+        ]
+      },
+      "expectedOutput": 1,
+      "isHidden": true,
+      "weight": 1
+    },
+    {
+      "input": {
+        "prices": [
+          0,
+          0,
+          0,
+          1
+        ]
+      },
+      "expectedOutput": 1,
+      "isHidden": true,
+      "weight": 1
+    },
+    {
+      "input": {
+        "prices": [
+          10000,
+          1,
+          10000
+        ]
+      },
+      "expectedOutput": 9999,
+      "isHidden": true,
+      "weight": 1
+    }
+  ]
+}

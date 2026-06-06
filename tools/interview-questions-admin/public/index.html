@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Interview Questions Admin (temp)</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <h1>Interview Questions Admin</h1>
+        <span class="badge">temporary · delete when done</span>
+        <div class="toolbar">
+          <button id="btn-refresh" class="secondary">Refresh</button>
+          <button id="btn-new" class="secondary">+ New</button>
+        </div>
+      </header>
+
+      <main>
+        <aside class="sidebar">
+          <div class="sidebar-filters">
+            <select id="filter-roundType">
+              <option value="">All round types</option>
+              <option value="DSA" selected>DSA</option>
+              <option value="SQL">SQL</option>
+              <option value="System Design">System Design</option>
+              <option value="HR">HR</option>
+              <option value="CS Fundamentals">CS Fundamentals</option>
+            </select>
+            <input id="filter-search" type="search" placeholder="Search title, questionId…" />
+          </div>
+          <div id="question-list" class="question-list"></div>
+        </aside>
+
+        <section class="content">
+          <div class="doc-actions">
+            <button id="btn-save" class="primary">Save</button>
+            <button id="btn-delete" class="danger">Delete</button>
+            <span id="status" class="status">Select a question</span>
+          </div>
+
+          <div id="question-meta" class="question-meta hidden"></div>
+
+          <nav class="tabs">
+            <button class="tab active" data-tab="testcases">Test Cases</button>
+            <button class="tab" data-tab="json">Full JSON</button>
+            <button class="tab" data-tab="runner">Run Tests</button>
+          </nav>
+
+          <div class="tab-panels">
+            <!-- Test Cases tab -->
+            <div id="panel-testcases" class="tab-panel active">
+              <div class="tc-toolbar">
+                <div id="tc-summary" class="tc-summary">No question selected</div>
+                <button id="btn-add-empty-tc" class="secondary" type="button">+ Blank test case</button>
+              </div>
+
+              <div id="testcase-list" class="testcase-list"></div>
+
+              <div class="bulk-testcase-card">
+                <div class="add-tc-header">
+                  <h3>Bulk insert test cases</h3>
+                  <p>Paste the <code>testCases</code> array from Full JSON — same format as in the document</p>
+                </div>
+                <textarea
+                  id="bulk-tc-paste"
+                  spellcheck="false"
+                  placeholder='[
+  {
+    "input": { "nums": [2, 7, 11, 15], "target": 9 },
+    "expectedOutput": [0, 1],
+    "isHidden": false,
+    "weight": 1
+  },
+  {
+    "input": { "nums": [3, 2, 4], "target": 6 },
+    "expectedOutput": [1, 2],
+    "isHidden": true,
+    "weight": 1
+  }
+]'
+                ></textarea>
+                <div class="bulk-tc-footer">
+                  <span class="bulk-tc-note">All pasted cases will be inserted as <strong>hidden</strong></span>
+                  <button id="btn-insert-all-tc" class="primary" type="button">Insert all test cases</button>
+                </div>
+              </div>
+
+              <div class="add-testcase-card">
+                <div class="add-tc-header">
+                  <h3>Add test case</h3>
+                  <p>Paste input &amp; expected output JSON, then click Add</p>
+                </div>
+                <div class="add-tc-grid">
+                  <label>
+                    <span>Input</span>
+                    <textarea id="new-tc-input" spellcheck="false" placeholder='{"nums": [2,7,11,15], "target": 9}'></textarea>
+                  </label>
+                  <label>
+                    <span>Expected output</span>
+                    <textarea id="new-tc-output" spellcheck="false" placeholder="[0, 1]"></textarea>
+                  </label>
+                </div>
+                <div class="add-tc-footer">
+                  <label class="toggle-row">
+                    <span>Hidden test case</span>
+                    <label class="switch">
+                      <input type="checkbox" id="new-tc-hidden" />
+                      <span class="slider"></span>
+                    </label>
+                  </label>
+                  <label class="weight-row">
+                    Weight
+                    <input type="number" id="new-tc-weight" min="0" step="1" value="1" />
+                  </label>
+                  <button id="btn-add-testcase" class="primary" type="button">Add test case ↵</button>
+                </div>
+                <p class="add-tc-hint">Tip: ⌘/Ctrl + Enter in either field to add quickly</p>
+              </div>
+            </div>
+
+            <!-- Full JSON tab -->
+            <div id="panel-json" class="tab-panel">
+              <div class="panel-toolbar">
+                <button id="btn-format" class="secondary" type="button">Format JSON</button>
+                <button id="btn-sync-from-json" class="secondary" type="button">Reload test cases from JSON</button>
+              </div>
+              <textarea id="json-editor" spellcheck="false" placeholder="Select a question or create new…"></textarea>
+            </div>
+
+            <!-- Run Tests tab -->
+            <div id="panel-runner" class="tab-panel">
+              <div class="runner-grid">
+                <label>
+                  <span>Reference solution</span>
+                  <textarea id="solution-editor" spellcheck="false" placeholder="Paste solution code here…"></textarea>
+                </label>
+                <div class="runner-side">
+                  <div class="test-controls">
+                    <label>
+                      Language
+                      <select id="test-language">
+                        <option value="python">Python</option>
+                        <option value="cpp">C++</option>
+                        <option value="java">Java</option>
+                      </select>
+                    </label>
+                    <button id="btn-run-tests" class="success" type="button">Run all test cases</button>
+                  </div>
+                  <p class="runner-hint">Runs every test case from the Test Cases tab in the same order (#1, #2, …). Requires Docker.</p>
+                  <div id="test-results" class="test-results">Results appear here</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
