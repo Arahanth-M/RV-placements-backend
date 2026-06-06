@@ -8,7 +8,9 @@ import Submission from "../models/Submission.js";
 import Student from "../models/Student.js";
 import { getCompanyFocusTags } from "../utils/companyFocusTags.js";
 import { attachPlacementCategoryToCompany } from "../utils/ctcCategory.js";
+import { sortCompaniesForCategoryPreview } from "../utils/companyCategoryPreviewBuckets.js";
 import { projectCompanyListResponse } from "../utils/companyListProjection.js";
+import { COMPANY_VISIT_DEFAULT_YEAR } from "../utils/placementYears.js";
 import redis from "../utils/redis.js";
 import { companyDetailRedisKey } from "../services/companyDetailCache.js";
 import {
@@ -97,10 +99,18 @@ companyRouter.get("/", async (req, res) => {
         placementDreamDetailYear: c.placementDreamDetailYear,
         placementSummerDisplayType: c.placementSummerDisplayType,
         placementSummerDetailYear: c.placementSummerDetailYear,
+        placementInternshipOnlyForListingYear: c.placementInternshipOnlyForListingYear,
+        placementInternshipOnlyDisplayType: c.placementInternshipOnlyDisplayType,
+        placementInternshipOnlyDetailYear: c.placementInternshipOnlyDetailYear,
       });
     });
 
-    return res.json(list);
+    const visitSortYear =
+      selectedYear != null && selectedYear !== ""
+        ? normalizeCompanyDetailYear(selectedYear) ?? COMPANY_VISIT_DEFAULT_YEAR
+        : COMPANY_VISIT_DEFAULT_YEAR;
+
+    return res.json(sortCompaniesForCategoryPreview(list, { defaultYear: visitSortYear }));
   } catch (e) {
     console.error("❌ Error fetching companies:", e.message);
     return res.status(500).json({ error: "Server error" });

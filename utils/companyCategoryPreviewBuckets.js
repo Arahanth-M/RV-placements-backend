@@ -7,6 +7,7 @@ import { getCompanyPlacementMeta } from "./ctcCategory.js";
 import { getOpenDreamMinRupeesForClusterSync } from "../services/placementHubSettingsService.js";
 import { COMPANY_VISIT_DEFAULT_YEAR } from "./placementYears.js";
 import { COMPANY_DETAIL_VISIT_YEARS } from "./placementYears.js";
+import { companyVisitSortTimestamp } from "./visitDateSort.js";
 
 const PLACEMENT_CATEGORY_OPEN_DREAM = "open dream";
 
@@ -14,48 +15,6 @@ const PLACEMENT_CATEGORY_OPEN_DREAM = "open dream";
 function normalizePlacementDetailYear(raw) {
   const y = Number(raw);
   return Number.isFinite(y) && COMPANY_DETAIL_VISIT_YEARS.includes(y) ? y : undefined;
-}
-
-/**
- * @param {unknown} value
- * @returns {number|null}
- */
-function toTimestamp(value) {
-  if (value === null || value === undefined) return null;
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-
-  const raw = String(value).trim();
-  if (!raw) return null;
-
-  if (/^\d+$/.test(raw)) {
-    const n = Number(raw);
-    if (Number.isFinite(n)) return raw.length <= 10 ? n * 1000 : n;
-  }
-
-  let ts = Date.parse(raw);
-  if (!Number.isNaN(ts)) return ts;
-
-  const noOrdinal = raw.replace(/\b(\d{1,2})(st|nd|rd|th)\b/gi, "$1");
-  ts = Date.parse(noOrdinal);
-  if (!Number.isNaN(ts)) return ts;
-
-  const dmy = noOrdinal.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
-  if (dmy) {
-    const day = Number(dmy[1]);
-    const month = Number(dmy[2]) - 1;
-    let year = Number(dmy[3]);
-    if (year < 100) year += 2000;
-    const date = new Date(year, month, day);
-    if (
-      date.getFullYear() === year &&
-      date.getMonth() === month &&
-      date.getDate() === day
-    ) {
-      return date.getTime();
-    }
-  }
-
-  return null;
 }
 
 /** Normalizes company/visit `type` strings for comparisons (same rules as list filters). */
@@ -111,7 +70,15 @@ function hasNonEmptyCtcStringInCompany(company) {
   return false;
 }
 
+/** On-campus FTE / internship+FTE visit types — never treat as stipend-only internship hub rows. */
+function isFtePlacementType(typeRaw) {
+  const norm = normalizeType(typeRaw);
+  if (norm === "fte") return true;
+  return norm.includes("internship") && norm.includes("fte");
+}
+
 function isInternshipOnlyCompany(company) {
+  if (isFtePlacementType(company?.type)) return false;
   if (!Array.isArray(company?.roles) || company.roles.length === 0) return false;
   if (hasNonEmptyCtcStringInCompany(company)) return false;
   if (!company.roles.every((role) => isCtcObjectEmpty(role?.ctc))) return false;
@@ -161,11 +128,9 @@ export function companyHasAnyYearSummerInternshipListingFromVisits(visits) {
 /** Single approved row qualifies for Dream / Open dream merge slot (non-PPO FTE-style). */
 export function visitQualifiesDreamTierRow(visit) {
   if (!visit || typeof visit !== "object") return false;
-  return (
-    !visitIsPpo(visit) &&
-    !visitIsMarkedOffCampus(visit) &&
-    !isInternshipOnlyCompany({ roles: visit.roles })
-  );
+  if (visitIsMarkedOffCampus(visit) || visitIsPpo(visit)) return false;
+  if (isFtePlacementType(visit?.type)) return true;
+  return !isInternshipOnlyCompany({ roles: visit.roles, type: visit?.type });
 }
 
 /**
@@ -196,10 +161,22 @@ export function visitQualifiesInternshipOnlyHubRow(visit) {
   if (!visit || typeof visit !== "object") return false;
   if (visitIsMarkedOffCampus(visit)) return false;
   if (visitIsPpo(visit)) return false;
+  if (isFtePlacementType(visit?.type)) return false;
   const norm = normalizeType(visit?.type);
   if (norm.includes("onlyinternship")) return true;
   if (norm.includes("only") && norm.includes("internship")) return true;
   return isInternshipOnlyCompany({ roles: visit.roles });
+}
+
+/** Approved row for `placementYear` is on-campus 6-month internship-only (not PPO / FTE). */
+export function hasInternshipOnlyVisitForYear(allVisits, placementYear) {
+  const y = normalizePlacementDetailYear(placementYear);
+  if (y === undefined || !Array.isArray(allVisits)) return false;
+  return allVisits.some(
+    (v) =>
+      normalizePlacementDetailYear(v?.year) === y &&
+      visitQualifiesInternshipOnlyHubRow(v)
+  );
 }
 
 /**
@@ -306,6 +283,34 @@ export function getSummerPlacementPrefFromVisits(visits, preferredListingYear) {
       (v) => normalizePlacementDetailYear(v?.year) === prefYear
     );
     if (scoped.length > 0) pool = scoped;
+  }
+
+  pool.sort((a, b) => (Number(b.year) || 0) - (Number(a.year) || 0));
+  const v = pool[0];
+  return {
+    displayType: visitDisplayType(v),
+    detailYear: normalizePlacementDetailYear(v?.year),
+  };
+}
+
+/**
+ * Internship-only tile: strict 6-month rows; optional listing year narrows the pool first.
+ * @returns {{ displayType?: string, detailYear?: number }}
+ */
+export function getInternshipOnlyPlacementPrefFromVisits(visits, preferredListingYear) {
+  if (!Array.isArray(visits)) return { displayType: undefined, detailYear: undefined };
+  let pool = visits.filter((v) => visitQualifiesInternshipOnlyHubRow(v));
+  if (pool.length === 0) return { displayType: undefined, detailYear: undefined };
+
+  const prefYear = normalizePlacementDetailYear(preferredListingYear);
+  if (prefYear !== undefined) {
+    const scoped = pool.filter(
+      (v) => normalizePlacementDetailYear(v?.year) === prefYear
+    );
+    if (scoped.length === 0) {
+      return { displayType: undefined, detailYear: undefined };
+    }
+    pool = scoped;
   }
 
   pool.sort((a, b) => (Number(b.year) || 0) - (Number(a.year) || 0));
@@ -468,7 +473,11 @@ export function getCompanyDetailHeadlineTypeFromVisits(
     typeof placementListContextRaw === "string"
       ? placementListContextRaw.trim().toLowerCase().replace(/-/g, "_")
       : "";
-  if (ctx === "summer_internship") {
+  if (
+    ctx === "summer_internship" ||
+    ctx === "internship_only" ||
+    ctx === "off_campus"
+  ) {
     return raw || undefined;
   }
   const pref = normalizePlacementDetailYear(placementYearRaw);
@@ -508,24 +517,24 @@ function dreamTileBaseCompany(c) {
  * @param {Record<string, unknown>[]} companies — already `attachPlacementCategoryToCompany`’d
  * @returns {Record<string, unknown>[]}
  */
-export function sortCompaniesForCategoryPreview(companies) {
+/**
+ * @param {Record<string, unknown>[]} companies
+ * @param {{ defaultYear?: number }} [options]
+ */
+export function sortCompaniesForCategoryPreview(companies, options = {}) {
   return [...companies].sort((a, b) => {
-    const aMessageTs = toTimestamp(
-      a?.messageDate ?? a?.messagedate ?? a?.message_date
-    );
-    const bMessageTs = toTimestamp(
-      b?.messageDate ?? b?.messagedate ?? b?.message_date
-    );
+    const aVisitTs = companyVisitSortTimestamp(a, options);
+    const bVisitTs = companyVisitSortTimestamp(b, options);
 
-    if (aMessageTs !== null && bMessageTs !== null) return aMessageTs - bMessageTs;
-    if (aMessageTs !== null) return -1;
-    if (bMessageTs !== null) return 1;
+    if (aVisitTs !== null && bVisitTs !== null && aVisitTs !== bVisitTs) {
+      return aVisitTs - bVisitTs;
+    }
+    if (aVisitTs !== null) return -1;
+    if (bVisitTs !== null) return 1;
 
-    const aUpdatedTs = toTimestamp(a?.updatedAt) ?? toTimestamp(a?.createdAt) ?? 0;
-    const bUpdatedTs = toTimestamp(b?.updatedAt) ?? toTimestamp(b?.createdAt) ?? 0;
-    if (aUpdatedTs !== bUpdatedTs) return aUpdatedTs - bUpdatedTs;
-
-    return (a?.name || "").localeCompare(b?.name || "");
+    const byName = (a?.name || "").localeCompare(b?.name || "");
+    if (byName !== 0) return byName;
+    return String(a?._id || "").localeCompare(String(b?._id || ""));
   });
 }
 

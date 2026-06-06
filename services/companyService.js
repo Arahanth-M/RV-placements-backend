@@ -16,6 +16,8 @@ import {
   getCompanyDetailHeadlineTypeFromVisits,
   getListPlacementCategoryMetaFromVisits,
   getSummerPlacementPrefFromVisits,
+  getInternshipOnlyPlacementPrefFromVisits,
+  hasInternshipOnlyVisitForYear,
   sortCompaniesForCategoryPreview,
   visitIsMarkedOffCampus,
   visitIsPpo,
@@ -495,28 +497,35 @@ function visitEffectiveMatchYear(v) {
  */
 function mergedDateOfVisitForApi(visitApproved, allApprovedVisits, placementYear) {
   const y = normalizeCompanyDetailYear(placementYear);
-  const sameYear = (Array.isArray(allApprovedVisits)
-    ? allApprovedVisits.filter((v) => visitEffectiveMatchYear(v) === y)
-    : []
-  ).sort((a, b) => {
+  const all = Array.isArray(allApprovedVisits) ? allApprovedVisits : [];
+
+  const byRecency = (a, b) => {
     const ma = a.migratedAt ? new Date(a.migratedAt).getTime() : 0;
     const mb = b.migratedAt ? new Date(b.migratedAt).getTime() : 0;
     if (ma !== mb) return mb - ma;
     const ida = a._id ? String(a._id) : "";
     const idb = b._id ? String(b._id) : "";
     return ida.localeCompare(idb);
-  });
+  };
+
+  const sameYear = all.filter((v) => visitEffectiveMatchYear(v) === y).sort(byRecency);
+  const otherYears = all.filter((v) => visitEffectiveMatchYear(v) !== y).sort(byRecency);
 
   /** @type {Record<string, unknown>[]} */
   const ordered = [];
+  const seen = new Set();
+  const pushVisit = (v) => {
+    const id = v?._id != null ? String(v._id) : "";
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    ordered.push(v);
+  };
+
   if (visitApproved && typeof visitApproved === "object" && visitApproved._id) {
-    ordered.push(visitApproved);
-    for (const v of sameYear) {
-      if (v?._id && String(v._id) !== String(visitApproved._id)) ordered.push(v);
-    }
-  } else {
-    for (const v of sameYear) ordered.push(v);
+    pushVisit(visitApproved);
   }
+  for (const v of sameYear) pushVisit(v);
+  for (const v of otherYears) pushVisit(v);
 
   for (const v of ordered) {
     const raw = v?.date_of_visit;
@@ -1383,7 +1392,7 @@ function pickVisitCandidateForPlacementContext(candidates, ctx) {
 
   if (ctx === "internship_only") {
     const only = candidates.filter((v) => visitQualifiesInternshipOnlyHubRow(v));
-    return only.length > 0 ? only[0] : candidates[0];
+    return only.length > 0 ? only[0] : null;
   }
 
   if (ctx === "summer_internship") {
@@ -1906,6 +1915,10 @@ export async function getCompanyDetailLegacyMergedById(
         : false;
     merged.placementSummerInternshipVisitByYear =
       buildPlacementSummerInternshipVisitByYearMap(scopedApprovedVisits);
+    merged.placementInternshipOnlyVisitMissingForYear =
+      ctx === "internship_only"
+        ? !hasInternshipOnlyVisitForYear(scopedApprovedVisits, placementYear)
+        : false;
     merged.date_of_visit = mergedDateOfVisitForApi(
       visitApproved,
       scopedApprovedVisits,
@@ -1940,6 +1953,10 @@ export async function getCompanyDetailLegacyMergedById(
       : false;
   merged.placementSummerInternshipVisitByYear =
     buildPlacementSummerInternshipVisitByYearMap(scopedApprovedVisits);
+  merged.placementInternshipOnlyVisitMissingForYear =
+    ctx === "internship_only"
+      ? !hasInternshipOnlyVisitForYear(scopedApprovedVisits, placementYear)
+      : false;
   return { merged, visit: null, staticRow };
 }
 
@@ -2057,7 +2074,16 @@ export async function listApprovedCompaniesLegacyMerged(
     }
 
     for (const clusterVisits of visitsByCluster.values()) {
-      const visit = [...clusterVisits].sort(sortVisitsForListing)[0];
+      const visit = (() => {
+        const sorted = [...clusterVisits].sort(sortVisitsForListing);
+        if (normalizedListingYear != null) {
+          const yearHit = sorted.find(
+            (v) => (Number(v?.year) || 0) === normalizedListingYear
+          );
+          if (yearHit) return yearHit;
+        }
+        return sorted[0] ?? null;
+      })();
       if (!visit) continue;
 
       const clusterKey = listingHubClusterKey(visit);
@@ -2070,6 +2096,15 @@ export async function listApprovedCompaniesLegacyMerged(
       const mustDoTopicVisits = mustDoTopicVisitsByCompany.get(String(row._id)) ?? [];
       const visitForMerge = withClusterMustDoTopics(visit, mustDoTopicVisits);
       const merged = mergeToLegacyShape(staticRow, visitForMerge);
+      const listingYearForDate =
+        normalizedListingYear ??
+        normalizeCompanyDetailYear(visit?.year) ??
+        COMPANY_VISIT_DEFAULT_YEAR;
+      merged.date_of_visit = mergedDateOfVisitForApi(
+        visit,
+        scopedVisits,
+        listingYearForDate
+      );
       const placementAnyYearPpoOnCampus =
         companyHasAnyYearSummerPpoFromVisits(scopedVisits);
       const placementHasDreamTierVisit =
@@ -2085,6 +2120,10 @@ export async function listApprovedCompaniesLegacyMerged(
         normalizedListingYear == null
           ? placementSummerInternshipForListingYear
           : hasSummerInternshipListingVisitForYear(scopedVisits, normalizedListingYear);
+      const placementInternshipOnlyForListingYear =
+        normalizedListingYear == null
+          ? scopedVisits.some((v) => visitQualifiesInternshipOnlyHubRow(v))
+          : hasInternshipOnlyVisitForYear(scopedVisits, normalizedListingYear);
       const placementMeta = getListPlacementCategoryMetaFromVisits(
         scopedVisits,
         visitWithPlainRoleCtc(visit),
@@ -2097,8 +2136,13 @@ export async function listApprovedCompaniesLegacyMerged(
         ...catMeta
       } = placementMeta;
       const summerPref = getSummerPlacementPrefFromVisits(scopedVisits, placementYear);
+      const internshipOnlyPref = getInternshipOnlyPlacementPrefFromVisits(
+        scopedVisits,
+        placementYear
+      );
       list.push({
         ...merged,
+        placementVisitYear: normalizeCompanyDetailYear(visit?.year) ?? undefined,
         placementCompanyVisitId: visit?._id ? String(visit._id) : undefined,
         totalGotInByYear,
         category: catMeta.category,
@@ -2108,10 +2152,13 @@ export async function listApprovedCompaniesLegacyMerged(
         placementDreamTierForListingYear,
         placementSummerInternshipForListingYear,
         placementSummerStrictVisitForListingYear,
+        placementInternshipOnlyForListingYear,
         placementDreamDisplayType,
         placementDreamDetailYear,
         placementSummerDisplayType: summerPref.displayType,
         placementSummerDetailYear: summerPref.detailYear,
+        placementInternshipOnlyDisplayType: internshipOnlyPref.displayType,
+        placementInternshipOnlyDetailYear: internshipOnlyPref.detailYear,
       });
     }
   }
@@ -2157,6 +2204,21 @@ async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
     const primary = pickPrimaryVisitForListing(allVisits, placementYear);
     if (!primary) continue;
 
+    const listingYearNorm =
+      placementYear != null && placementYear !== ""
+        ? normalizeCompanyDetailYear(placementYear)
+        : null;
+    const listingYearForDate =
+      listingYearNorm ??
+      normalizeCompanyDetailYear(primary?.year) ??
+      COMPANY_VISIT_DEFAULT_YEAR;
+    const clusterKey = clusterKeyFromPlacementVisitClusterField(primary?.cluster);
+    const clusterScopedVisits = allVisits.filter(
+      (v) => clusterKeyFromPlacementVisitClusterField(v?.cluster) === clusterKey
+    );
+    const scopedForCategory =
+      clusterScopedVisits.length > 0 ? clusterScopedVisits : allVisits;
+
     const minimal = {
       _id: staticRow._id,
       name: staticRow.name,
@@ -2164,6 +2226,11 @@ async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
       type: primary.type,
       offCampus: primary.offCampus === true,
       roles: primary.roles,
+      date_of_visit: mergedDateOfVisitForApi(
+        primary,
+        scopedForCategory,
+        listingYearForDate
+      ),
       messageDate: primary.messageDate,
       updatedAt: primary.updatedAt,
       createdAt: primary.createdAt,
@@ -2180,10 +2247,6 @@ async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
       companyHasAnyYearSummerPpoFromVisits(allVisits);
     const placementHasDreamTierVisit =
       companyHasDreamTierVisitFromVisits(allVisits);
-    const listingYearNorm =
-      placementYear != null && placementYear !== ""
-        ? normalizeCompanyDetailYear(placementYear)
-        : null;
     const placementDreamTierForListingYear =
       listingYearNorm == null
         ? placementHasDreamTierVisit
@@ -2195,13 +2258,10 @@ async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
       listingYearNorm == null
         ? placementSummerInternshipForListingYear
         : hasSummerInternshipListingVisitForYear(allVisits, listingYearNorm);
-
-    const clusterKey = clusterKeyFromPlacementVisitClusterField(primary?.cluster);
-    const clusterScopedVisits = allVisits.filter(
-      (v) => clusterKeyFromPlacementVisitClusterField(v?.cluster) === clusterKey
-    );
-    const scopedForCategory =
-      clusterScopedVisits.length > 0 ? clusterScopedVisits : allVisits;
+    const placementInternshipOnlyForListingYear =
+      listingYearNorm == null
+        ? scopedForCategory.some((v) => visitQualifiesInternshipOnlyHubRow(v))
+        : hasInternshipOnlyVisitForYear(scopedForCategory, listingYearNorm);
 
     const placementMeta = getListPlacementCategoryMetaFromVisits(
       scopedForCategory,
@@ -2215,12 +2275,18 @@ async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
       ...catMeta
     } = placementMeta;
     const summerPref = getSummerPlacementPrefFromVisits(allVisits, placementYear);
+    const internshipOnlyPref = getInternshipOnlyPlacementPrefFromVisits(
+      scopedForCategory,
+      placementYear
+    );
     minimal.category = catMeta.category;
     minimal.totalCtcRupees = catMeta.totalCtcRupees;
     minimal.placementDreamDisplayType = placementDreamDisplayType;
     minimal.placementDreamDetailYear = placementDreamDetailYear;
     minimal.placementSummerDisplayType = summerPref.displayType;
     minimal.placementSummerDetailYear = summerPref.detailYear;
+    minimal.placementInternshipOnlyDisplayType = internshipOnlyPref.displayType;
+    minimal.placementInternshipOnlyDetailYear = internshipOnlyPref.detailYear;
     minimal.placementAnyYearPpoOnCampus = placementAnyYearPpoOnCampus;
     minimal.placementHasDreamTierVisit = placementHasDreamTierVisit;
     minimal.placementDreamTierForListingYear = placementDreamTierForListingYear;
@@ -2228,6 +2294,8 @@ async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
       placementSummerInternshipForListingYear;
     minimal.placementSummerStrictVisitForListingYear =
       placementSummerStrictVisitForListingYear;
+    minimal.placementInternshipOnlyForListingYear =
+      placementInternshipOnlyForListingYear;
     minimal.placementListClusterKey = clusterKeyFromPlacementVisitClusterField(
       primary?.cluster
     );
@@ -2258,7 +2326,13 @@ export async function getCompanyCategoryPreviewLogos(placementYear = null, clust
       placementSummerDetailYear: c.placementSummerDetailYear,
     };
   });
-  let ordered = sortCompaniesForCategoryPreview(withCategory);
+  const previewSortYear =
+    placementYear != null && placementYear !== ""
+      ? normalizeCompanyDetailYear(placementYear) ?? COMPANY_VISIT_DEFAULT_YEAR
+      : COMPANY_VISIT_DEFAULT_YEAR;
+  let ordered = sortCompaniesForCategoryPreview(withCategory, {
+    defaultYear: previewSortYear,
+  });
   const requestedCluster = normalizePlacementClusterQuery(clusterRaw);
   if (requestedCluster != null) {
     ordered = ordered.filter((c) => c.placementListClusterKey === requestedCluster);

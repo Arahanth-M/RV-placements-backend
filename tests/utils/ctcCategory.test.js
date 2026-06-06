@@ -40,21 +40,45 @@ describe("ctcCategory", () => {
   });
 
   describe("sumCtcObjectToRupees", () => {
-    it("sums arbitrary keys", () => {
-      const total = sumCtcObjectToRupees({
-        base: 500_000,
-        jb: "2 LPA",
-        stocks: 100_000,
-      });
-      expect(total).toBe(500_000 + 200_000 + 100_000);
+    it("uses only the CTC total key, not Base or other breakdown lines", () => {
+      expect(
+        sumCtcObjectToRupees({
+          CTC: "8 LPA",
+          Base: "6 LPA",
+          stocks: 100_000,
+        })
+      ).toBe(800_000);
     });
 
-    it("handles Map", () => {
+    it("falls back to Base when CTC is absent", () => {
+      expect(
+        sumCtcObjectToRupees({
+          Base: "7 LPA",
+          jb: "2 LPA",
+          stocks: 100_000,
+        })
+      ).toBe(700_000);
+    });
+
+    it("ignores other breakdown keys when neither CTC nor Base is present", () => {
+      expect(
+        sumCtcObjectToRupees({
+          jb: "2 LPA",
+          stocks: 100_000,
+        })
+      ).toBe(0);
+    });
+
+    it("reads legacy total key", () => {
+      expect(sumCtcObjectToRupees({ total: "6 LPA" })).toBe(600_000);
+    });
+
+    it("handles Map with CTC key", () => {
       const m = new Map([
-        ["a", 5],
-        ["b", "3 LPA"],
+        ["CTC", "7 LPA"],
+        ["Base", "5 LPA"],
       ]);
-      expect(sumCtcObjectToRupees(m)).toBe(500_000 + 300_000);
+      expect(sumCtcObjectToRupees(m)).toBe(700_000);
     });
   });
 
@@ -76,15 +100,23 @@ describe("ctcCategory", () => {
   });
 
   describe("getCompanyPlacementMeta", () => {
-    it("uses max role total", () => {
+    it("uses max role CTC total across roles", () => {
       const meta = getCompanyPlacementMeta({
         roles: [
           { ctc: { total: "6 LPA" } },
-          { ctc: { base: 12, jb: 2 } },
+          { ctc: { CTC: "14 LPA", base: 12, jb: 2 } },
         ],
       });
       expect(meta.totalCtcRupees).toBe(1_400_000);
       expect(meta.category).toBe(PLACEMENT_CATEGORY.OPEN_DREAM);
+    });
+
+    it("does not inflate tier by summing Base with CTC on the same role", () => {
+      const meta = getCompanyPlacementMeta({
+        roles: [{ ctc: { CTC: "8 LPA", Base: "6 LPA" } }],
+      });
+      expect(meta.totalCtcRupees).toBe(800_000);
+      expect(meta.category).toBe(PLACEMENT_CATEGORY.DREAM);
     });
 
     it("dream when no roles", () => {

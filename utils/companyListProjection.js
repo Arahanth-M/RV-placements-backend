@@ -87,5 +87,12 @@ export function projectCompanyListResponse(c) {
     placementDreamDetailYear: c.placementDreamDetailYear,
     placementSummerDisplayType: c.placementSummerDisplayType,
     placementSummerDetailYear: c.placementSummerDetailYear,
+    placementInternshipOnlyForListingYear: c.placementInternshipOnlyForListingYear,
+    placementInternshipOnlyDisplayType: c.placementInternshipOnlyDisplayType,
+    placementInternshipOnlyDetailYear: c.placementInternshipOnlyDetailYear,
+    placementVisitYear: (() => {
+      const y = Number(c.placementVisitYear ?? c.year);
+      return Number.isFinite(y) && y > 2000 ? y : undefined;
+    })(),
   };
 }
