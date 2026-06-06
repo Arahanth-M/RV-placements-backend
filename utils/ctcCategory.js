@@ -13,6 +13,11 @@ export const PLACEMENT_CATEGORY = {
   OPEN_DREAM: "open dream",
 };
 
+/** Keys on `role.ctc` that hold the total package amount. */
+const ROLE_CTC_TOTAL_KEYS = ["CTC", "Ctc", "ctc", "total"];
+/** Fallback when no CTC total is present — still excludes variable / bonus breakdown lines. */
+const ROLE_BASE_TOTAL_KEYS = ["Base", "base"];
+
 /**
  * Normalize one CTC component (string or number) to annual rupees.
  * @param {unknown} value
@@ -65,9 +70,10 @@ export function parseCtcStringToRupees(raw) {
 }
 
 /**
- * Sum all values in a plain ctc object (any keys) after normalization.
+ * Read package amount from a role's `ctc` object: CTC first, then Base if CTC is absent.
+ * Ignores variable pay, stocks, and other breakdown components.
  * @param {Record<string, unknown>|Map|undefined|null} ctc
- * @returns {number}
+ * @returns {number} annual rupees, or 0 when no usable CTC/Base value is present
  */
 export function sumCtcObjectToRupees(ctc) {
   const obj =
@@ -77,12 +83,18 @@ export function sumCtcObjectToRupees(ctc) {
         ? ctc
         : {};
 
-  let sum = 0;
-  for (const key of Object.keys(obj)) {
-    const rupees = normalizeCtcComponentToRupees(obj[key]);
-    if (rupees !== null && Number.isFinite(rupees)) sum += rupees;
-  }
-  return sum;
+  const readFirstPositive = (keys) => {
+    for (const key of keys) {
+      if (!(key in obj)) continue;
+      const rupees = normalizeCtcComponentToRupees(obj[key]);
+      if (rupees !== null && Number.isFinite(rupees) && rupees > 0) {
+        return rupees;
+      }
+    }
+    return null;
+  };
+
+  return readFirstPositive(ROLE_CTC_TOTAL_KEYS) ?? readFirstPositive(ROLE_BASE_TOTAL_KEYS) ?? 0;
 }
 
 /**
