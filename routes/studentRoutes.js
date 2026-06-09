@@ -15,6 +15,10 @@ import {
   buildProfilePayloadFromStudentRecord,
   buildUsnLookupStudentPayload,
 } from "../services/studentProfileService.js";
+import {
+  getProfileDiscrepancyReportStatus,
+  submitProfileDiscrepancyReport,
+} from "../services/studentProfileDiscrepancyService.js";
 import { isAdminEmail } from "../config/constants.js";
 import validateRequest from "../middleware/validateRequest.js";
 import { profileCacheInvalidateSchema } from "../validations/student.validation.js";
@@ -136,6 +140,65 @@ router.get(
       res
         .status(500)
         .json({ error: "Server error while fetching student profile" });
+    }
+  }
+);
+
+router.get(
+  "/profile/discrepancy/status",
+  authJWT,
+  checkBetaAccess,
+  authorize(["student", "admin", "spc"]),
+  async (req, res) => {
+    try {
+      if (!req.user?.email) {
+        return res.json({ hasReported: false });
+      }
+      const status = await getProfileDiscrepancyReportStatus(req.user.email);
+      return res.json(status);
+    } catch (error) {
+      console.error("❌ Error fetching profile discrepancy status:", error.message);
+      return res.status(500).json({ error: "Error fetching report status" });
+    }
+  }
+);
+
+router.post(
+  "/profile/discrepancy",
+  authJWT,
+  checkBetaAccess,
+  authorize(["student", "admin", "spc"]),
+  async (req, res) => {
+    try {
+      if (!req.user?.email) {
+        return res.status(401).json({ error: "You must be logged in" });
+      }
+      if (req.user?.isAdminSession === true) {
+        return res.status(403).json({ error: "Admins cannot submit profile discrepancy reports" });
+      }
+
+      const result = await submitProfileDiscrepancyReport(req.user);
+
+      if (result.reason === "not_found") {
+        return res.status(404).json({ error: "Student profile not found" });
+      }
+      if (result.reason === "already_reported") {
+        return res.status(400).json({
+          error: "You have already reported discrepancies for your profile",
+          hasReported: true,
+        });
+      }
+      if (!result.ok) {
+        return res.status(400).json({ error: "Could not submit report", hasReported: false });
+      }
+
+      return res.json({
+        message: "Report sent. Admins have been notified.",
+        hasReported: true,
+      });
+    } catch (error) {
+      console.error("❌ Error submitting profile discrepancy report:", error.message);
+      return res.status(500).json({ error: "Error submitting report" });
     }
   }
 );

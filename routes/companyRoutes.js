@@ -14,6 +14,10 @@ import { COMPANY_VISIT_DEFAULT_YEAR } from "../utils/placementYears.js";
 import redis from "../utils/redis.js";
 import { companyDetailRedisKey } from "../services/companyDetailCache.js";
 import {
+  getCompanyDetailRequestStatus,
+  submitCompanyDetailRequest,
+} from "../services/companyDetailRequestService.js";
+import {
   addHelpfulVote,
   createCompanyWithVisit,
   getApprovedPlacementYearsForCompany,
@@ -388,6 +392,63 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
 
 
 
+
+// Student: request more company details (once per user per company; notifies admins)
+companyRouter.post("/:id/detail-request", authJWT, async (req, res) => {
+  try {
+    if (!req.user?.email) {
+      return res.status(401).json({ error: "You must be logged in to request details" });
+    }
+    if (req.user?.isAdminSession === true) {
+      return res.status(403).json({ error: "Admins cannot submit detail requests" });
+    }
+
+    const placementYearRaw = req.body?.placementYear ?? req.query?.year;
+    const placementYear =
+      placementYearRaw != null && placementYearRaw !== ""
+        ? normalizeCompanyDetailYear(placementYearRaw)
+        : undefined;
+
+    const result = await submitCompanyDetailRequest(req.params.id, req.user, {
+      placementYear,
+    });
+
+    if (result.reason === "not_found") {
+      return res.status(404).json({ error: "Company not found" });
+    }
+    if (result.reason === "already_requested") {
+      return res.status(400).json({
+        error: "You have already requested more details for this company",
+        hasRequested: true,
+      });
+    }
+    if (!result.ok) {
+      return res.status(400).json({ error: "Could not submit request", hasRequested: false });
+    }
+
+    return res.json({
+      message: "Request sent. Admins have been notified.",
+      hasRequested: true,
+    });
+  } catch (error) {
+    console.error("❌ Error submitting company detail request:", error);
+    return res.status(500).json({ error: "Error submitting request" });
+  }
+});
+
+companyRouter.get("/:id/detail-request/status", authJWT, async (req, res) => {
+  try {
+    if (!req.user?.email) {
+      return res.json({ hasRequested: false });
+    }
+
+    const status = await getCompanyDetailRequestStatus(req.params.id, req.user.email);
+    return res.json(status);
+  } catch (error) {
+    console.error("❌ Error fetching detail request status:", error);
+    return res.status(500).json({ error: "Error fetching request status" });
+  }
+});
 
 // Increment helpful count for a company (one vote per user)
 companyRouter.post("/:id/helpful", authJWT, async (req, res) => {

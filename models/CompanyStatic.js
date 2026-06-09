@@ -20,6 +20,8 @@ const companyStaticSchema = new mongoose.Schema(
     prev_coding_ques: [{ type: mongoose.Schema.Types.Mixed }],
     helpfulCount: { type: Number, default: 0, min: 0 },
     helpfulUsers: [{ type: String }],
+    /** Student emails that requested more company details (one request per email). */
+    detailRequestUsers: [{ type: String }],
     submittedBy: submittedBySchema,
   },
   { timestamps: true }

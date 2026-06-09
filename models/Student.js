@@ -25,6 +25,11 @@ const studentSchema = new mongoose.Schema(
       type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Event" }],
       default: [],
     },
+    /** Student flagged incorrect data on View Profile (one report per roster row). */
+    profileDiscrepancyReported: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,

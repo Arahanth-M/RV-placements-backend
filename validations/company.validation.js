@@ -60,6 +60,7 @@ const optionalCompanyBody = {
   cluster: Joi.string().valid(...COMPANY_VISIT_CLUSTER_CANONICAL),
   helpfulCount: Joi.number().integer().min(0),
   helpfulUsers: Joi.array().items(t(320)).max(10000),
+  detailRequestUsers: Joi.array().items(t(320)).max(10000),
   totalStudentsApplied: Joi.number().integer().min(0),
   totalClearedOA: Joi.number().integer().min(0),
   totalGotIn: Joi.number().integer().min(0),
