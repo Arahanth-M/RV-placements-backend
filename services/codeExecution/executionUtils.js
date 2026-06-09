@@ -48,17 +48,49 @@ export const sanitizeInput = (value) => {
   return value;
 };
 
+/** Failure fields for post-submit UI (visible or hidden). */
+const buildTestCaseFailureDetail = (item) => ({
+  input: sanitizeInput(item?.input ?? null),
+  expectedOutput: sanitizeInput(item?.expectedOutput ?? null),
+  actualOutput: sanitizeInput(item?.actualOutput ?? null),
+  error: toSafeString(item?.error),
+});
+
 /**
- * Per hidden testcase for post-submit UI (pass/fail only; no inputs/outputs).
+ * Per hidden testcase for post-submit UI.
+ * Passed cases: pass/fail only. Failed cases: include input/expected/actual/error.
  * @param {Array<{ isHidden?: unknown, passed?: boolean }>} results
  */
 export const buildHiddenTestResultsFromRows = (results = []) => {
   const rows = Array.isArray(results) ? results : [];
   const hidden = rows.filter((item) => normalizeIsHidden(item?.isHidden) === true);
-  return hidden.map((item, idx) => ({
-    caseNumber: idx + 1,
-    passed: Boolean(item?.passed),
-  }));
+  return hidden.map((item, idx) => {
+    const passed = Boolean(item?.passed);
+    const base = { caseNumber: idx + 1, passed };
+    if (passed) return base;
+    return { ...base, ...buildTestCaseFailureDetail(item) };
+  });
+};
+
+/**
+ * Failed visible testcases for post-submit UI (full failure detail per case).
+ * @param {Array<{ isHidden?: unknown, passed?: boolean }>} results
+ */
+export const buildFailedVisibleTestsFromRows = (results = []) => {
+  const rows = Array.isArray(results) ? results : [];
+  let visibleIdx = 0;
+  const failed = [];
+  for (const item of rows) {
+    if (normalizeIsHidden(item?.isHidden) === true) continue;
+    visibleIdx += 1;
+    if (item?.passed === true) continue;
+    failed.push({
+      caseNumber: visibleIdx,
+      passed: false,
+      ...buildTestCaseFailureDetail(item),
+    });
+  }
+  return failed;
 };
 
 /**
@@ -70,10 +102,21 @@ export const buildHiddenTestResultsForClient = (execution = {}) => {
   const explicit = Array.isArray(execution.hiddenTestResults)
     ? execution.hiddenTestResults
         .filter((row) => row && typeof row === "object")
-        .map((row, idx) => ({
-          caseNumber: Number(row.caseNumber) > 0 ? Number(row.caseNumber) : idx + 1,
-          passed: Boolean(row.passed),
-        }))
+        .map((row, idx) => {
+          const passed = Boolean(row.passed);
+          const base = {
+            caseNumber: Number(row.caseNumber) > 0 ? Number(row.caseNumber) : idx + 1,
+            passed,
+          };
+          if (passed) return base;
+          return {
+            ...base,
+            input: row.input ?? null,
+            expectedOutput: row.expectedOutput ?? null,
+            actualOutput: row.actualOutput ?? null,
+            error: typeof row.error === "string" ? row.error : "",
+          };
+        })
     : [];
   if (explicit.length > 0) return explicit;
 
@@ -167,6 +210,7 @@ export default {
   calculateExecutionSummary,
   normalizeIsHidden,
   buildHiddenTestResultsFromRows,
+  buildFailedVisibleTestsFromRows,
   buildHiddenTestResultsForClient,
   truncateUserDebugOutput,
   USER_DEBUG_OUTPUT_MAX_BYTES,

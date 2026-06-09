@@ -56,6 +56,11 @@ const codeExecutionTraceSchema = new mongoose.Schema(
     executionTime: { type: Number },
     weightedPassRate: { type: Number },
     failedTests: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    /** Per hidden case pass/fail; failure rows include input/expected/actual for post-submit UI. */
+    hiddenTestResults: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    /** Lightweight pass/fail rows (legacy fallback for hidden results). */
+    caseResults: { type: [mongoose.Schema.Types.Mixed], default: undefined },
+    userDebugOutput: { type: String, trim: true, default: "" },
   },
   { _id: false }
 );

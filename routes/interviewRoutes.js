@@ -143,6 +143,18 @@ const buildLastCodeExecutionSummary = (evaluationTrace) => {
       hiddenTotalCount,
       hiddenPassedCount,
     }),
+    failedTests: Array.isArray(ex.failedTests)
+      ? ex.failedTests
+          .filter((row) => row && typeof row === "object")
+          .map((row, idx) => ({
+            caseNumber: Number(row.caseNumber) > 0 ? Number(row.caseNumber) : idx + 1,
+            passed: false,
+            input: row.input ?? null,
+            expectedOutput: row.expectedOutput ?? null,
+            actualOutput: row.actualOutput ?? null,
+            error: typeof row.error === "string" ? row.error : "",
+          }))
+      : [],
     userDebugOutput: typeof ex.userDebugOutput === "string" ? ex.userDebugOutput : "",
   };
 };

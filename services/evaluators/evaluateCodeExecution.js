@@ -1,5 +1,6 @@
 import { executeCode, normalizeExecutionLanguage } from "../codeExecution/executeCode.js";
 import {
+  buildFailedVisibleTestsFromRows,
   buildHiddenTestResultsFromRows,
   normalizeIsHidden,
 } from "../codeExecution/executionUtils.js";
@@ -209,29 +210,16 @@ export const evaluateCodeExecution = async (payload) => {
     verdict,
   });
 
-  const failedTests = Array.isArray(executionResult?.results)
-    ? executionResult.results
-        .map((item, index) => ({ index, ...item }))
-        .filter((item) => item?.passed !== true)
-        .filter((item) => item?.isHidden !== true)
-        .map((item) => ({
-          index: item.index,
-          input: item.input,
-          expectedOutput: item.expectedOutput,
-          actualOutput: item.actualOutput,
-          error: item.error,
-        }))
-    : [];
+  const resultRows = Array.isArray(executionResult?.results) ? executionResult.results : [];
+  const failedTests = buildFailedVisibleTestsFromRows(resultRows);
 
-  const normalizedResultRows = Array.isArray(executionResult?.results)
-    ? executionResult.results.map((item) => ({
-        isHidden: normalizeIsHidden(item?.isHidden),
-        passed: Boolean(item?.passed),
-      }))
-    : [];
+  const normalizedResultRows = resultRows.map((item) => ({
+    isHidden: normalizeIsHidden(item?.isHidden),
+    passed: Boolean(item?.passed),
+  }));
 
-  /** Per hidden testcase pass/fail for post-submit UI (no inputs/outputs — cases stay hidden). */
-  const hiddenTestResults = buildHiddenTestResultsFromRows(normalizedResultRows);
+  /** Per hidden testcase for post-submit UI; failure detail only when not passed. */
+  const hiddenTestResults = buildHiddenTestResultsFromRows(resultRows);
 
   const executionIssueFeedback = executionFailureStatuses.has(executionResult?.status)
     ? `Execution issue (${executionResult?.status || "EXECUTION_ERROR"}): the submission did not complete sandboxed evaluation successfully.`
