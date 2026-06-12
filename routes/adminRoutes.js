@@ -38,6 +38,11 @@ import {
 import { invalidateSpcMyRecordsCacheByEmail } from "../services/spcMyRecordsCache.js";
 import { getStudentPlacementStats } from "../services/studentPlacementStatsCache.js";
 import { invalidateCompanyDetailCache } from "../services/companyDetailCache.js";
+import {
+  approveSubmissionAndUpdateCompany,
+  approveSubmissionsBatch,
+  MAX_SUBMISSION_APPROVE_BATCH_SIZE,
+} from "../services/submissionApprovalService.js";
 import { normalizePlacementClusterQuery } from "../utils/placementCluster.js";
 
 async function invalidateSubmitterListCaches(submission) {
@@ -671,13 +676,65 @@ submissionModRouter.post("/submissions/:id/add-answer", async (req, res) => {
   }
 });
 
-// Approve submission and update company
+function reviewerFromRequest(req) {
+  const reviewerRole =
+    req.user?.isAdminSession === true
+      ? "admin"
+      : req.user?.role === "spc"
+        ? "spc"
+        : "admin";
+  const reviewerName =
+    String(req.user?.username || "").trim() ||
+    String(req.user?.email || "")
+      .split("@")[0]
+      .trim() ||
+    "Reviewer";
+  return {
+    role: reviewerRole,
+    name: reviewerName,
+    email: String(req.user?.email || "").trim(),
+  };
+}
+
+// Batch-approve pending submissions (grouped by company visit; parallel across visits)
+submissionModRouter.post("/submissions/approve-batch", async (req, res) => {
+  try {
+    const rawIds = req.body?.ids;
+    if (!Array.isArray(rawIds) || rawIds.length === 0) {
+      return res.status(400).json({ error: "Request body must include a non-empty ids array." });
+    }
+    if (rawIds.length > MAX_SUBMISSION_APPROVE_BATCH_SIZE) {
+      return res.status(400).json({
+        error: `Cannot approve more than ${MAX_SUBMISSION_APPROVE_BATCH_SIZE} submissions per batch.`,
+      });
+    }
+
+    const summary = await approveSubmissionsBatch(rawIds, reviewerFromRequest(req));
+
+    res.json({
+      message: `Batch approval finished: ${summary.successCount} succeeded, ${summary.failCount} failed.`,
+      ...summary,
+    });
+  } catch (error) {
+    console.error("❌ Error in batch submission approval:", error.message);
+    res.status(500).json({
+      error: "Server error",
+      details: error.message,
+    });
+  }
+});
+
+// Approve submission and update company (targeted visit update + per-visit lock)
 submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
   try {
     const submission = await Submission.findById(req.params.id);
-    
+
     if (!submission) {
       return res.status(404).json({ error: "Submission not found" });
+    }
+
+    if (submission.status !== "pending") {
+      return res.status(400).json({ error: "Only pending submissions can be approved." });
     }
 
     let mergeSource = submission.content;
@@ -700,593 +757,35 @@ submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
       }
     }
 
-    const placementYear = normalizeCompanyDetailYear(submission.placementYear);
-    const placementListContextRaw = submission.placementListContext;
-    const placementListContext =
-      placementListContextRaw != null && String(placementListContextRaw).trim() !== ""
-        ? String(placementListContextRaw).trim()
-        : null;
-
-    const companyVisitIdHint = submission.companyVisitId ?? null;
-    const placementClusterForSub = normalizePlacementClusterQuery(submission.cluster);
-
-    await ensureAdminVisitForYear(submission.companyId, placementYear);
-    const loadedForSub = await getCompanyMergedForAdminById(
-      String(submission.companyId),
-      placementYear,
-      placementListContext,
-      companyVisitIdHint,
-      placementClusterForSub
+    const result = await approveSubmissionAndUpdateCompany(
+      submission,
+      mergeSource,
+      reviewerFromRequest(req)
     );
-    if (!loadedForSub?.staticRow || !loadedForSub.merged) {
-      return res.status(404).json({ error: "Company not found" });
-    }
-    let merged = JSON.parse(JSON.stringify(loadedForSub.merged));
-
-    const removeLegacySolutionField = () => {
-      const legacyKeys = ["onlineQuestion_solution", "onlineQuestion_solutions"];
-      legacyKeys.forEach((key) => {
-        if (key in merged) delete merged[key];
-      });
-    };
-
-    const legacySolutions = merged["onlineQuestion_solution"];
-    if (
-      (!merged.onlineQuestions_solution || merged.onlineQuestions_solution.length === 0) &&
-      Array.isArray(legacySolutions) &&
-      legacySolutions.length > 0
-    ) {
-      merged.onlineQuestions_solution = legacySolutions;
-    }
-    removeLegacySolutionField();
-
-    // Parse submission content (optional mergeContent from body = AI-enhanced text, not persisted on Submission)
-    let parsedContent;
-    try {
-      parsedContent = JSON.parse(mergeSource);
-    } catch {
-      parsedContent = { question: mergeSource, solution: "" };
-    }
-
-    // Update company based on submission type
-    if (submission.type === "onlineQuestions") {
-      // Ensure we get a string value
-      let questionText = parsedContent.question || mergeSource;
-      if (questionText && typeof questionText !== 'string') {
-        questionText = String(questionText);
-      }
-      if (questionText) {
-        // Initialize arrays if they don't exist
-        if (!merged.onlineQuestions) {
-          merged.onlineQuestions = [];
-        }
-        if (!merged.onlineQuestions_solution) {
-          merged.onlineQuestions_solution = [];
-        }
-        const ensureSolutionArraySync = () => {
-          while (merged.onlineQuestions_solution.length < merged.onlineQuestions.length) {
-            merged.onlineQuestions_solution.push("");
-          }
-        };
-        
-        const sanitizedQuestion = sanitizeText(questionText);
-        
-        if (sanitizedQuestion.length > 0) {
-          const existingIndex = merged.onlineQuestions.findIndex(
-            (q) => typeof q === "string" && q.trim() === sanitizedQuestion.trim()
-          );
-
-          const getSanitizedSolution = () => {
-            if (!parsedContent.solution) return "";
-            return sanitizeText(parsedContent.solution);
-          };
-
-          if (existingIndex === -1) {
-            merged.onlineQuestions.push(sanitizedQuestion);
-
-            ensureSolutionArraySync();
-            const newIndex = merged.onlineQuestions.length - 1;
-
-            const sanitizedSolution = getSanitizedSolution();
-            merged.onlineQuestions_solution[newIndex] = sanitizedSolution || "";
-            
-            console.log('✅ Added online question to company:', merged._id);
-          } else {
-            console.log('ℹ️ Question already exists, updating solution text');
-            ensureSolutionArraySync();
-            const sanitizedSolution = getSanitizedSolution();
-            if (sanitizedSolution) {
-              const existingSolution = merged.onlineQuestions_solution[existingIndex] || "";
-              const combined = existingSolution
-                ? `${existingSolution}\n\n${sanitizedSolution}`
-                : sanitizedSolution;
-              merged.onlineQuestions_solution[existingIndex] = combined;
-            } else if (
-              !merged.onlineQuestions_solution[existingIndex] ||
-              typeof merged.onlineQuestions_solution[existingIndex] !== "string"
-            ) {
-              merged.onlineQuestions_solution[existingIndex] = "";
-            }
-          }
-        } else {
-          console.warn(`Question truncated but still exceeds limit: ${truncatedQuestion?.length || 0} chars`);
-        }
-      }
-    } else if (submission.type === "interviewQuestions") {
-      // Ensure we get a string value
-      let questionText = parsedContent.question || mergeSource;
-      if (questionText && typeof questionText !== 'string') {
-        questionText = String(questionText);
-      }
-      if (questionText) {
-        // Initialize arrays if they don't exist
-        if (!merged.interviewQuestions) {
-          merged.interviewQuestions = [];
-        }
-        if (!merged.interviewQuestions_solution) {
-          merged.interviewQuestions_solution = [];
-        }
-        const ensureSolutionArraySync = () => {
-          while (merged.interviewQuestions_solution.length < merged.interviewQuestions.length) {
-            merged.interviewQuestions_solution.push("");
-          }
-        };
-        
-        const sanitizedQuestion = sanitizeText(questionText);
-        
-        if (sanitizedQuestion.length > 0) {
-          const existingIndex = merged.interviewQuestions.findIndex(
-            (q) => typeof q === "string" && q.trim() === sanitizedQuestion.trim()
-          );
-
-          const getSanitizedSolution = () => {
-            if (!parsedContent.solution) return "";
-            return sanitizeText(parsedContent.solution);
-          };
-
-          if (existingIndex === -1) {
-            merged.interviewQuestions.push(sanitizedQuestion);
-
-            ensureSolutionArraySync();
-            const newIndex = merged.interviewQuestions.length - 1;
-
-            const sanitizedSolution = getSanitizedSolution();
-            merged.interviewQuestions_solution[newIndex] = sanitizedSolution || "";
-            
-            console.log('✅ Added interview question to company:', merged._id);
-          } else {
-            console.log('ℹ️ Question already exists, updating solution text');
-            ensureSolutionArraySync();
-            const sanitizedSolution = getSanitizedSolution();
-            if (sanitizedSolution) {
-              const existingSolution = merged.interviewQuestions_solution[existingIndex] || "";
-              const combined = existingSolution
-                ? `${existingSolution}\n\n${sanitizedSolution}`
-                : sanitizedSolution;
-              merged.interviewQuestions_solution[existingIndex] = combined;
-            } else if (
-              !merged.interviewQuestions_solution[existingIndex] ||
-              typeof merged.interviewQuestions_solution[existingIndex] !== "string"
-            ) {
-              merged.interviewQuestions_solution[existingIndex] = "";
-            }
-          }
-        }
-      }
-    } else if (submission.type === "interviewProcess") {
-      // Ensure we get a string value
-      let processText = parsedContent.question || parsedContent.content || mergeSource;
-      if (processText && typeof processText !== 'string') {
-        processText = String(processText);
-      }
-      if (processText) {
-        const sanitizedProcess = sanitizeText(processText);
-        if (sanitizedProcess.length > 0) {
-          // Initialize array if it doesn't exist
-          if (!merged.interviewProcess || !Array.isArray(merged.interviewProcess)) {
-            merged.interviewProcess = [];
-          }
-          
-          // Check if this process already exists (compare content)
-          // Handle both legacy string format and new JSON string format
-          const processExists = merged.interviewProcess.some(process => {
-            try {
-              // Try to parse as JSON (new format with metadata)
-              const parsed = JSON.parse(process);
-              if (parsed && typeof parsed === 'object' && parsed.content) {
-                return parsed.content === sanitizedProcess;
-              }
-            } catch {
-              // Not JSON, treat as legacy string
-            }
-            // Legacy string format - direct comparison
-            return process === sanitizedProcess;
-          });
-          
-          if (!processExists) {
-            // Store as JSON string to preserve submitter info while keeping String type in schema
-            const processEntry = JSON.stringify({
-              content: sanitizedProcess,
-              submittedBy: {
-                name: submission.submittedBy.name,
-                email: submission.submittedBy.email
-              },
-              isAnonymous: submission.isAnonymous === true || submission.isAnonymous === 'true'
-            });
-            merged.interviewProcess.push(processEntry);
-            console.log('✅ Added interview process to company:', merged._id);
-          } else {
-            console.log('⚠️ Interview process already exists in company');
-          }
-        }
-      }
-    } else if (submission.type === "internshipExperience") {
-      let experienceText =
-        parsedContent.experience || parsedContent.content || mergeSource;
-      if (experienceText && typeof experienceText !== "string") {
-        experienceText = String(experienceText);
-      }
-      if (experienceText) {
-        const sanitizedExperience = sanitizeText(experienceText);
-        if (sanitizedExperience.length > 0) {
-          if (!merged.internshipExperience || !Array.isArray(merged.internshipExperience)) {
-            merged.internshipExperience = [];
-          }
-
-          const experienceExists = merged.internshipExperience.some((exp) => {
-            try {
-              const parsed = JSON.parse(exp);
-              if (parsed && typeof parsed === "object") {
-                const existingContent = parsed.content || parsed.experience || "";
-                return String(existingContent).trim() === sanitizedExperience;
-              }
-            } catch {
-              // Legacy plain-string format.
-            }
-            return String(exp || "").trim() === sanitizedExperience;
-          });
-
-          if (!experienceExists) {
-            const experienceEntry = JSON.stringify({
-              content: sanitizedExperience,
-              submittedBy: {
-                name: submission.submittedBy.name,
-                email: submission.submittedBy.email,
-              },
-              isAnonymous:
-                submission.isAnonymous === true || submission.isAnonymous === "true",
-            });
-            merged.internshipExperience.push(experienceEntry);
-            console.log("✅ Added internship experience to company:", merged._id);
-          } else {
-            console.log("⚠️ Internship experience already exists in company");
-          }
-        }
-      }
-    } else if (submission.type === "mustDoTopics") {
-      // Ensure we get a string value
-      let topicText = parsedContent.question || parsedContent.content || parsedContent.topic || mergeSource;
-      if (topicText && typeof topicText !== 'string') {
-        topicText = String(topicText);
-      }
-      if (topicText) {
-        const sanitizedTopic = sanitizeText(topicText);
-        if (sanitizedTopic.length > 0) {
-          // Initialize array if it doesn't exist
-          if (!merged.Must_Do_Topics || !Array.isArray(merged.Must_Do_Topics)) {
-            merged.Must_Do_Topics = [];
-          }
-          
-          // Append the new topic to the array (avoid duplicates)
-          if (!merged.Must_Do_Topics.includes(sanitizedTopic)) {
-            merged.Must_Do_Topics.push(sanitizedTopic);
-            console.log('✅ Added must do topic to company:', merged._id);
-          } else {
-            console.log('⚠️ Must do topic already exists in company');
-          }
-        }
-      }
-    }
-
-    // Final validation: ensure all array values don't exceed their max lengths
-    // Also filter out empty strings that might cause validation issues
-    if (merged.onlineQuestions) {
-      merged.onlineQuestions = merged.onlineQuestions
-        .map((q) => sanitizeText(q))
-        .filter((q) => q && q.length > 0);
-    }
-    if (merged.onlineQuestions_solution) {
-      merged.onlineQuestions_solution = merged.onlineQuestions_solution.map((s) => sanitizeText(s));
-    }
-    if (merged.interviewQuestions) {
-      merged.interviewQuestions = merged.interviewQuestions
-        .map((q) => sanitizeText(q))
-        .filter((q) => q && q.length > 0);
-    }
-    if (merged.interviewQuestions_solution) {
-      merged.interviewQuestions_solution = merged.interviewQuestions_solution.map((s) => sanitizeText(s));
-    }
-    if (merged.interviewProcess) {
-      // Handle both array and legacy string format
-      if (Array.isArray(merged.interviewProcess)) {
-        merged.interviewProcess = merged.interviewProcess
-          .map((p) => sanitizeText(p))
-          .filter((p) => p && p.length > 0);
-      } else if (typeof merged.interviewProcess === 'string') {
-        // Convert legacy string to array
-        const sanitized = sanitizeText(merged.interviewProcess);
-        if (sanitized && sanitized.length > 0) {
-          merged.interviewProcess = [sanitized];
-        }
-      }
-    }
-    if (merged.internshipExperience) {
-      if (Array.isArray(merged.internshipExperience)) {
-        merged.internshipExperience = merged.internshipExperience
-          .map((exp) => sanitizeText(exp))
-          .filter((exp) => exp && exp.length > 0);
-      } else if (typeof merged.internshipExperience === "string") {
-        const sanitized = sanitizeText(merged.internshipExperience);
-        if (sanitized && sanitized.length > 0) {
-          merged.internshipExperience = [sanitized];
-        }
-      }
-    }
-    
-    // Truncate Must_Do_Topics to max 200 characters
-    if (merged.Must_Do_Topics && Array.isArray(merged.Must_Do_Topics)) {
-      merged.Must_Do_Topics = merged.Must_Do_Topics.map(topic => {
-        if (typeof topic === 'string' && topic.length > 200) {
-          return topic.substring(0, 200);
-        }
-        return topic || '';
-      }).filter(topic => topic && topic.trim().length > 0);
-    }
-    
-    // Truncate mcqQuestions fields to their max lengths
-    // Convert to plain objects first to ensure Mongoose recognizes changes
-    if (merged.mcqQuestions && Array.isArray(merged.mcqQuestions)) {
-      merged.mcqQuestions = merged.mcqQuestions.map((mcq, index) => {
-        if (!mcq || typeof mcq !== 'object') return mcq;
-        
-        // Convert to plain object if it's a Mongoose subdocument
-        const plainMcq = mcq.toObject ? mcq.toObject() : { ...mcq };
-        const truncatedMcq = {};
-        
-        // Copy all fields first
-        Object.keys(plainMcq).forEach(key => {
-          truncatedMcq[key] = plainMcq[key];
-        });
-        
-        // Question max 300
-        if (typeof truncatedMcq.question === 'string') {
-          if (truncatedMcq.question.length > 300) {
-            console.log(`⚠️ Truncating mcqQuestions[${index}].question from ${truncatedMcq.question.length} to 300`);
-            truncatedMcq.question = truncatedMcq.question.substring(0, 300);
-          }
-        }
-        
-        // Options max 100 each
-        ['optionA', 'optionB', 'optionC', 'optionD', 'answer'].forEach(field => {
-          if (typeof truncatedMcq[field] === 'string') {
-            if (truncatedMcq[field].length > 100) {
-              console.log(`⚠️ Truncating mcqQuestions[${index}].${field} from ${truncatedMcq[field].length} to 100`);
-              truncatedMcq[field] = truncatedMcq[field].substring(0, 100);
-            }
-          }
-        });
-        
-        // Final safety check - ensure no field exceeds limits
-        if (truncatedMcq.question && truncatedMcq.question.length > 300) {
-          truncatedMcq.question = truncatedMcq.question.substring(0, 300);
-        }
-        ['optionA', 'optionB', 'optionC', 'optionD', 'answer'].forEach(field => {
-          if (truncatedMcq[field] && truncatedMcq[field].length > 100) {
-            truncatedMcq[field] = truncatedMcq[field].substring(0, 100);
-          }
-        });
-        
-        return truncatedMcq;
-      });
-      
-      // Mark as modified
-      
-      // Final verification pass - double check all lengths
-      merged.mcqQuestions.forEach((mcq, index) => {
-        if (mcq && typeof mcq === 'object') {
-          if (mcq.question && typeof mcq.question === 'string' && mcq.question.length > 300) {
-            console.error(`❌ FINAL CHECK FAILED: mcqQuestions[${index}].question still ${mcq.question.length} chars`);
-            mcq.question = mcq.question.substring(0, 300);
-          }
-          ['optionA', 'optionB', 'optionC', 'optionD', 'answer'].forEach(field => {
-            if (mcq[field] && typeof mcq[field] === 'string' && mcq[field].length > 100) {
-              console.error(`❌ FINAL CHECK FAILED: mcqQuestions[${index}].${field} still ${mcq[field].length} chars`);
-              mcq[field] = mcq[field].substring(0, 100);
-            }
-          });
-        }
-      });
-      
-      // Mark again after final verification
-    }
-    
-    // Truncate other string fields with maxlength constraints
-    if (merged.eligibility && typeof merged.eligibility === 'string' && merged.eligibility.length > 500) {
-      merged.eligibility = merged.eligibility.substring(0, 500);
-    }
-    if (merged.business_model && typeof merged.business_model === 'string' && merged.business_model.length > 100) {
-      merged.business_model = merged.business_model.substring(0, 100);
-    }
-    
-    // Truncate jobDescription fields
-    if (merged.jobDescription && Array.isArray(merged.jobDescription)) {
-      merged.jobDescription = merged.jobDescription.map(jd => {
-        if (jd && typeof jd === 'object') {
-          const truncatedJd = { ...jd };
-          // Title max 100
-          if (typeof truncatedJd.title === 'string' && truncatedJd.title.length > 100) {
-            truncatedJd.title = truncatedJd.title.substring(0, 100);
-          }
-          return truncatedJd;
-        }
-        return jd;
-      });
-    }
-
-    // Persist to companies + company_visits (replaces single Company / companies1 save)
-    try {
-      console.log("📊 Company data before persist:");
-      if (merged.mcqQuestions) {
-        merged.mcqQuestions.forEach((mcq, idx) => {
-          if (mcq && typeof mcq === "object") {
-            console.log(`  mcqQuestions[${idx}]:`, {
-              questionLength: mcq.question?.length || 0,
-              optionALength: mcq.optionA?.length || 0,
-              optionBLength: mcq.optionB?.length || 0,
-              optionCLength: mcq.optionC?.length || 0,
-              optionDLength: mcq.optionD?.length || 0,
-            });
-          }
-        });
-      }
-      await persistMergedCompany(
-        String(submission.companyId),
-        merged,
-        placementYear,
-        placementListContext,
-        companyVisitIdHint,
-        placementClusterForSub
-      );
-      console.log("✅ Company updated successfully:", submission.companyId);
-
-      const afterPersist = await getCompanyMergedForAdminById(
-        String(submission.companyId),
-        placementYear,
-        placementListContext,
-        companyVisitIdHint,
-        placementClusterForSub
-      );
-      const visitIdAfter = afterPersist?.visit?._id;
-      if (visitIdAfter) {
-        const visitApprovedAt = new Date();
-        await approveAndNormalizeSingleCompanyVisitById(
-          visitIdAfter,
-          visitApprovedAt,
-          String(submission.companyId)
-        );
-      } else {
-        console.warn(
-          "⚠️ Submission approved but no company_visits row found to normalize/approve for company",
-          submission.companyId
-        );
-      }
-    } catch (saveError) {
-      console.error("❌ Error persisting company:", saveError);
-      console.error("❌ Error details:", {
-        name: saveError.name,
-        message: saveError.message,
-        errors: saveError.errors,
-      });
-      if (saveError.errors) {
-        Object.keys(saveError.errors).forEach((key) => {
-          console.error(`❌ Validation error for ${key}:`, saveError.errors[key].message);
-        });
-      }
-      if (saveError.name === "ValidationError") {
-        const errors = {};
-        Object.keys(saveError.errors || {}).forEach((key) => {
-          errors[key] = saveError.errors[key].message;
-        });
-        return res.status(400).json({
-          error: "Validation failed",
-          details: errors,
-          message: saveError.message,
-        });
-      }
-      throw saveError;
-    }
-
-    // Mark submission as approved instead of deleting
-    submission.status = "approved";
-    submission.approvedAt = new Date();
-    const reviewerRole =
-      req.user?.isAdminSession === true
-        ? "admin"
-        : req.user?.role === "spc"
-          ? "spc"
-          : "admin";
-    const reviewerName =
-      String(req.user?.username || "").trim() ||
-      String(req.user?.email || "")
-        .split("@")[0]
-        .trim() ||
-      "Reviewer";
-    submission.reviewedBy = {
-      role: reviewerRole,
-      name: reviewerName,
-      email: String(req.user?.email || "").trim(),
-    };
-    await submission.save();
-    await invalidateSubmitterListCaches(submission);
-
-    // Award leaderboard points: question = 5, interview experience = 10
-    const POINTS_QUESTION = 5;
-    const POINTS_INTERVIEW_EXPERIENCE = 10;
-    const pointsToAdd =
-      submission.type === "interviewProcess"
-        ? POINTS_INTERVIEW_EXPERIENCE
-        : POINTS_QUESTION; // onlineQuestions, interviewQuestions, mustDoTopics
-
-    const contributor =
-      (await User1.findOne({ email: submission.submittedBy?.email })) || null;
-    if (contributor) {
-      contributor.points = (contributor.points || 0) + pointsToAdd;
-      await contributor.save();
-      try {
-        await invalidateLeaderboardCache();
-      } catch (cacheErr) {
-        console.warn("⚠️ Failed to invalidate leaderboard cache after approval:", cacheErr?.message || cacheErr);
-      }
-    }
-
-    await invalidateAdminDashboardStatsCache();
-
-    const reloadedSub = await getCompanyMergedForAdminById(
-      String(submission.companyId),
-      placementYear,
-      placementListContext,
-      companyVisitIdHint,
-      placementClusterForSub
-    );
-    const companyOut = reloadedSub?.merged
-      ? companyToJsonSafePlainObject(reloadedSub.merged)
-      : null;
-
-    // In-app notifications are sent only when a company visit is approved from the
-    // Admin Dashboard Companies tab (`POST /companies/:id/approve`), not when
-    // approving individual content submissions (questions, process, must-do, etc.).
 
     res.json({
       message: "Submission approved and company updated successfully",
-      company: companyOut,
-      submission: submission,
+      submission: result.submission,
+      companyId: result.companyId,
+      visitId: result.visitId,
     });
   } catch (error) {
     console.error("❌ Error approving submission:", error.message);
-    console.error("❌ Full error stack:", error.stack);
-    console.error("❌ Error name:", error.name);
-    console.error("❌ Error details:", error.errors || error);
-    
-    // Return more detailed error information
-    const statusCode = error.name === 'ValidationError' ? 400 : 500;
-    res.status(statusCode).json({ 
-      error: "Server error", 
+    const statusCode =
+      error.message === "Company not found"
+        ? 404
+        : error.message === "Only pending submissions can be approved."
+          ? 400
+          : 500;
+    res.status(statusCode).json({
+      error: statusCode === 500 ? "Server error" : error.message,
       details: error.message,
       errorName: error.name,
-      validationErrors: error.errors || null
+      validationErrors: error.errors || null,
     });
   }
 });
+
 
 // Paginated companies list — approved: minimal fields; pending: card fields without heavy blobs (roles, JD, solutions, etc.)
 adminRouter.get("/companies", async (req, res) => {

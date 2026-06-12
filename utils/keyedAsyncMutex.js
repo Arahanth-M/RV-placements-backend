@@ -1,0 +1,35 @@
+/** @type {Map<string, Promise<void>>} */
+const tailByKey = new Map();
+
+/**
+ * Serialize async work per key (e.g. one company visit approval at a time).
+ * @template T
+ * @param {string} key
+ * @param {() => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+export async function withKeyedAsyncMutex(key, fn) {
+  const safeKey = String(key || "").trim() || "default";
+  const previous = tailByKey.get(safeKey) || Promise.resolve();
+
+  let release = () => {};
+  const current = new Promise((resolve) => {
+    release = resolve;
+  });
+
+  const chained = previous
+    .catch(() => {})
+    .then(() => current);
+  tailByKey.set(safeKey, chained);
+
+  await previous.catch(() => {});
+
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (tailByKey.get(safeKey) === chained) {
+      tailByKey.delete(safeKey);
+    }
+  }
+}

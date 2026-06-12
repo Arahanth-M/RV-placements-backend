@@ -2402,6 +2402,42 @@ export async function getCompanyMergedForAdminById(
 }
 
 /**
+ * Resolve the `company_visits` row a submission approval should mutate (single lightweight pass).
+ * @param {Record<string, unknown>} submission
+ * @returns {Promise<{ companyId: import("mongoose").Types.ObjectId, visitId: import("mongoose").Types.ObjectId } | null>}
+ */
+export async function resolveSubmissionApproveVisit(submission) {
+  const companyId = String(submission?.companyId || "");
+  const _id = toObjectId(companyId);
+  if (!_id) return null;
+
+  const staticRow = await CompanyStatic.findById(_id).select("_id").lean();
+  if (!staticRow) return null;
+
+  const placementYear = normalizeCompanyDetailYear(submission.placementYear);
+  const placementListContextRaw = submission.placementListContext;
+  const placementListContext =
+    placementListContextRaw != null && String(placementListContextRaw).trim() !== ""
+      ? String(placementListContextRaw).trim()
+      : null;
+  const placementClusterForSub = normalizePlacementClusterQuery(submission.cluster);
+  const companyVisitIdHint = submission.companyVisitId ?? null;
+
+  await ensureAdminVisitForYear(_id, placementYear);
+
+  const pack = await getCompanyMergedForAdminById(
+    companyId,
+    placementYear,
+    placementListContext,
+    companyVisitIdHint,
+    placementClusterForSub
+  );
+  if (!pack?.visit?._id) return null;
+
+  return { companyId: _id, visitId: pack.visit._id };
+}
+
+/**
  * Creates an empty visit row for `placementYear` if missing (e.g. before persisting visit-only fields from admin).
  * @param {string|import("mongoose").Types.ObjectId} companyId
  * @param {number} [placementYear]
