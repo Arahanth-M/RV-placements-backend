@@ -229,15 +229,16 @@ describe("AI interview scoring helpers", () => {
     expect(resolveRoundAbout("DSA", "arrays")).toContain("Data structures");
   });
 
-  it("HR rounds plan for a single question to limit token usage", () => {
+  it("HR rounds plan for a single question; DSA rounds cap at two coding problems", () => {
     expect(inferQuestionCount("HR")).toBe(1);
-    expect(inferQuestionCount("DSA")).toBe(3);
+    expect(inferQuestionCount("DSA")).toBe(2);
   });
 
-  it("clampQuestionCountForRound keeps HR at one question", () => {
+  it("clampQuestionCountForRound keeps HR at one question and DSA at two", () => {
     expect(clampQuestionCountForRound("HR", 3, 0)).toBe(1);
     expect(clampQuestionCountForRound("HR", null, 0)).toBe(1);
     expect(clampQuestionCountForRound("SQL", 99, 0)).toBe(4);
-    expect(clampQuestionCountForRound("DSA", 5, 0)).toBe(3);
+    expect(clampQuestionCountForRound("DSA", 5, 0)).toBe(2);
+    expect(clampQuestionCountForRound("DSA", 3, 0)).toBe(2);
   });
 });

@@ -898,6 +898,16 @@ export const generateQuestion = async ({
           strat === "code_execution" ? cloneSerializable(tests) || [] : undefined,
         resolvedDsaMetadata:
           strat === "code_execution" ? cloneSerializable(dsaMeta) || {} : undefined,
+        resolvedTopics: cloneSerializable(
+          Array.isArray(retrieved.metadata?.topics) ? retrieved.metadata.topics : []
+        ),
+        resolvedSubtopics: cloneSerializable(
+          Array.isArray(retrieved.metadata?.subtopics) ? retrieved.metadata.subtopics : []
+        ),
+        resolvedCompanyTags: cloneSerializable(
+          Array.isArray(retrieved.metadata?.companyTags) ? retrieved.metadata.companyTags : []
+        ),
+        resolvedComplexity: cloneSerializable(retrieved.metadata?.complexity) || null,
       };
     };
 

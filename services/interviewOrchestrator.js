@@ -6,6 +6,11 @@
  * - It does not write to DB or call external services.
  * - `evaluationResult` is accepted for future extension, but currently unused.
  */
+import {
+  MAX_DSA_QUESTIONS_PER_ROUND,
+  MAX_HR_QUESTIONS_PER_ROUND,
+} from "./interviewEngine.js";
+
 export async function handleEvaluationResult(session, evaluationResult) {
   // Reserved for future policy logic (quality gates, retry branches, etc.).
   void evaluationResult;
@@ -40,9 +45,9 @@ export async function handleEvaluationResult(session, evaluationResult) {
   );
   let plannedQuestionCount = rawPlanned;
   if (isDsaRound) {
-    plannedQuestionCount = Math.min(3, rawPlanned);
+    plannedQuestionCount = Math.min(MAX_DSA_QUESTIONS_PER_ROUND, rawPlanned);
   } else if (isHrRound) {
-    plannedQuestionCount = 1;
+    plannedQuestionCount = MAX_HR_QUESTIONS_PER_ROUND;
   }
   const hasNextQuestion = currentQuestionIndex < plannedQuestionCount - 1;
   const isLastRound = currentRoundIndex >= rounds.length - 1;

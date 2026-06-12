@@ -22,6 +22,7 @@ import {
   resolveInterviewMergedCompanyForSession,
 } from "../services/interviewSessionService.js";
 import { collectSessionQuestionExclusions } from "../services/interviewQuestionExclusions.js";
+import { buildResolvedFieldsForQuestionSlot } from "../utils/interviewQuestionSlotSnapshot.js";
 import { generateFinalReport } from "../services/interviewEngine.js";
 import { callLLM } from "../services/llmClient.js";
 import { getCompanyContext } from "../services/mcp/getCompanyContext.js";
@@ -487,6 +488,10 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       supportedCodingLanguages,
       resolvedCodeTestCases,
       resolvedDsaMetadata,
+      resolvedTopics,
+      resolvedSubtopics,
+      resolvedCompanyTags,
+      resolvedComplexity,
     } = gen;
 
     if (!question || !String(question).trim()) {
@@ -519,6 +524,10 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       supportedCodingLanguages,
       resolvedCodeTestCases,
       resolvedDsaMetadata,
+      resolvedTopics,
+      resolvedSubtopics,
+      resolvedCompanyTags,
+      resolvedComplexity,
     };
   }
 
@@ -581,6 +590,10 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       supportedCodingLanguages,
       resolvedCodeTestCases,
       resolvedDsaMetadata,
+      resolvedTopics,
+      resolvedSubtopics,
+      resolvedCompanyTags,
+      resolvedComplexity,
     } = pendingNextQuestion;
 
     const nextExpectedPointsStored = (Array.isArray(expectedPoints) ? expectedPoints : []).map(
@@ -593,15 +606,14 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       })
     );
 
-    const resolvedSlotPayload =
-      Array.isArray(resolvedCodeTestCases) && resolvedCodeTestCases.length > 0
-        ? {
-            resolvedCodeTestCases,
-            ...(resolvedDsaMetadata && typeof resolvedDsaMetadata === "object"
-              ? { resolvedDsaMetadata }
-              : {}),
-          }
-        : {};
+    const resolvedSlotPayload = buildResolvedFieldsForQuestionSlot({
+      resolvedCodeTestCases,
+      resolvedDsaMetadata,
+      resolvedTopics,
+      resolvedSubtopics,
+      resolvedCompanyTags,
+      resolvedComplexity,
+    });
 
     if (!currentRound.questions[nextQuestionIndex]) {
       currentRound.questions[nextQuestionIndex] = {
@@ -653,6 +665,29 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
           resolvedSlotPayload.resolvedDsaMetadata;
       } else {
         currentRound.questions[nextQuestionIndex].resolvedDsaMetadata = undefined;
+      }
+      if (resolvedSlotPayload.resolvedTopics) {
+        currentRound.questions[nextQuestionIndex].resolvedTopics = resolvedSlotPayload.resolvedTopics;
+      } else {
+        currentRound.questions[nextQuestionIndex].resolvedTopics = undefined;
+      }
+      if (resolvedSlotPayload.resolvedSubtopics) {
+        currentRound.questions[nextQuestionIndex].resolvedSubtopics =
+          resolvedSlotPayload.resolvedSubtopics;
+      } else {
+        currentRound.questions[nextQuestionIndex].resolvedSubtopics = undefined;
+      }
+      if (resolvedSlotPayload.resolvedCompanyTags) {
+        currentRound.questions[nextQuestionIndex].resolvedCompanyTags =
+          resolvedSlotPayload.resolvedCompanyTags;
+      } else {
+        currentRound.questions[nextQuestionIndex].resolvedCompanyTags = undefined;
+      }
+      if (resolvedSlotPayload.resolvedComplexity) {
+        currentRound.questions[nextQuestionIndex].resolvedComplexity =
+          resolvedSlotPayload.resolvedComplexity;
+      } else {
+        currentRound.questions[nextQuestionIndex].resolvedComplexity = undefined;
       }
     }
 

@@ -21,6 +21,10 @@ const toSafeString = (value, fallback = "") => {
 };
 
 export const INTERVIEW_MAX_ROUNDS = 4;
+/** Hard cap: at most this many coding problems per DSA round in any interview. */
+export const MAX_DSA_QUESTIONS_PER_ROUND = 2;
+/** HR rounds always use exactly one behavioral question. */
+export const MAX_HR_QUESTIONS_PER_ROUND = 1;
 export const INTERVIEW_ALLOWED_ROUND_TYPES = [
   "DSA",
   "System Design",
@@ -50,15 +54,15 @@ const toBoundedScore = (value) => {
 };
 
 export const inferQuestionCount = (roundType) => {
-  if (roundType === "DSA") return 3;
+  if (roundType === "DSA") return MAX_DSA_QUESTIONS_PER_ROUND;
   if (roundType === "SQL") return 4;
   if (roundType === "System Design") return 3;
-  if (roundType === "HR") return 1;
+  if (roundType === "HR") return MAX_HR_QUESTIONS_PER_ROUND;
   if (roundType === "CS Fundamentals") return 3;
   return 3;
 };
 
-/** Clamp stored/planned question count for a round type (HR min 1, SQL max 4, etc.). */
+/** Clamp stored/planned question count for a round type (HR max 1, DSA max 2, SQL max 4, etc.). */
 export const clampQuestionCountForRound = (roundType, questionCount, slots = 0) => {
   const planned = inferQuestionCount(roundType || "");
   let count =
@@ -70,7 +74,10 @@ export const clampQuestionCountForRound = (roundType, questionCount, slots = 0) 
   }
   count = Math.min(planned, Math.max(1, count));
   if (roundType === "DSA") {
-    count = Math.min(3, count);
+    count = Math.min(MAX_DSA_QUESTIONS_PER_ROUND, count);
+  }
+  if (roundType === "HR") {
+    count = Math.min(MAX_HR_QUESTIONS_PER_ROUND, count);
   }
   return count;
 };

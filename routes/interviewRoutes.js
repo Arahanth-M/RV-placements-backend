@@ -49,6 +49,11 @@ import {
   normalizedQuestionAttempts,
   isQuestionRetryPendingSlot,
 } from "../utils/interviewQuestionAttempts.js";
+import {
+  buildQuestionDisplayFromSlot,
+  mergeQuestionDisplayPreferSlot,
+  slotNeedsBankQuestionLookup,
+} from "../utils/interviewQuestionSlotSnapshot.js";
 import { INTERVIEW_STATES, assertValidTransition } from "../services/interviewStateMachine.js";
 import {
   getCachedInterviewSummaries,
@@ -85,7 +90,7 @@ const isInterviewLimitBypassRole = (req) => {
   return getAuthenticatedUserRole(req) === "admin";
 };
 
-/** DSA rounds never show or plan more than three questions (legacy sessions may still store a higher count). */
+/** DSA rounds never show or plan more than two questions (legacy sessions may still store a higher count). */
 const isDsaInterviewRoundType = (t) => String(t || "").trim().toUpperCase() === "DSA";
 
 const visibleTestCasesFromDoc = (testCases) =>
@@ -297,6 +302,7 @@ const buildPreviewLookupLogContext = ({
   visibleCount,
   totalTestCases,
   hasSqlMetadata,
+  displaySource,
 }) => ({
   route,
   sessionId: toSafeString(sessionId),
@@ -308,6 +314,7 @@ const buildPreviewLookupLogContext = ({
   slotQuestionTextLen: toSafeString(slotQuestionText).length,
   rootQuestionTextLen: toSafeString(rootQuestionText).length,
   resolvedQuestionId: toSafeString(resolvedQuestionId),
+  displaySource: toSafeString(displaySource),
   resolvedQuestionTextLen: toSafeString(resolvedQuestionText).length,
   totalTestCases: Number(totalTestCases) || 0,
   visibleCount: Number(visibleCount) || 0,
@@ -427,6 +434,38 @@ async function resolveInterviewQuestionDoc({
     });
   }
   return fallbackMatch || null;
+}
+
+/**
+ * Prefer question display metadata snapshotted on the session slot; query the bank only when needed.
+ */
+async function resolveQuestionDisplayDoc({
+  slot,
+  questionId = "",
+  questionText = "",
+  roundType = "",
+  includeFullDoc = false,
+}) {
+  const slotDisplay = buildQuestionDisplayFromSlot(slot);
+  if (!slotNeedsBankQuestionLookup(slot, roundType)) {
+    return { doc: slotDisplay, source: "session_snapshot" };
+  }
+
+  const bankDoc = await resolveInterviewQuestionDoc({
+    questionId: questionId || slotDisplay?.questionId || "",
+    questionText: questionText || slotDisplay?.question || "",
+    roundType,
+    includeFullDoc,
+  });
+
+  if (!bankDoc) {
+    return { doc: slotDisplay, source: "session_snapshot_partial" };
+  }
+
+  return {
+    doc: mergeQuestionDisplayPreferSlot(slotDisplay, bankDoc),
+    source: "bank",
+  };
 }
 
 function recordLatencyMetric(metricName, durationMs) {
@@ -904,13 +943,15 @@ router.post("/run-preview", validateRequest(interviewRunPreviewSchema), async (r
       session?.rounds?.[currentRoundIndex]?.type ||
       session?.roundsDetails?.[currentRoundIndex]?.questionType ||
       "";
-    const questionDoc = await resolveInterviewQuestionDoc({
+    const questionDoc = await resolveQuestionDisplayDoc({
+      slot: questionSlot,
       questionId,
       questionText,
       roundType: roundTypeForLookup,
       includeFullDoc: true,
     });
-    if (!questionDoc) {
+    const previewQuestionDoc = questionDoc.doc;
+    if (!previewQuestionDoc) {
       console.warn(
         "[previewQuestionLookup] run-preview: no questionDoc",
         buildPreviewLookupLogContext({
@@ -939,7 +980,7 @@ router.post("/run-preview", validateRequest(interviewRunPreviewSchema), async (r
       const allowedLangs = resolveSupportedCodingLanguages(
         questionSlot,
         strategy,
-        questionDoc?.dsaMetadata || null
+        previewQuestionDoc?.dsaMetadata || null
       );
       if (!allowedLangs.includes(wantLang)) {
         return res.status(400).json({
@@ -949,7 +990,7 @@ router.post("/run-preview", validateRequest(interviewRunPreviewSchema), async (r
       }
     }
 
-    if (!questionId && questionDoc?.questionId) {
+    if (!questionId && previewQuestionDoc?.questionId) {
       const slotQuestionIdPath = `rounds.${currentRoundIndex}.questions.${currentQuestionIndex}.questionId`;
       await mongoose.connection.collection("interviewsessions").updateOne(
         {
@@ -957,7 +998,7 @@ router.post("/run-preview", validateRequest(interviewRunPreviewSchema), async (r
           [slotQuestionIdPath]: { $exists: false },
         },
         {
-          $set: { [slotQuestionIdPath]: String(questionDoc.questionId).trim() },
+          $set: { [slotQuestionIdPath]: String(previewQuestionDoc.questionId).trim() },
         }
       );
     }
@@ -966,7 +1007,7 @@ router.post("/run-preview", validateRequest(interviewRunPreviewSchema), async (r
 
     let executionPayload;
     if (strategy === "code_execution") {
-      const visibleTestCases = visibleTestCasesFromDoc(questionDoc.testCases);
+      const visibleTestCases = visibleTestCasesFromDoc(previewQuestionDoc.testCases);
       console.log(
         "[previewQuestionLookup] run-preview: resolved coding question",
         buildPreviewLookupLogContext({
@@ -978,12 +1019,14 @@ router.post("/run-preview", validateRequest(interviewRunPreviewSchema), async (r
           slotQuestionId: questionId,
           slotQuestionText: questionSlot?.question || "",
           rootQuestionText: session?.currentQuestion || "",
-          resolvedQuestionId: questionDoc?.questionId || "",
-          resolvedQuestionText: questionDoc?.question || "",
+          resolvedQuestionId: previewQuestionDoc?.questionId || "",
+          resolvedQuestionText: previewQuestionDoc?.question || "",
           strategy,
           visibleCount: visibleTestCases.length,
-          totalTestCases: Array.isArray(questionDoc?.testCases) ? questionDoc.testCases.length : 0,
-          hasSqlMetadata: Boolean(questionDoc?.sqlMetadata),
+          totalTestCases: Array.isArray(previewQuestionDoc?.testCases)
+            ? previewQuestionDoc.testCases.length
+            : 0,
+          hasSqlMetadata: Boolean(previewQuestionDoc?.sqlMetadata),
         })
       );
       if (visibleTestCases.length === 0) {
@@ -998,12 +1041,14 @@ router.post("/run-preview", validateRequest(interviewRunPreviewSchema), async (r
             slotQuestionId: questionId,
             slotQuestionText: questionSlot?.question || "",
             rootQuestionText: session?.currentQuestion || "",
-            resolvedQuestionId: questionDoc?.questionId || "",
-            resolvedQuestionText: questionDoc?.question || "",
+            resolvedQuestionId: previewQuestionDoc?.questionId || "",
+            resolvedQuestionText: previewQuestionDoc?.question || "",
             strategy,
             visibleCount: 0,
-            totalTestCases: Array.isArray(questionDoc?.testCases) ? questionDoc.testCases.length : 0,
-            hasSqlMetadata: Boolean(questionDoc?.sqlMetadata),
+            totalTestCases: Array.isArray(previewQuestionDoc?.testCases)
+              ? previewQuestionDoc.testCases.length
+              : 0,
+            hasSqlMetadata: Boolean(previewQuestionDoc?.sqlMetadata),
           })
         );
         return res.status(400).json({
@@ -1015,7 +1060,7 @@ router.post("/run-preview", validateRequest(interviewRunPreviewSchema), async (r
         language: normalizeExecutionLanguage(language),
         code,
         testCases: visibleTestCases,
-        functionSignature: questionDoc?.dsaMetadata?.functionSignature || "",
+        functionSignature: previewQuestionDoc?.dsaMetadata?.functionSignature || "",
         jobId: `preview-${sessionId}-${currentRoundIndex}-${currentQuestionIndex}-${Date.now()}`,
       });
     } else {
@@ -1034,7 +1079,7 @@ router.post("/run-preview", validateRequest(interviewRunPreviewSchema), async (r
 
     console.log("[runPreview] completed", {
       sessionId,
-      questionId: questionDoc?.questionId || "",
+      questionId: previewQuestionDoc?.questionId || "",
       strategy,
       status: executionPayload?.status,
     });
@@ -1137,12 +1182,14 @@ router.get("/interview-status/:sessionId", async (req, res) => {
     });
     const activeQuestionId = String(slotNow?.questionId || "").trim();
     const activeQuestionText = String(slotNow?.question || effectiveCurrentQuestion || "").trim();
-    const previewQuestionDoc = await resolveInterviewQuestionDoc({
+    const questionDisplayResult = await resolveQuestionDisplayDoc({
+      slot: slotNow,
       questionId: activeQuestionId,
       questionText: activeQuestionText,
       roundType,
       includeFullDoc: false,
     });
+    const previewQuestionDoc = questionDisplayResult.doc;
     console.log(
       "[previewQuestionLookup] interview-status: resolved question",
       buildPreviewLookupLogContext({
@@ -1164,6 +1211,7 @@ router.get("/interview-status/:sessionId", async (req, res) => {
           ? previewQuestionDoc.testCases.length
           : 0,
         hasSqlMetadata: Boolean(previewQuestionDoc?.sqlMetadata),
+        displaySource: questionDisplayResult.source,
       })
     );
     if (!activeQuestionId && slotNow && previewQuestionDoc?.questionId) {

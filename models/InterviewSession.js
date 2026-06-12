@@ -141,6 +141,11 @@ const roundQuestionSchema = new mongoose.Schema(
     /** Snapshot from bank at question creation — grading prefers this over a second DB lookup. */
     resolvedCodeTestCases: { type: [mongoose.Schema.Types.Mixed], default: undefined },
     resolvedDsaMetadata: { type: mongoose.Schema.Types.Mixed, default: undefined },
+    /** Display metadata snapshotted at pick time (avoids bank lookups on status polls). */
+    resolvedTopics: { type: [String], default: undefined },
+    resolvedSubtopics: { type: [String], default: undefined },
+    resolvedCompanyTags: { type: [String], default: undefined },
+    resolvedComplexity: { type: mongoose.Schema.Types.Mixed, default: undefined },
   },
   { _id: false }
 );
@@ -177,7 +182,7 @@ const roundSchema = new mongoose.Schema(
     type: { type: String, enum: ROUND_TYPES, required: true },
     about: { type: String, trim: true },
     difficulty: { type: String, trim: true },
-  /** Per-round cap from {@link inferQuestionCount}; HR allows 1, SQL up to 4, others up to 5. */
+  /** Per-round cap from {@link inferQuestionCount}; HR allows 1, DSA up to 2, SQL up to 4, others up to 5. */
     questionCount: { type: Number, min: 1, max: 5, default: 3 },
     questions: { type: [roundQuestionSchema], default: [] },
     feedback: { type: roundFeedbackSchema, default: () => ({}) },

@@ -17,6 +17,7 @@ import { generateRoundFeedbackLLM } from "./mcp/generateRoundFeedbackLLM.js";
 import { roundTypeImpliesCodeExecutionInterview } from "./interviewCodeGradingGuards.js";
 import { logInterviewDsaLlmDebug, tailId } from "./interviewDebugLog.js";
 import { computeDsaRoundQuestionBuckets } from "../utils/interviewQuestionAttempts.js";
+import { buildResolvedFieldsForQuestionSlot } from "../utils/interviewQuestionSlotSnapshot.js";
 import { INTERVIEW_STATES } from "./interviewStateMachine.js";
 import {
   INTERVIEW_LIMIT_REASON,
@@ -433,6 +434,10 @@ export const startRound = async (sessionId) => {
     supportedCodingLanguages,
     resolvedCodeTestCases,
     resolvedDsaMetadata,
+    resolvedTopics,
+    resolvedSubtopics,
+    resolvedCompanyTags,
+    resolvedComplexity,
   } = gen;
 
   // 4) Store first question in round.questions
@@ -455,12 +460,7 @@ export const startRound = async (sessionId) => {
         roundType: currentRound.type,
         expectedAnswerMode,
       }),
-      ...(Array.isArray(resolvedCodeTestCases) && resolvedCodeTestCases.length > 0
-        ? { resolvedCodeTestCases }
-        : {}),
-      ...(resolvedDsaMetadata && typeof resolvedDsaMetadata === "object"
-        ? { resolvedDsaMetadata }
-        : {}),
+      ...buildResolvedFieldsForQuestionSlot(gen),
     },
   ];
 

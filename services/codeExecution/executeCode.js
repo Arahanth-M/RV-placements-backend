@@ -73,14 +73,31 @@ export const normalizeExecutionLanguage = (language) => {
   return "python";
 };
 
-const normalizeTestCases = (testCases) => {
+const normalizeTestCases = (testCases, { skipDedupe = false } = {}) => {
   if (!Array.isArray(testCases)) return [];
-  return dedupeTestCases(testCases).map((testcase) => ({
-    input: sanitizeInput(testcase?.input ?? null),
-    expectedOutput: sanitizeInput(testcase?.expectedOutput ?? null),
-    isHidden: Boolean(testcase?.isHidden),
-    weight: Number(testcase?.weight) || 1,
-  }));
+  const rows = skipDedupe ? testCases : dedupeTestCases(testCases);
+  return rows
+    .filter((testcase) => testcase && typeof testcase === "object")
+    .map((testcase) => ({
+      input: sanitizeInput(testcase?.input ?? null),
+      expectedOutput: sanitizeInput(testcase?.expectedOutput ?? null),
+      isHidden: Boolean(testcase?.isHidden),
+      weight: Number(testcase?.weight) || 1,
+    }));
+};
+
+/** Count how many editor test cases actually reach the Docker runner. */
+export const getTestCaseRunCounts = (testCases, { skipDedupe = false } = {}) => {
+  if (!Array.isArray(testCases)) {
+    return { submitted: 0, invalid: 0, dedupedDropped: 0, runnable: 0 };
+  }
+  const submitted = testCases.length;
+  const invalid = testCases.filter((tc) => !tc || typeof tc !== "object").length;
+  const afterInvalid = testCases.filter((tc) => tc && typeof tc === "object");
+  const afterDedupe = skipDedupe ? afterInvalid : dedupeTestCases(afterInvalid);
+  const dedupedDropped = skipDedupe ? 0 : Math.max(0, afterInvalid.length - afterDedupe.length);
+  const runnable = normalizeTestCases(testCases, { skipDedupe }).length;
+  return { submitted, invalid, dedupedDropped, runnable };
 };
 
 const parseFunctionName = (functionSignature) => {
@@ -796,6 +813,7 @@ export const runDockerExecution = async ({
   envPairs = [],
   memoryLimit = DOCKER_MEMORY_LIMIT,
   cpuLimit = DOCKER_CPU_LIMIT,
+  timeoutMs = EXECUTION_TIMEOUT_MS,
 }) => {
   const createArgs = [
     "create",
@@ -816,7 +834,7 @@ export const runDockerExecution = async ({
 
   console.log("[executeCode] container start", {
     image: dockerImage,
-    timeoutMs: EXECUTION_TIMEOUT_MS,
+    timeoutMs,
     memory: memoryLimit,
     cpus: cpuLimit,
     pidsLimit: DOCKER_PIDS_LIMIT,
@@ -868,10 +886,10 @@ export const runDockerExecution = async ({
 
     const started = await runDockerCommand({
       args: ["start", "-a", containerId],
-      timeoutMs: EXECUTION_TIMEOUT_MS,
+      timeoutMs,
     });
     if (started.timedOut) {
-      console.error("[executeCode] timeout", { timeoutMs: EXECUTION_TIMEOUT_MS });
+      console.error("[executeCode] timeout", { timeoutMs });
       if (started.stderr.trim()) {
         console.error("[executeCode] timeout stderr snapshot", {
           stderr: started.stderr.slice(-2000),
@@ -906,16 +924,23 @@ export async function executeCode({
   testCases,
   functionSignature,
   jobId,
+  skipTestCaseDedupe = false,
+  executionTimeoutMs,
 }) {
+  const runTimeoutMs =
+    Number.isFinite(Number(executionTimeoutMs)) && Number(executionTimeoutMs) > 0
+      ? Number(executionTimeoutMs)
+      : EXECUTION_TIMEOUT_MS;
   const canonicalLang = normalizeExecutionLanguage(language);
   console.log("[executeCode] execution started", {
     language: canonicalLang,
     testcaseCount: Array.isArray(testCases) ? testCases.length : 0,
+    skipTestCaseDedupe,
   });
 
   const safeCode = toSafeString(code);
   const safeFunctionSignature = toSafeString(functionSignature);
-  const normalizedCases = normalizeTestCases(testCases);
+  const normalizedCases = normalizeTestCases(testCases, { skipDedupe: skipTestCaseDedupe });
   const executionJobId = toSafeString(jobId) || randomUUID();
 
   if (!safeCode || normalizedCases.length === 0) {
@@ -1049,6 +1074,7 @@ export async function executeCode({
         containerCommand: ["python", "runner.py"],
         filesToCopy: ["solution.py", "runner.py", "testcases.json"],
         envPairs: ["PYTHONDONTWRITEBYTECODE=1", "PYTHONUNBUFFERED=1"],
+        timeoutMs: runTimeoutMs,
       });
     } else if (canonicalLang === "cpp") {
       await ensureDockerImage(DOCKER_IMAGE_CPP);
@@ -1074,6 +1100,7 @@ export async function executeCode({
         dirsToCopy: ["vendor"],
         memoryLimit: DOCKER_MEMORY_LIMIT_CPP,
         cpuLimit: DOCKER_CPU_LIMIT_CPP,
+        timeoutMs: runTimeoutMs,
       });
     } else {
       await ensureDockerImage(DOCKER_IMAGE_JAVA);
@@ -1097,6 +1124,7 @@ export async function executeCode({
         filesToCopy: ["Main.java", "Solution.java", "testcases.json", "gson.jar"],
         memoryLimit: DOCKER_MEMORY_LIMIT_CPP,
         cpuLimit: DOCKER_CPU_LIMIT_CPP,
+        timeoutMs: runTimeoutMs,
       });
     }
 
@@ -1104,8 +1132,9 @@ export async function executeCode({
       return normalizeExecutionResult({
         status: EXECUTION_TIMEOUT,
         results: [],
-        executionTime: EXECUTION_TIMEOUT_MS,
+        executionTime: runTimeoutMs,
         memoryUsed: 0,
+        error: `Execution timed out after ${runTimeoutMs}ms before all test cases finished.`,
       });
     }
 
