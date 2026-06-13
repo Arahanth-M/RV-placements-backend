@@ -166,8 +166,12 @@ async function processEvaluateAnswerJob(sessionId, answer, options = {}) {
     }
   }
 
-  // 3) Pre-evaluation LLM reasoning — skipped for DSA / coding-style rounds (no LLM on those paths).
-  const suppressInterviewLlm = roundTypeImpliesCodeExecutionInterview(currentRound.type);
+  // 3) Pre-evaluation LLM reasoning — skipped for DSA / coding-style rounds and MCQ (deterministic grading).
+  const isMcqQuestion =
+    toSafeString(questionSlot?.evaluationStrategy).toLowerCase() === "mcq_exact" ||
+    Boolean(questionSlot?.resolvedMcqMetadata);
+  const suppressInterviewLlm =
+    roundTypeImpliesCodeExecutionInterview(currentRound.type) || isMcqQuestion;
   logInterviewDsaLlmDebug("submit_answer_pre_eval", {
     sessionIdTail: tailId(sessionId),
     roundNumber: currentRound.roundNumber ?? currentRoundNumber,
@@ -288,7 +292,12 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
 
     let effectiveEvaluationStrategy = slotEvalStrategy || bankEvalStrategy || "";
 
-    if (hasTests && !isBankSqlTheoreticalRound && bankEvalStrategy !== "sql_execution") {
+    if (
+      slotEvalStrategy === "mcq_exact" ||
+      Boolean(questionObj?.resolvedMcqMetadata)
+    ) {
+      effectiveEvaluationStrategy = "mcq_exact";
+    } else if (hasTests && !isBankSqlTheoreticalRound && bankEvalStrategy !== "sql_execution") {
       effectiveEvaluationStrategy = "code_execution";
     } else if (
       roundTypeImpliesCodeExecutionInterview(currentRound.type) &&
@@ -336,12 +345,14 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       language: codingLanguage,
       testCases: executionTestCases,
       functionSignature,
+      mcqMetadata: questionObj?.resolvedMcqMetadata || null,
       metadata: {
         testCases: executionTestCases,
         functionSignature,
         sqlMetadata,
         questionId: questionIdHint || questionMetadataDoc?.questionId || "",
         questionSource,
+        mcqMetadata: questionObj?.resolvedMcqMetadata || null,
       },
     });
     logInterviewDsaLlmDebug("submit_answer_evaluated", {
@@ -464,6 +475,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       mergePlacementByType: session.mergePlacementByType === true,
       excludedQuestionIds: sessionExclusions.excludedQuestionIds,
       excludedQuestionTexts: sessionExclusions.excludedQuestionTexts,
+      questionSlotIndex: currentQuestionIndex + 1,
     });
 
     if (gen.generationError) {
@@ -492,6 +504,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       resolvedSubtopics,
       resolvedCompanyTags,
       resolvedComplexity,
+      resolvedMcqMetadata,
     } = gen;
 
     if (!question || !String(question).trim()) {
@@ -528,6 +541,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       resolvedSubtopics,
       resolvedCompanyTags,
       resolvedComplexity,
+      resolvedMcqMetadata,
     };
   }
 
@@ -594,6 +608,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       resolvedSubtopics,
       resolvedCompanyTags,
       resolvedComplexity,
+      resolvedMcqMetadata,
     } = pendingNextQuestion;
 
     const nextExpectedPointsStored = (Array.isArray(expectedPoints) ? expectedPoints : []).map(
@@ -609,6 +624,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
     const resolvedSlotPayload = buildResolvedFieldsForQuestionSlot({
       resolvedCodeTestCases,
       resolvedDsaMetadata,
+      resolvedMcqMetadata,
       resolvedTopics,
       resolvedSubtopics,
       resolvedCompanyTags,
@@ -624,6 +640,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
           ? supportedCodingLanguages
           : undefined,
         evaluationStrategy: evaluationStrategy || undefined,
+        expectedAnswerMode: expectedAnswerMode || undefined,
         sourceType: questionId ? "retrieved" : "generated",
         previewRunCount: 0,
         answer: "",
@@ -645,6 +662,8 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
         : undefined;
       currentRound.questions[nextQuestionIndex].evaluationStrategy =
         evaluationStrategy || undefined;
+      currentRound.questions[nextQuestionIndex].expectedAnswerMode =
+        expectedAnswerMode || undefined;
       currentRound.questions[nextQuestionIndex].sourceType = questionId
         ? "retrieved"
         : "generated";
@@ -689,6 +708,14 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       } else {
         currentRound.questions[nextQuestionIndex].resolvedComplexity = undefined;
       }
+      if (resolvedSlotPayload.resolvedMcqMetadata) {
+        currentRound.questions[nextQuestionIndex].resolvedMcqMetadata =
+          resolvedSlotPayload.resolvedMcqMetadata;
+      } else {
+        currentRound.questions[nextQuestionIndex].resolvedMcqMetadata = undefined;
+      }
+      currentRound.questions[nextQuestionIndex].expectedAnswerMode =
+        expectedAnswerMode || undefined;
     }
 
     session.currentQuestion = question;

@@ -49,6 +49,7 @@ describe("interviewQuestionSlotSnapshot", () => {
       subtopics: ["Two pointers"],
       companyTags: ["Google"],
       complexity: { time: "O(n)", space: "O(n)" },
+      mcq: null,
     });
   });
 
@@ -90,5 +91,34 @@ describe("interviewQuestionSlotSnapshot", () => {
         "HR"
       )
     ).toBe(false);
+  });
+
+  test("slotNeedsBankQuestionLookup skips bank for MCQ snapshot", () => {
+    expect(
+      slotNeedsBankQuestionLookup(
+        {
+          questionId: "Q040",
+          evaluationStrategy: "mcq_exact",
+          resolvedMcqMetadata: {
+            options: [
+              { id: "A", text: "One" },
+              { id: "B", text: "Two" },
+            ],
+            correctOptionId: "A",
+          },
+        },
+        "CS Fundamentals"
+      )
+    ).toBe(false);
+  });
+
+  test("buildResolvedFieldsForQuestionSlot copies MCQ metadata", () => {
+    expect(
+      buildResolvedFieldsForQuestionSlot({
+        resolvedMcqMetadata: { options: [{ id: "A", text: "One" }], correctOptionId: "A" },
+      })
+    ).toEqual({
+      resolvedMcqMetadata: { options: [{ id: "A", text: "One" }], correctOptionId: "A" },
+    });
   });
 });

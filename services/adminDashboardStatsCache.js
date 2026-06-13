@@ -1,4 +1,4 @@
-import User from "../models/User.js";
+import User1 from "../models/User1.js";
 import Submission from "../models/Submission.js";
 import CompanyVisit from "../models/CompanyVisit.js";
 import {
@@ -33,7 +33,7 @@ export async function computeAdminDashboardStats() {
     totalCompanies,
     pendingCompanies,
   ] = await Promise.all([
-    User.countDocuments(),
+    User1.countDocuments(),
     Submission.countDocuments(),
     Submission.countDocuments({ status: "pending" }),
     Submission.countDocuments({ status: "approved" }),

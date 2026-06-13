@@ -5,6 +5,7 @@ import authJWT from "../middleware/authJWT.js";
 import validateRequest from "../middleware/validateRequest.js";
 import { eventCreateSchema, eventUpdateSchema } from "../validations/event.validation.js";
 import Event from "../models/Event.js";
+import "../models/User1.js";
 import Student from "../models/Student.js";
 import {
   getCachedEventRegistrations,

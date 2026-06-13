@@ -2,6 +2,8 @@ import InterviewQuestion from "../models/InterviewQuestion.js";
 import { normalizeExpectedPoints } from "./mcp/generateQuestion.js";
 import { bankDocSatisfiesCodeGrading, cloneSerializable } from "./interviewCodeGradingGuards.js";
 import { dedupeTestCases } from "../utils/dedupeTestCases.js";
+import { normalizeMcqBankDoc } from "../utils/normalizeMcqBankDoc.js";
+import { isCsFundamentalsRoundType } from "../utils/csFundamentalsRoundPlan.js";
 
 const toSafeString = (value, fallback = "") =>
   typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -11,7 +13,24 @@ const normalizeDifficulty = (value) => {
   return safe === "easy" || safe === "medium" || safe === "hard" ? safe : "medium";
 };
 
-const inferExpectedAnswerMode = ({ roundType, evaluationStrategy, rubric = [] }) => {
+const normalizeStringList = (value) => {
+  if (Array.isArray(value)) {
+    return value.map((item) => toSafeString(item)).filter(Boolean);
+  }
+  if (typeof value === "string" && value.trim()) {
+    return value
+      .split(/[,;|]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+};
+
+const inferExpectedAnswerMode = ({ roundType, evaluationStrategy, rubric = [], mcqMetadata }) => {
+  if (mcqMetadata || toSafeString(evaluationStrategy).toLowerCase() === "mcq_exact") {
+    return "mcq";
+  }
+
   const explicitMode = toSafeString(rubric?.[0]?.expectedAnswerMode);
   if (explicitMode) return explicitMode;
 
@@ -70,14 +89,52 @@ const buildRoundTypeMatcher = (roundType) => {
   return { $regex: `^${escapeRegex(toSafeString(roundType))}$`, $options: "i" };
 };
 
+const isCsFundamentalsRound = (roundType) => isCsFundamentalsRoundType(roundType);
+
+const docPassesBankFilter = (roundType, doc, questionKind = null) => {
+  const strat = toSafeString(doc?.evaluationStrategy).toLowerCase();
+
+  if (questionKind === "mcq") {
+    return strat === "mcq_exact" && normalizeMcqBankDoc(doc) != null;
+  }
+
+  if (questionKind === "theory") {
+    if (strat === "mcq_exact" || strat === "code_execution" || strat === "sql_execution") {
+      return false;
+    }
+    return bankDocSatisfiesCodeGrading(roundType, doc);
+  }
+
+  if (strat === "mcq_exact") {
+    return normalizeMcqBankDoc(doc) != null;
+  }
+  return bankDocSatisfiesCodeGrading(roundType, doc);
+};
+
 const pickTopQuestions = async (match, limit = 1) => {
   const lim = Math.max(1, Math.min(40, Number(limit) || 1));
   return InterviewQuestion.aggregate([
     { $match: match },
     {
       $addFields: {
-        _verifiedRank: { $cond: [{ $eq: ["$sourceMetadata.verified", true] }, 1, 0] },
-        _qualityRank: { $ifNull: ["$sourceMetadata.qualityScore", 0] },
+        _verifiedRank: {
+          $cond: [
+            {
+              $or: [
+                { $eq: ["$sourceMetadata.verified", true] },
+                { $eq: ["$verified", true] },
+              ],
+            },
+            1,
+            0,
+          ],
+        },
+        _qualityRank: {
+          $ifNull: [
+            "$sourceMetadata.qualityScore",
+            { $ifNull: ["$qualityScore", 0] },
+          ],
+        },
         _randomTieBreaker: { $rand: {} },
       },
     },
@@ -108,6 +165,7 @@ export async function retrieveQuestion({
   roundType,
   difficulty,
   excludedQuestionIds = [],
+  questionKind = null,
 }) {
   const companyTag = toSafeString(company);
   const normalizedRoundType = toSafeString(roundType);
@@ -125,21 +183,68 @@ export async function retrieveQuestion({
   };
   if (exclusions.length > 0) baseMatch.questionId = { $nin: exclusions };
 
-  // Retrieval cascade: strict -> relax difficulty -> relax company.
   const candidateMatches = [];
-  if (companyTag) {
-    candidateMatches.push({ ...baseMatch, companyTags: companyTag });
-    candidateMatches.push({ roundType: roundTypeMatcher, companyTags: companyTag });
+  const normalizedQuestionKind = toSafeString(questionKind).toLowerCase();
+
+  if (normalizedQuestionKind === "mcq") {
+    candidateMatches.push({
+      ...baseMatch,
+      evaluationStrategy: "mcq_exact",
+    });
+    candidateMatches.push({
+      roundType: roundTypeMatcher,
+      evaluationStrategy: "mcq_exact",
+    });
+  } else if (normalizedQuestionKind === "theory") {
+    if (companyTag) {
+      candidateMatches.push({
+        ...baseMatch,
+        companyTags: companyTag,
+        evaluationStrategy: "rubric_llm",
+      });
+      candidateMatches.push({
+        roundType: roundTypeMatcher,
+        companyTags: companyTag,
+        evaluationStrategy: "rubric_llm",
+      });
+    }
+    candidateMatches.push({ ...baseMatch, evaluationStrategy: "rubric_llm" });
+    candidateMatches.push({ roundType: roundTypeMatcher, evaluationStrategy: "rubric_llm" });
+    candidateMatches.push({
+      ...baseMatch,
+      evaluationStrategy: { $nin: ["mcq_exact", "code_execution", "sql_execution"] },
+    });
+    candidateMatches.push({
+      roundType: roundTypeMatcher,
+      evaluationStrategy: { $nin: ["mcq_exact", "code_execution", "sql_execution"] },
+    });
+  } else if (isCsFundamentalsRound(normalizedRoundType)) {
+    candidateMatches.push({
+      ...baseMatch,
+      evaluationStrategy: "mcq_exact",
+    });
+    candidateMatches.push({
+      roundType: roundTypeMatcher,
+      evaluationStrategy: "mcq_exact",
+    });
   }
-  candidateMatches.push(baseMatch);
-  candidateMatches.push({ roundType: roundTypeMatcher });
+
+  if (!normalizedQuestionKind || normalizedQuestionKind === "theory") {
+    if (companyTag) {
+      candidateMatches.push({ ...baseMatch, companyTags: companyTag });
+      candidateMatches.push({ roundType: roundTypeMatcher, companyTags: companyTag });
+    }
+    if (!normalizedQuestionKind) {
+      candidateMatches.push(baseMatch);
+      candidateMatches.push({ roundType: roundTypeMatcher });
+    }
+  }
 
   let selected = null;
 
   for (const match of candidateMatches) {
     const batch = await pickTopQuestions(match, 24);
-    selected =
-      batch.find((doc) => bankDocSatisfiesCodeGrading(normalizedRoundType, doc)) || null;
+    selected = batch.find((doc) => docPassesBankFilter(normalizedRoundType, doc, normalizedQuestionKind || null)) || null;
     if (selected) break;
   }
 
@@ -147,16 +252,22 @@ export async function retrieveQuestion({
     return null;
   }
 
+  const resolvedMcqMetadata = normalizeMcqBankDoc(selected);
+  const isMcq = resolvedMcqMetadata != null;
+
   const expectedAnswerMode = inferExpectedAnswerMode({
     roundType: selected.roundType,
-    evaluationStrategy: selected.evaluationStrategy,
+    evaluationStrategy: isMcq ? "mcq_exact" : selected.evaluationStrategy,
     rubric: selected.rubric,
+    mcqMetadata: resolvedMcqMetadata,
   });
 
-  const expectedPoints = normalizeExpectedPoints(selected.rubric, {
-    roundType: selected.roundType,
-    expectedAnswerMode,
-  });
+  const expectedPoints = isMcq
+    ? []
+    : normalizeExpectedPoints(selected.rubric, {
+        roundType: selected.roundType,
+        expectedAnswerMode,
+      });
 
   const rawTests = dedupeTestCases(Array.isArray(selected.testCases) ? selected.testCases : []);
 
@@ -165,7 +276,10 @@ export async function retrieveQuestion({
     expectedAnswerMode,
     expectedPoints,
     questionId: toSafeString(selected.questionId),
-    evaluationStrategy: toSafeString(selected.evaluationStrategy),
+    evaluationStrategy: isMcq
+      ? "mcq_exact"
+      : toSafeString(selected.evaluationStrategy),
+    resolvedMcqMetadata: resolvedMcqMetadata || undefined,
     testCases: cloneSerializable(rawTests) || [],
     metadata: {
       title: toSafeString(selected.title),
@@ -173,8 +287,8 @@ export async function retrieveQuestion({
       companyTags: Array.isArray(selected.companyTags) ? selected.companyTags : [],
       roundType: toSafeString(selected.roundType),
       difficulty: toSafeString(selected.difficulty),
-      topics: Array.isArray(selected.topics) ? selected.topics : [],
-      subtopics: Array.isArray(selected.subtopics) ? selected.subtopics : [],
+      topics: normalizeStringList(selected.topics),
+      subtopics: normalizeStringList(selected.subtopics),
       dsaMetadata: selected.dsaMetadata || {},
       sqlMetadata: selected.sqlMetadata || {},
       systemDesignMetadata: selected.systemDesignMetadata || {},

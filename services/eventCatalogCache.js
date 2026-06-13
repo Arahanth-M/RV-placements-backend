@@ -6,6 +6,7 @@
  * TTL is a safety net if invalidation is missed.
  */
 import Event from "../models/Event.js";
+import "../models/User1.js";
 import { redisUrl } from "../src/utils/redisClient.js";
 import { getJSON, setJSON, deleteKey } from "../src/utils/redisHelpers.js";
 

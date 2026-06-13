@@ -35,7 +35,7 @@ const expectedPointSchema = new mongoose.Schema(
     },
     expectedAnswerMode: {
       type: String,
-      enum: ["code", "design", "story", "conceptual"],
+      enum: ["code", "design", "story", "conceptual", "mcq"],
       default: "conceptual",
     },
     embedding: { type: [Number] },
@@ -146,6 +146,13 @@ const roundQuestionSchema = new mongoose.Schema(
     resolvedSubtopics: { type: [String], default: undefined },
     resolvedCompanyTags: { type: [String], default: undefined },
     resolvedComplexity: { type: mongoose.Schema.Types.Mixed, default: undefined },
+    /** MCQ grading key + options — never expose correctOptionId to clients. */
+    resolvedMcqMetadata: { type: mongoose.Schema.Types.Mixed, default: undefined },
+    expectedAnswerMode: {
+      type: String,
+      enum: ["code", "design", "story", "conceptual", "mcq"],
+      default: "conceptual",
+    },
   },
   { _id: false }
 );

@@ -54,6 +54,7 @@ import {
   mergeQuestionDisplayPreferSlot,
   slotNeedsBankQuestionLookup,
 } from "../utils/interviewQuestionSlotSnapshot.js";
+import { buildClientMcqPayload } from "../utils/normalizeMcqBankDoc.js";
 import { INTERVIEW_STATES, assertValidTransition } from "../services/interviewStateMachine.js";
 import {
   getCachedInterviewSummaries,
@@ -1353,6 +1354,17 @@ router.get("/interview-status/:sessionId", async (req, res) => {
         )
       : [];
 
+    const slotExpectedAnswerMode = toSafeString(slotNow?.expectedAnswerMode);
+    const expectedAnswerMode =
+      slotExpectedAnswerMode ||
+      (slotEvalStrat === "mcq_exact" ? "mcq" : "") ||
+      (previewQuestionDoc?.mcq ? "mcq" : "") ||
+      "conceptual";
+    const mcqPayload =
+      previewQuestionDoc?.mcq ||
+      buildClientMcqPayload(slotNow?.resolvedMcqMetadata) ||
+      null;
+
     return res.json({
       status: toClientStatus(session.state),
       currentRound: session.currentRound,
@@ -1394,6 +1406,8 @@ router.get("/interview-status/:sessionId", async (req, res) => {
         ? previewQuestionDoc.companyTags
         : [],
       questionComplexity: extractQuestionComplexityForClient(previewQuestionDoc?.complexity),
+      expectedAnswerMode,
+      mcq: mcqPayload,
       previewSqlContext,
       isProcessing,
       tips: selectedTips,

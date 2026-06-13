@@ -22,7 +22,6 @@ import {
   getPlacementHubSettingsForApi,
   updatePlacementHubOpenDreamThresholds,
 } from "../services/placementHubSettingsService.js";
-import User from "../models/User.js";
 import User1 from "../models/User1.js";
 import Student from "../models/Student.js";
 import Submission from "../models/Submission.js";
@@ -281,7 +280,7 @@ function sanitizeText(text) {
 // Get total number of users
 adminRouter.get("/stats/users", async (req, res) => {
   try {
-    const totalUsers = await User.countDocuments();
+    const totalUsers = await User1.countDocuments();
     res.json({ totalUsers });
   } catch (error) {
     console.error("❌ Error fetching user count:", error.message);

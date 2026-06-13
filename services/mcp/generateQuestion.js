@@ -11,6 +11,10 @@ import {
   cloneSerializable,
   roundTypeImpliesCodeExecutionInterview,
 } from "../interviewCodeGradingGuards.js";
+import {
+  isCsFundamentalsRoundType,
+  resolveCsFundamentalsQuestionKind,
+} from "../../utils/csFundamentalsRoundPlan.js";
 
 const MIN_POOL_SIZE = 5;
 const MAX_POOL_SIZE = 10;
@@ -44,7 +48,13 @@ const normalizeSupportedCodingLanguagesForSlot = (evaluationStrategy, dsaMetadat
 /** LLM pool items often omit strategy; align with round type so workers use code_execution when appropriate. */
 export const inferEvaluationStrategyForRound = (roundType, pickedStrategy) => {
   const ps = toSafeString(pickedStrategy).toLowerCase();
-  if (ps === "code_execution" || ps === "sql_execution" || ps === "rubric_llm" || ps === "behavioral_llm") {
+  if (
+    ps === "code_execution" ||
+    ps === "sql_execution" ||
+    ps === "rubric_llm" ||
+    ps === "behavioral_llm" ||
+    ps === "mcq_exact"
+  ) {
     return ps === "sql_execution" ? "rubric_llm" : ps;
   }
   const rt = toSafeString(roundType).toLowerCase();
@@ -184,7 +194,7 @@ const normalizeRubricCategory = (value, fallback = "coverage") => {
 
 const normalizeExpectedAnswerMode = (value, fallback = "conceptual") => {
   const safe = toSafeString(value, fallback);
-  return ["code", "design", "story", "conceptual"].includes(safe)
+  return ["code", "design", "story", "conceptual", "mcq"].includes(safe)
     ? safe
     : fallback;
 };
@@ -816,6 +826,7 @@ export const generateQuestion = async ({
   excludedQuestionIds = [],
   excludedQuestionTexts = [],
   roundQuestionCount = null,
+  questionSlotIndex = 0,
 }) => {
   const { excludedIdSet, excludedTextSet } = mergeInterviewQuestionExclusions(
     {
@@ -838,6 +849,25 @@ export const generateQuestion = async ({
     const retrievalExclusions = Array.from(new Set([...excludedIdSet, ...seenIdSet]));
     const poolTextExclusion = new Set([...excludedTextSet, ...seenTextSet]);
     const doNotRepeatTexts = [...excludedTextSet];
+
+    const csFundamentalsQuestionKind = isCsFundamentalsRoundType(roundType)
+      ? resolveCsFundamentalsQuestionKind(questionSlotIndex)
+      : null;
+
+    const buildMcqBankUnavailablePayload = () => ({
+      generationError: {
+        code: "MCQ_BANK_UNAVAILABLE",
+        message:
+          "No MCQ question is available for this CS Fundamentals slot right now. Please try again in a moment or contact support.",
+      },
+      question: "",
+      questionUrl: "",
+      expectedAnswerMode: "mcq",
+      expectedPoints: [],
+      questionId: "",
+      evaluationStrategy: "mcq_exact",
+      supportedCodingLanguages: [],
+    });
 
     const buildPayloadFromRetrieved = (retrieved) => {
       let strat = inferEvaluationStrategyForRound(roundType, retrieved.evaluationStrategy);
@@ -877,6 +907,11 @@ export const generateQuestion = async ({
           };
         }
       }
+      const resolvedMcqMetadata =
+        strat === "mcq_exact" && retrieved.resolvedMcqMetadata
+          ? cloneSerializable(retrieved.resolvedMcqMetadata)
+          : undefined;
+
       return {
         question: retrieved.question,
         questionUrl: toSafeString(retrieved.metadata?.url),
@@ -898,6 +933,7 @@ export const generateQuestion = async ({
           strat === "code_execution" ? cloneSerializable(tests) || [] : undefined,
         resolvedDsaMetadata:
           strat === "code_execution" ? cloneSerializable(dsaMeta) || {} : undefined,
+        resolvedMcqMetadata,
         resolvedTopics: cloneSerializable(
           Array.isArray(retrieved.metadata?.topics) ? retrieved.metadata.topics : []
         ),
@@ -926,14 +962,21 @@ export const generateQuestion = async ({
       roundType,
       difficulty,
       excludedQuestionIds: retrievalExclusions,
+      questionKind: csFundamentalsQuestionKind,
     });
     if (retrieved?.question) {
       if (isInterviewQuestionExcluded(retrieved, excludedIdSet, excludedTextSet)) {
         console.log(
           "[generateQuestion] Skipping bank row — already used in this session (text or id)"
         );
+        if (csFundamentalsQuestionKind === "mcq") {
+          return buildMcqBankUnavailablePayload();
+        }
       } else {
-        console.log("[generateQuestion] Retrieved curated question");
+        console.log("[generateQuestion] Retrieved curated question", {
+          questionKind: csFundamentalsQuestionKind || "default",
+          questionSlotIndex,
+        });
         const bankPayload = buildPayloadFromRetrieved(retrieved);
         if (bankPayload.generationError) {
           return bankPayload;
@@ -941,6 +984,14 @@ export const generateQuestion = async ({
         await recordSeenForPick(bankPayload);
         return bankPayload;
       }
+    }
+
+    if (csFundamentalsQuestionKind === "mcq") {
+      console.error("[generateQuestion] CS Fundamentals MCQ slot but no bank question", {
+        roundType: toSafeString(roundType),
+        questionSlotIndex,
+      });
+      return buildMcqBankUnavailablePayload();
     }
 
     if (inferEvaluationStrategyForRound(roundType, "") === "code_execution") {

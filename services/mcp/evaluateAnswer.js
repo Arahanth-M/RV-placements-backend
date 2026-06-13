@@ -1,6 +1,7 @@
 import { evaluateCodeExecution } from "../evaluators/evaluateCodeExecution.js";
 import { evaluateRubricLLM } from "../evaluators/evaluateRubricLLM.js";
 import { evaluateBehavioralLLM } from "../evaluators/evaluateBehavioralLLM.js";
+import { evaluateMcqExact } from "../evaluators/evaluateMcqExact.js";
 import { logInterviewDsaLlmDebug } from "../interviewDebugLog.js";
 
 const normalizeStrategy = (value) => {
@@ -11,7 +12,8 @@ const normalizeStrategy = (value) => {
   if (
     safe === "code_execution" ||
     safe === "rubric_llm" ||
-    safe === "behavioral_llm"
+    safe === "behavioral_llm" ||
+    safe === "mcq_exact"
   ) {
     return safe;
   }
@@ -52,6 +54,8 @@ export const evaluateAnswer = async ({ evaluationStrategy, ...payload }) => {
   switch (strategy) {
     case "code_execution":
       return evaluateCodeExecution(payload);
+    case "mcq_exact":
+      return evaluateMcqExact(payload);
     case "behavioral_llm":
       return evaluateBehavioralLLM(payload);
     case "rubric_llm":

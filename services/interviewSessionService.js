@@ -418,6 +418,7 @@ export const startRound = async (sessionId) => {
     mergePlacementByType: session.mergePlacementByType === true,
     excludedQuestionIds: sessionExclusions.excludedQuestionIds,
     excludedQuestionTexts: sessionExclusions.excludedQuestionTexts,
+    questionSlotIndex: 0,
   });
 
   if (gen?.generationError) {
@@ -434,6 +435,7 @@ export const startRound = async (sessionId) => {
     supportedCodingLanguages,
     resolvedCodeTestCases,
     resolvedDsaMetadata,
+    resolvedMcqMetadata,
     resolvedTopics,
     resolvedSubtopics,
     resolvedCompanyTags,
@@ -450,6 +452,7 @@ export const startRound = async (sessionId) => {
         ? supportedCodingLanguages
         : undefined,
       evaluationStrategy: toSafeString(evaluationStrategy) || undefined,
+      expectedAnswerMode: toSafeString(expectedAnswerMode) || undefined,
       sourceType: toSafeString(questionId) ? "retrieved" : "generated",
       previewRunCount: 0,
       answer: "",

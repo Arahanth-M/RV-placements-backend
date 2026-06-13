@@ -1,4 +1,5 @@
 import { roundTypeImpliesCodeExecutionInterview } from "../services/interviewCodeGradingGuards.js";
+import { buildClientMcqPayload } from "./normalizeMcqBankDoc.js";
 
 const toSafeString = (value) => (typeof value === "string" ? value.trim() : "");
 
@@ -25,6 +26,9 @@ export function buildResolvedFieldsForQuestionSlot(gen = {}) {
   if (gen.resolvedComplexity && typeof gen.resolvedComplexity === "object") {
     out.resolvedComplexity = gen.resolvedComplexity;
   }
+  if (gen.resolvedMcqMetadata && typeof gen.resolvedMcqMetadata === "object") {
+    out.resolvedMcqMetadata = gen.resolvedMcqMetadata;
+  }
   return out;
 }
 
@@ -47,6 +51,7 @@ export function buildQuestionDisplayFromSlot(slot) {
       slot.resolvedComplexity && typeof slot.resolvedComplexity === "object"
         ? slot.resolvedComplexity
         : null,
+    mcq: buildClientMcqPayload(slot.resolvedMcqMetadata),
   };
 }
 
@@ -61,6 +66,10 @@ function slotHasCodeDisplaySnapshot(slot) {
   return tests.length > 0 && Boolean(sig);
 }
 
+function slotHasMcqDisplaySnapshot(slot) {
+  return Boolean(buildClientMcqPayload(slot?.resolvedMcqMetadata));
+}
+
 /**
  * True when interview-status / run-preview must still query the question bank.
  */
@@ -73,6 +82,10 @@ export function slotNeedsBankQuestionLookup(slot, roundType = "") {
 
   if (isCodeExecutionSlot(slot, roundType)) {
     return !slotHasCodeDisplaySnapshot(slot);
+  }
+
+  if (toSafeString(slot?.evaluationStrategy).toLowerCase() === "mcq_exact") {
+    return !slotHasMcqDisplaySnapshot(slot);
   }
 
   if (toSafeString(slot.questionId) && Array.isArray(slot.resolvedTopics)) {
@@ -121,5 +134,9 @@ export function mergeQuestionDisplayPreferSlot(slotDisplay, bankDoc) {
           ? bank.companyTags
           : [],
     complexity: slot.complexity || bank.complexity || null,
+    mcq:
+      slot.mcq && typeof slot.mcq === "object"
+        ? slot.mcq
+        : buildClientMcqPayload(bank.mcqMetadata || bank.resolvedMcqMetadata),
   };
 }

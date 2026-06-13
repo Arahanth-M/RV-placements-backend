@@ -1,4 +1,3 @@
-import User from "../models/User.js";
 import User1 from "../models/User1.js";
 import Submission from "../models/Submission.js";
 import CompanyStatic from "../models/CompanyStatic.js";
@@ -208,7 +207,7 @@ export async function computeAdminStatsSnapshot() {
     submissionTrendRaw,
     acceptanceTrendRaw,
   ] = await Promise.all([
-    User.countDocuments(),
+    User1.countDocuments(),
     CompanyStatic.countDocuments(),
     Submission.countDocuments({ status: "pending" }),
     Submission.countDocuments({ submittedAt: { $gte: todayStart } }),

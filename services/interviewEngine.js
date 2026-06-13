@@ -58,7 +58,7 @@ export const inferQuestionCount = (roundType) => {
   if (roundType === "SQL") return 4;
   if (roundType === "System Design") return 3;
   if (roundType === "HR") return MAX_HR_QUESTIONS_PER_ROUND;
-  if (roundType === "CS Fundamentals") return 3;
+  if (roundType === "CS Fundamentals") return 3; // 2 MCQ (bank) + 1 theory (bank, then LLM)
   return 3;
 };
 

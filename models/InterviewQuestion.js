@@ -7,9 +7,10 @@ const EVALUATION_STRATEGIES = [
   "sql_execution",
   "rubric_llm",
   "behavioral_llm",
+  "mcq_exact",
 ];
 const IMPORTANCE_LEVELS = ["mustHave", "goodToHave", "redFlag"];
-const ANSWER_MODES = ["code", "design", "story", "conceptual"];
+const ANSWER_MODES = ["code", "design", "story", "conceptual", "mcq"];
 
 const testcaseSchema = new mongoose.Schema(
   {
