@@ -78,6 +78,9 @@ export async function evaluateMcqExact({ answer, question, mcqMetadata, metadata
   const isCorrect = selectedOptionId === correctOptionId;
   const score = isCorrect ? 10 : 1;
   const verdict = isCorrect ? "correct" : "incorrect";
+  const wrongReason = toSafeString(selectedOption?.distractorReason);
+  const correctText = toSafeString(correctOption?.text);
+  const selectedText = toSafeString(selectedOption?.text);
 
   let feedback;
   if (isCorrect) {
@@ -85,8 +88,6 @@ export async function evaluateMcqExact({ answer, question, mcqMetadata, metadata
       ? `Correct (${correctOptionId}). ${explanation}`
       : `Correct — option ${correctOptionId}.`;
   } else {
-    const wrongReason = toSafeString(selectedOption?.distractorReason);
-    const correctText = toSafeString(correctOption?.text);
     feedback = `Incorrect. You selected ${selectedOptionId}. The correct answer is ${correctOptionId}${
       correctText ? ` (${correctText})` : ""
     }.`;
@@ -96,6 +97,15 @@ export async function evaluateMcqExact({ answer, question, mcqMetadata, metadata
       feedback += ` ${explanation}`;
     }
   }
+
+  const mcqTrace = {
+    selectedOptionId,
+    correctOptionId,
+    selectedOptionText: selectedText,
+    correctOptionText: correctText,
+    reason: isCorrect ? "" : wrongReason,
+    explanation,
+  };
 
   return {
     score,
@@ -118,11 +128,7 @@ export async function evaluateMcqExact({ answer, question, mcqMetadata, metadata
         ? []
         : [`Selected ${selectedOptionId} instead of ${correctOptionId}`],
       subscores: { selection: isCorrect ? 1 : 0 },
-      mcq: {
-        selectedOptionId,
-        correctOptionId,
-        question: toSafeString(question),
-      },
+      mcq: mcqTrace,
     },
   };
 }

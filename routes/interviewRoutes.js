@@ -165,6 +165,31 @@ const buildLastCodeExecutionSummary = (evaluationTrace) => {
   };
 };
 
+const buildLastMcqFeedback = (prevQuestion) => {
+  if (!prevQuestion || typeof prevQuestion !== "object") return null;
+  const trace = prevQuestion.evaluationTrace;
+  const isMcq =
+    trace?.questionType === "mcq" ||
+    trace?.expectedAnswerMode === "mcq" ||
+    Boolean(trace?.mcq);
+  if (!isMcq) return null;
+
+  const mcq = trace?.mcq && typeof trace.mcq === "object" ? trace.mcq : {};
+  const selectedOptionId = toSafeString(prevQuestion.answer || mcq.selectedOptionId).toUpperCase();
+  const correctOptionId = toSafeString(mcq.correctOptionId).toUpperCase();
+  if (!selectedOptionId && !correctOptionId) return null;
+
+  return {
+    selectedOptionId: selectedOptionId || null,
+    correctOptionId: correctOptionId || null,
+    selectedOptionText: toSafeString(mcq.selectedOptionText),
+    correctOptionText: toSafeString(mcq.correctOptionText),
+    reason: toSafeString(mcq.reason),
+    explanation: toSafeString(mcq.explanation),
+    verdict: toSafeString(trace?.verdict) || null,
+  };
+};
+
 const resolveSupportedCodingLanguages = (
   questionSlot,
   evaluationStrategyFallback = "",
@@ -1380,6 +1405,8 @@ router.get("/interview-status/:sessionId", async (req, res) => {
           ? prevQuestion.question.trim()
           : null,
       lastCorrectness: exposePrevFeedback ? prevQuestion?.evaluationTrace?.verdict ?? null : null,
+      lastAnswer: exposePrevFeedback ? toSafeString(prevQuestion?.answer) || null : null,
+      lastMcqFeedback: exposePrevFeedback ? buildLastMcqFeedback(prevQuestion) : null,
       lastRelevance: exposePrevFeedback
         ? toRelevanceLabel(prevQuestion?.evaluationTrace?.relevance)
         : null,

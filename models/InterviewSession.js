@@ -65,6 +65,18 @@ const codeExecutionTraceSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const mcqEvaluationTraceSchema = new mongoose.Schema(
+  {
+    selectedOptionId: { type: String, trim: true },
+    correctOptionId: { type: String, trim: true },
+    selectedOptionText: { type: String, trim: true },
+    correctOptionText: { type: String, trim: true },
+    reason: { type: String, trim: true },
+    explanation: { type: String, trim: true },
+  },
+  { _id: false }
+);
+
 const evaluationTraceSchema = new mongoose.Schema(
   {
     scoringVersion: { type: String, trim: true },
@@ -89,6 +101,10 @@ const evaluationTraceSchema = new mongoose.Schema(
     },
     execution: {
       type: codeExecutionTraceSchema,
+      default: undefined,
+    },
+    mcq: {
+      type: mcqEvaluationTraceSchema,
       default: undefined,
     },
   },
