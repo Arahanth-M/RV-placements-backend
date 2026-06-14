@@ -110,5 +110,28 @@ describe("visitDateSort", () => {
       );
       expect(withoutVisit).toBeNull();
     });
+
+    it("uses hub-specific dream and summer dates for sorting", () => {
+      const dreamTs = companyVisitSortTimestamp(
+        {
+          date_of_visit: "mid September",
+          placementDreamDateOfVisit: "April 2026",
+          placementDreamDetailYear: 2026,
+          placementVisitYear: 2027,
+        },
+        { defaultYear: 2026, hub: "dream" }
+      );
+      expect(dreamTs).toBe(new Date(2026, 3, 15).getTime());
+
+      const summerTs = companyVisitSortTimestamp(
+        {
+          date_of_visit: "April 2026",
+          placementSummerDateOfVisit: "mid September",
+          placementSummerDetailYear: 2026,
+        },
+        { defaultYear: 2026, hub: "summer_internship" }
+      );
+      expect(summerTs).toBe(new Date(2026, 8, 15).getTime());
+    });
   });
 });

@@ -7,7 +7,7 @@ import { getCompanyPlacementMeta } from "./ctcCategory.js";
 import { getOpenDreamMinRupeesForClusterSync } from "../services/placementHubSettingsService.js";
 import { COMPANY_VISIT_DEFAULT_YEAR } from "./placementYears.js";
 import { COMPANY_DETAIL_VISIT_YEARS } from "./placementYears.js";
-import { companyVisitSortTimestamp } from "./visitDateSort.js";
+import { sortCompaniesByVisitDate } from "./visitDateSort.js";
 
 const PLACEMENT_CATEGORY_OPEN_DREAM = "open dream";
 
@@ -401,14 +401,17 @@ export function getListPlacementCategoryMetaFromVisits(
 
   let dreamDisplayType;
   let dreamDetailYear;
+  let dreamSubtitleVisit = null;
 
   if (displayVisit) {
+    dreamSubtitleVisit = displayVisit;
     dreamDisplayType = visitDisplayType(displayVisit);
     dreamDetailYear = normalizePlacementDetailYear(displayVisit.year);
   } else if (
     hybridFallbackVisit != null &&
     hybridFallbackYear !== undefined
   ) {
+    dreamSubtitleVisit = hybridFallbackVisit;
     dreamDisplayType = visitDisplayType(hybridFallbackVisit);
     dreamDetailYear = hybridFallbackYear;
   } else if (prefYear !== undefined) {
@@ -417,6 +420,12 @@ export function getListPlacementCategoryMetaFromVisits(
       !visitQualifiesSummerInternshipListingRow(primaryVisit)
         ? primaryVisit
         : pickDreamHubSubtitleVisitAcrossYears(list, openDreamMinRupees);
+    if (
+      subtitleVisit &&
+      !visitQualifiesSummerInternshipListingRow(subtitleVisit)
+    ) {
+      dreamSubtitleVisit = subtitleVisit;
+    }
     dreamDisplayType = subtitleVisit
       ? visitDisplayType(subtitleVisit)
       : undefined;
@@ -424,6 +433,7 @@ export function getListPlacementCategoryMetaFromVisits(
       ? normalizePlacementDetailYear(subtitleVisit.year)
       : prefYear;
   } else if (bestGlobalVisit) {
+    dreamSubtitleVisit = bestGlobalVisit;
     dreamDisplayType = visitDisplayType(bestGlobalVisit);
     dreamDetailYear = normalizePlacementDetailYear(bestGlobalVisit.year);
   } else {
@@ -432,6 +442,12 @@ export function getListPlacementCategoryMetaFromVisits(
       !visitQualifiesSummerInternshipListingRow(primaryVisit)
         ? primaryVisit
         : pickDreamHubSubtitleVisitAcrossYears(list, openDreamMinRupees);
+    if (
+      subtitleVisit &&
+      !visitQualifiesSummerInternshipListingRow(subtitleVisit)
+    ) {
+      dreamSubtitleVisit = subtitleVisit;
+    }
     dreamDisplayType = subtitleVisit
       ? visitDisplayType(subtitleVisit)
       : undefined;
@@ -440,10 +456,16 @@ export function getListPlacementCategoryMetaFromVisits(
       : normalizePlacementDetailYear(primaryVisit?.year);
   }
 
+  const dreamDateOfVisit =
+    dreamSubtitleVisit?.date_of_visit == null
+      ? ""
+      : String(dreamSubtitleVisit.date_of_visit).trim();
+
   return {
     ...globalMeta,
     dreamDisplayType,
     dreamDetailYear,
+    dreamDateOfVisit,
   };
 }
 
@@ -522,20 +544,7 @@ function dreamTileBaseCompany(c) {
  * @param {{ defaultYear?: number }} [options]
  */
 export function sortCompaniesForCategoryPreview(companies, options = {}) {
-  return [...companies].sort((a, b) => {
-    const aVisitTs = companyVisitSortTimestamp(a, options);
-    const bVisitTs = companyVisitSortTimestamp(b, options);
-
-    if (aVisitTs !== null && bVisitTs !== null && aVisitTs !== bVisitTs) {
-      return aVisitTs - bVisitTs;
-    }
-    if (aVisitTs !== null) return -1;
-    if (bVisitTs !== null) return 1;
-
-    const byName = (a?.name || "").localeCompare(b?.name || "");
-    if (byName !== 0) return byName;
-    return String(a?._id || "").localeCompare(String(b?._id || ""));
-  });
+  return sortCompaniesByVisitDate(companies, { ...options, hub: options.hub ?? "dream" });
 }
 
 function toLogoItem(c) {

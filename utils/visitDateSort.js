@@ -228,10 +228,68 @@ export function resolveCompanyVisitSortYear(company, hubDefaultYear) {
   return hubYear;
 }
 
+export function resolveVisitSortDateAndYear(company, hub, hubDefaultYear) {
+  if (!company || typeof company !== "object") {
+    return { dateRaw: null, sortYear: hubDefaultYear };
+  }
+
+  let dateRaw = company.date_of_visit;
+  let sortYear = resolveCompanyVisitSortYear(company, hubDefaultYear);
+
+  if (hub === "summer_internship") {
+    const summerDate = company.placementSummerDateOfVisit;
+    if (summerDate != null && String(summerDate).trim() !== "") {
+      dateRaw = summerDate;
+      const y = Number(company.placementSummerDetailYear);
+      if (Number.isFinite(y) && y > 2000) sortYear = y;
+    }
+  } else if (hub === "dream" || hub === "open_dream") {
+    const dreamDate = company.placementDreamDateOfVisit;
+    if (dreamDate != null && String(dreamDate).trim() !== "") {
+      dateRaw = dreamDate;
+      const y = Number(company.placementDreamDetailYear);
+      if (Number.isFinite(y) && y > 2000) sortYear = y;
+    } else if (company.placementDreamTierForListingYear === false) {
+      return { dateRaw: null, sortYear };
+    }
+  } else if (hub === "internship_only") {
+    const y = Number(company.placementInternshipOnlyDetailYear);
+    if (Number.isFinite(y) && y > 2000) sortYear = y;
+  }
+
+  return { dateRaw, sortYear };
+}
+
 export function companyVisitSortTimestamp(company, options = {}) {
   if (!company || typeof company !== "object") return null;
-  const sortOptions = {
-    defaultYear: resolveCompanyVisitSortYear(company, options.defaultYear),
-  };
-  return parseVisitDateToTimestamp(company.date_of_visit, sortOptions);
+  const { dateRaw, sortYear } = resolveVisitSortDateAndYear(
+    company,
+    options.hub,
+    options.defaultYear
+  );
+  if (dateRaw == null) return null;
+  return parseVisitDateToTimestamp(dateRaw, { defaultYear: sortYear });
+}
+
+export function compareCompaniesByVisitDate(a, b, options = {}) {
+  const aVisitTs = companyVisitSortTimestamp(a, options);
+  const bVisitTs = companyVisitSortTimestamp(b, options);
+
+  if (aVisitTs !== null && bVisitTs !== null && aVisitTs !== bVisitTs) {
+    return aVisitTs - bVisitTs;
+  }
+  if (aVisitTs !== null && bVisitTs === null) return -1;
+  if (aVisitTs === null && bVisitTs !== null) return 1;
+
+  const byName = (a?.name || "").localeCompare(b?.name || "");
+  if (byName !== 0) return byName;
+  const byCompanyId = String(a?._id || "").localeCompare(String(b?._id || ""));
+  if (byCompanyId !== 0) return byCompanyId;
+  return String(a?.placementCompanyVisitId || "").localeCompare(
+    String(b?.placementCompanyVisitId || "")
+  );
+}
+
+export function sortCompaniesByVisitDate(companies, options = {}) {
+  return [...companies].sort((a, b) => compareCompaniesByVisitDate(a, b, options));
 }
