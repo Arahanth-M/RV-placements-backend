@@ -72,7 +72,7 @@ import { executeCode, normalizeExecutionLanguage } from "../services/codeExecuti
 import { buildHiddenTestResultsForClient } from "../services/codeExecution/executionUtils.js";
 import {
   INTERVIEW_LIMIT_REASON,
-  isOneInterviewPerUserEnabled,
+  isInterviewWeeklyLimitEnabled,
 } from "../config/interviewLimits.js";
 
 const router = express.Router();
@@ -553,7 +553,7 @@ router.get("/eligibility", async (req, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const bypassLimit = !isOneInterviewPerUserEnabled() || isInterviewLimitBypassRole(req);
+    const bypassLimit = !isInterviewWeeklyLimitEnabled() || isInterviewLimitBypassRole(req);
     const eligibility = await getInterviewStartEligibility(userId, { bypassLimit });
 
     return res.json(eligibility);
@@ -579,13 +579,15 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    if (isOneInterviewPerUserEnabled() && !isInterviewLimitBypassRole(req)) {
+    if (isInterviewWeeklyLimitEnabled() && !isInterviewLimitBypassRole(req)) {
       const eligibility = await getInterviewStartEligibility(userId);
       if (!eligibility.canStart) {
         return res.status(403).json({
           code: eligibility.reason || INTERVIEW_LIMIT_REASON,
           error: eligibility.message || "Interview limit reached.",
           completedCount: eligibility.completedCount,
+          nextAvailableAt: eligibility.nextAvailableAt,
+          lastCompletedAt: eligibility.lastCompletedAt,
         });
       }
     }

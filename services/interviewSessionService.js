@@ -21,7 +21,8 @@ import { buildResolvedFieldsForQuestionSlot } from "../utils/interviewQuestionSl
 import { INTERVIEW_STATES } from "./interviewStateMachine.js";
 import {
   INTERVIEW_LIMIT_REASON,
-  INTERVIEW_LIMIT_REACHED_MESSAGE,
+  buildInterviewLimitReachedMessage,
+  computeWeeklyInterviewEligibility,
 } from "../config/interviewLimits.js";
 import {
   getCachedInterviewAnalytics,
@@ -266,6 +267,18 @@ export const countCompletedInterviewsForUser = async (userId) => {
   });
 };
 
+export const getLastCompletedInterviewForUser = async (userId) => {
+  const id = String(userId || "").trim();
+  if (!id) return null;
+  return InterviewSession.findOne({
+    userId: id,
+    state: INTERVIEW_STATES.INTERVIEW_COMPLETE,
+  })
+    .sort({ updatedAt: -1 })
+    .select("updatedAt")
+    .lean();
+};
+
 /**
  * @param {string} userId
  * @param {{ bypassLimit?: boolean }} [options]
@@ -278,25 +291,44 @@ export const getInterviewStartEligibility = async (userId, options = {}) => {
       reason: "UNAUTHORIZED",
       completedCount: 0,
       message: "",
+      nextAvailableAt: null,
+      lastCompletedAt: null,
     };
   }
 
-  const completedCount = await countCompletedInterviewsForUser(id);
+  const [completedCount, lastCompleted] = await Promise.all([
+    countCompletedInterviewsForUser(id),
+    getLastCompletedInterviewForUser(id),
+  ]);
+
   if (options.bypassLimit) {
     return {
       canStart: true,
       reason: null,
       completedCount,
       message: "",
+      nextAvailableAt: null,
+      lastCompletedAt: lastCompleted?.updatedAt
+        ? new Date(lastCompleted.updatedAt).toISOString()
+        : null,
     };
   }
 
-  if (completedCount >= 1) {
+  const weeklyEligibility = computeWeeklyInterviewEligibility({
+    lastCompletedAt: lastCompleted?.updatedAt ?? null,
+  });
+
+  if (!weeklyEligibility.canStart) {
+    const nextAvailableAt = weeklyEligibility.nextAvailableAt.toISOString();
     return {
       canStart: false,
       reason: INTERVIEW_LIMIT_REASON,
       completedCount,
-      message: INTERVIEW_LIMIT_REACHED_MESSAGE,
+      message: buildInterviewLimitReachedMessage(nextAvailableAt),
+      nextAvailableAt,
+      lastCompletedAt: weeklyEligibility.lastCompletedAt
+        ? weeklyEligibility.lastCompletedAt.toISOString()
+        : null,
     };
   }
 
@@ -305,6 +337,10 @@ export const getInterviewStartEligibility = async (userId, options = {}) => {
     reason: null,
     completedCount,
     message: "",
+    nextAvailableAt: null,
+    lastCompletedAt: weeklyEligibility.lastCompletedAt
+      ? weeklyEligibility.lastCompletedAt.toISOString()
+      : null,
   };
 };
 
