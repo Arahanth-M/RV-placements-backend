@@ -1,17 +1,5 @@
 import mongoose from "mongoose";
-import { jest } from "@jest/globals";
 import CompanyStatic from "../../models/CompanyStatic.js";
-import User1 from "../../models/User1.js";
-import { ADMIN_EMAILS } from "../../config/constants.js";
-
-const createNotification = jest.fn(async () => ({
-  _id: new mongoose.Types.ObjectId(),
-  type: "COMPANY_DETAIL_REQUEST",
-}));
-
-jest.unstable_mockModule("../../services/notificationService.js", () => ({
-  createNotification,
-}));
 
 const { getCompanyDetailRequestStatus, submitCompanyDetailRequest } = await import(
   "../../services/companyDetailRequestService.js"
@@ -20,22 +8,13 @@ const { getCompanyDetailRequestStatus, submitCompanyDetailRequest } = await impo
 describe("companyDetailRequestService", () => {
   let companyId;
   const studentEmail = "student.request@test.rvce.edu.in";
-  const adminEmail = ADMIN_EMAILS[0];
 
   beforeEach(async () => {
-    createNotification.mockClear();
-
     const company = await CompanyStatic.create({
       name: "Request Test Co",
       nameKey: `request-test-co-${Date.now()}`,
     });
     companyId = company._id;
-
-    await User1.findOneAndUpdate(
-      { email: adminEmail },
-      { email: adminEmail, username: "Test Admin" },
-      { upsert: true, new: true }
-    );
   });
 
   afterEach(async () => {
@@ -47,7 +26,7 @@ describe("companyDetailRequestService", () => {
     expect(status.hasRequested).toBe(false);
   });
 
-  it("allows one request per student and notifies admins", async () => {
+  it("allows one request per student without creating notifications", async () => {
     const first = await submitCompanyDetailRequest(
       companyId,
       { email: studentEmail, username: "Test Student" },
@@ -59,11 +38,8 @@ describe("companyDetailRequestService", () => {
     const status = await getCompanyDetailRequestStatus(companyId, studentEmail);
     expect(status.hasRequested).toBe(true);
 
-    expect(createNotification).toHaveBeenCalled();
-    const notifyCall = createNotification.mock.calls[0]?.[0];
-    expect(notifyCall?.type).toBe("COMPANY_DETAIL_REQUEST");
-    expect(notifyCall?.payload?.companyId).toBe(String(companyId));
-    expect(notifyCall?.body).toMatch(/Test Student/);
+    const doc = await CompanyStatic.findById(companyId).select("detailRequestUsers").lean();
+    expect(doc?.detailRequestUsers).toContain(studentEmail);
 
     const second = await submitCompanyDetailRequest(companyId, {
       email: studentEmail,

@@ -22,6 +22,7 @@ import {
   getPlacementHubSettingsForApi,
   updatePlacementHubOpenDreamThresholds,
 } from "../services/placementHubSettingsService.js";
+import { listAdminStudentRequests } from "../services/adminStudentRequestsService.js";
 import User1 from "../models/User1.js";
 import Student from "../models/Student.js";
 import Submission from "../models/Submission.js";
@@ -587,6 +588,16 @@ submissionModRouter.get("/submissions/:id", async (req, res) => {
 
 // Get dashboard stats (Redis-cached when REDIS_URL is set; invalidated on admin mutations)
 adminRouter.get("/stats", getAdminStats);
+
+adminRouter.get("/student-requests", async (_req, res) => {
+  try {
+    const data = await listAdminStudentRequests();
+    return res.json(data);
+  } catch (err) {
+    console.error("GET /api/admin/student-requests:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
 
 adminRouter.get("/placement-hub-settings", async (_req, res) => {
   try {
