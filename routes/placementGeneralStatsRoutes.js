@@ -1,0 +1,43 @@
+import express from "express";
+import {
+  getGeneralStatsByYear,
+  listGeneralStatsMeta,
+} from "../services/placementGeneralStatsCache.js";
+import { parseGeneralStatsYear } from "../utils/generalStatsYears.js";
+
+const placementGeneralStatsRouter = express.Router();
+
+placementGeneralStatsRouter.get("/years", async (_req, res) => {
+  try {
+    const meta = await listGeneralStatsMeta();
+    return res.json(meta);
+  } catch (error) {
+    console.error("❌ Error listing general stats years:", error?.message || error);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+placementGeneralStatsRouter.get("/:year", async (req, res) => {
+  try {
+    const year = parseGeneralStatsYear(req.params.year);
+    if (year == null) {
+      return res.status(400).json({ error: "Invalid year. Must be 2024–2028." });
+    }
+
+    const stats = await getGeneralStatsByYear(year);
+    if (!stats) {
+      return res.status(404).json({
+        error: "Stats not available",
+        message: `Placement statistics for ${year} are not available yet.`,
+        year,
+      });
+    }
+
+    return res.json(stats);
+  } catch (error) {
+    console.error("❌ Error fetching general stats:", error?.message || error);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+export default placementGeneralStatsRouter;

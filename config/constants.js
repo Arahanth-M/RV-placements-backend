@@ -76,6 +76,7 @@ export const routes = {
   NOTIFICATIONS: '/api/notifications',
   STUDENTS: '/api/students',
   PLACEMENT: '/api/placement',
+  PLACEMENT_STATS: '/api/placement-stats',
   LEADERBOARD: '/api/leaderboard',
   INTERVIEW: '/api/interview',
   RESUME: '/api/resume',

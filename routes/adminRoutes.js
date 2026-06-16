@@ -78,6 +78,16 @@ import {
   importStudentsFromXlsxBuffer,
   STUDENT_BATCH_COLUMN_GUIDE,
 } from "../services/studentBatchImportService.js";
+import PlacementGeneralStats from "../models/PlacementGeneralStats.js";
+import {
+  buildGeneralStatsFromXlsxBuffer,
+  statsDocumentFromPayload,
+} from "../services/placementGeneralStatsImportService.js";
+import {
+  invalidateGeneralStatsCache,
+  listGeneralStatsMeta,
+} from "../services/placementGeneralStatsCache.js";
+import { parseGeneralStatsYear } from "../utils/generalStatsYears.js";
 import {
   generateSubmissionAnswer,
   isSubmissionAddAnswerSupported,
@@ -146,6 +156,90 @@ adminRouter.post(
       return res.json(result);
     } catch (error) {
       console.error("❌ Admin student batch import:", error?.message || error);
+      return res.status(500).json({
+        success: false,
+        error: "Server error during import",
+      });
+    }
+  }
+);
+
+adminRouter.get("/placement-general-stats/meta", async (_req, res) => {
+  try {
+    const meta = await listGeneralStatsMeta();
+    return res.json(meta);
+  } catch (error) {
+    console.error("❌ Admin general stats meta:", error?.message || error);
+    return res.status(500).json({ success: false, error: "Server error" });
+  }
+});
+
+adminRouter.post(
+  "/placement-general-stats/import",
+  (req, res, next) => {
+    studentBatchUpload.single("file")(req, res, (err) => {
+      if (err) {
+        return res.status(400).json({
+          success: false,
+          error: err.message || "Upload failed",
+        });
+      }
+      next();
+    });
+  },
+  async (req, res) => {
+    try {
+      const year = parseGeneralStatsYear(req.body?.year);
+      if (year == null) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid year. Choose 2024, 2025, 2026, 2027, or 2028.",
+        });
+      }
+
+      if (!req.file?.buffer) {
+        return res.status(400).json({
+          success: false,
+          error: 'No file uploaded. Use the form field name "file".',
+        });
+      }
+
+      const parsed = buildGeneralStatsFromXlsxBuffer(req.file.buffer, year);
+      if (!parsed.success) {
+        return res.status(400).json({
+          success: false,
+          error: parsed.error,
+          details: parsed.details,
+        });
+      }
+
+      const uploadedBy = String(req.user?.email || "").trim();
+      const sourceFileName = String(req.file.originalname || "").trim();
+      const docPayload = statsDocumentFromPayload(
+        parsed.stats,
+        uploadedBy,
+        sourceFileName
+      );
+
+      const saved = await PlacementGeneralStats.findOneAndUpdate(
+        { year },
+        { $set: docPayload },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      ).lean();
+
+      await invalidateGeneralStatsCache(year);
+
+      return res.json({
+        success: true,
+        year,
+        totalOffers: saved.totalOffers,
+        companiesRecruited: saved.kpis?.companiesRecruited,
+        lastUpdatedAt: saved.updatedAt,
+        sourceFileName,
+        message: `General placement statistics for ${year} updated successfully.`,
+      });
+    } catch (error) {
+      console.error("❌ Admin general stats import:", error?.message || error);
       return res.status(500).json({
         success: false,
         error: "Server error during import",
