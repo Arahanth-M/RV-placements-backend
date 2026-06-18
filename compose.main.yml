@@ -28,6 +28,7 @@ services:
       - BACKEND_URL=http://localhost:7778
       - FRONTEND_URL=http://localhost:5173
       - DISABLE_EMBEDDED_INTERVIEW_WORKER=1
+      - DISABLE_EMBEDDED_NOTIFICATION_WORKER=1
       - GROQ_KEY_SLOT=admin
       - REDIS_URL=${REMOTE_REDIS_URL:-redis://host.docker.internal:6380}
     extra_hosts:

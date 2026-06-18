@@ -1,5 +1,7 @@
 import mongoose from "mongoose";
-import Notification from "../models/Notification.js";
+import Notification1, {
+  NOTIFICATIONS1_COLLECTION,
+} from "../models/Notification1.js";
 import { publishNotificationSse } from "./realtime/notificationEmitter.js";
 
 const MAX_LIMIT = 100;
@@ -26,7 +28,7 @@ function normalizeLimit(limit) {
  */
 export async function createNotification(data) {
   try {
-    const doc = await Notification.create(data);
+    const doc = await Notification1.create(data);
     try {
       await publishNotificationSse(doc.userId.toString(), {
         type: "NEW_NOTIFICATION",
@@ -78,7 +80,7 @@ export async function getUserNotifications(userId, { cursor, limit } = {}) {
     filter._id = { $lt: cursorOid };
   }
 
-  const rows = await Notification.find(filter)
+  const rows = await Notification1.find(filter)
     .select("-__v")
     .sort({ _id: -1 })
     .limit(fetchSize)
@@ -104,7 +106,7 @@ export async function getUnreadCount(userId) {
   const uid = parseObjectId(userId);
   if (!uid) return 0;
 
-  return Notification.countDocuments({
+  return Notification1.countDocuments({
     userId: uid,
     status: "unread",
   });
@@ -115,7 +117,7 @@ export async function markAsSeen(notificationId, userId) {
   const uid = parseObjectId(userId);
   if (!nid || !uid) return null;
 
-  const updated = await Notification.findOneAndUpdate(
+  const updated = await Notification1.findOneAndUpdate(
     { _id: nid, userId: uid },
     { $set: { status: "seen", seenAt: new Date() } },
     { new: true }
@@ -131,7 +133,7 @@ export async function markAllAsSeen(userId) {
   }
 
   const now = new Date();
-  const result = await Notification.updateMany(
+  const result = await Notification1.updateMany(
     { userId: uid, status: "unread" },
     { $set: { status: "seen", seenAt: now } }
   );
@@ -144,7 +146,7 @@ export async function deleteNotification(notificationId, userId) {
   const uid = parseObjectId(userId);
   if (!nid || !uid) return null;
 
-  const deleted = await Notification.findOneAndDelete({
+  const deleted = await Notification1.findOneAndDelete({
     _id: nid,
     userId: uid,
   }).lean();
@@ -158,6 +160,8 @@ export async function clearAllNotifications(userId) {
     return { deletedCount: 0 };
   }
 
-  const result = await Notification.deleteMany({ userId: uid });
+  const result = await Notification1.deleteMany({ userId: uid });
   return { deletedCount: result.deletedCount };
 }
+
+export { NOTIFICATIONS1_COLLECTION };

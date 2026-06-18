@@ -4,7 +4,7 @@ import requireAdmin from "../middleware/requireAdmin.js";
 import authJWT from "../middleware/authJWT.js";
 import validateRequest from "../middleware/validateRequest.js";
 import { eventCreateSchema, eventUpdateSchema } from "../validations/event.validation.js";
-import Event from "../models/Event.js";
+import Event1 from "../models/Event1.js";
 import "../models/User1.js";
 import Student from "../models/Student.js";
 import {
@@ -17,6 +17,8 @@ import {
   loadEventsCatalogFromDb,
   invalidateEventCatalogCache,
 } from "../services/eventCatalogCache.js";
+import { dispatchEvent } from "../services/events/eventDispatcher.js";
+import { EVENT_TYPES } from "../services/events/eventTypes.js";
 
 const eventRouter = express.Router();
 
@@ -66,7 +68,7 @@ eventRouter.get("/me/registrations", authJWT, async (req, res) => {
 // Get single event by ID (must stay after /me/registrations so "me" is not parsed as :id)
 eventRouter.get("/:id", async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id)
+    const event = await Event1.findById(req.params.id)
       .populate("createdBy", "username email")
       .select("-__v");
 
@@ -100,7 +102,7 @@ eventRouter.post("/:id/register", authJWT, async (req, res) => {
       return res.status(400).json({ error: "No email on this account." });
     }
 
-    const event = await Event.findById(id).select("_id lastDateToRegister").lean();
+    const event = await Event1.findById(id).select("_id lastDateToRegister").lean();
     if (!event) {
       return res.status(404).json({ error: "Event not found" });
     }
@@ -155,7 +157,7 @@ eventRouter.post("/", authJWT, requireAdmin, validateRequest(eventCreateSchema),
       return res.status(400).json({ error: "Invalid date format for lastDateToRegister" });
     }
 
-    const event = new Event({
+    const event = new Event1({
       title,
       url,
       lastDateToRegister: registrationDate,
@@ -166,11 +168,16 @@ eventRouter.post("/", authJWT, requireAdmin, validateRequest(eventCreateSchema),
 
     await event.save();
 
-    const populatedEvent = await Event.findById(event._id)
+    const populatedEvent = await Event1.findById(event._id)
       .populate("createdBy", "username email")
       .select("-__v");
 
     await invalidateEventCatalogCache();
+
+    dispatchEvent(EVENT_TYPES.ANNOUNCEMENT_CREATED, {
+      announcementId: event._id,
+      title: event.title,
+    });
 
     res.status(201).json(populatedEvent);
   } catch (error) {
@@ -195,7 +202,7 @@ eventRouter.put("/:id", authJWT, requireAdmin, validateRequest(eventUpdateSchema
   try {
     const { title, url, lastDateToRegister, type, organizer } = req.body;
 
-    const event = await Event.findById(req.params.id);
+    const event = await Event1.findById(req.params.id);
 
     if (!event) {
       return res.status(404).json({ error: "Event not found" });
@@ -216,7 +223,7 @@ eventRouter.put("/:id", authJWT, requireAdmin, validateRequest(eventUpdateSchema
 
     await event.save();
 
-    const populatedEvent = await Event.findById(event._id)
+    const populatedEvent = await Event1.findById(event._id)
       .populate("createdBy", "username email")
       .select("-__v");
 
@@ -243,13 +250,13 @@ eventRouter.put("/:id", authJWT, requireAdmin, validateRequest(eventUpdateSchema
 
 eventRouter.delete("/:id", authJWT, requireAdmin, async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id);
+    const event = await Event1.findById(req.params.id);
 
     if (!event) {
       return res.status(404).json({ error: "Event not found" });
     }
 
-    await Event.findByIdAndDelete(req.params.id);
+    await Event1.findByIdAndDelete(req.params.id);
 
     await invalidateEventCatalogCache();
 

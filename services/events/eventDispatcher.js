@@ -62,10 +62,72 @@ async function handleCompanyApproved(payload) {
   void createdCount;
 }
 
+async function processAnnouncementBatch(batch, announcementId, title) {
+  const announcementIdStr = String(announcementId);
+  const displayTitle =
+    (title && String(title).trim()) || "New announcement";
+  const results = await Promise.all(
+    batch.map((user) => {
+      const eventId = `ANNOUNCEMENT_CREATED_${announcementIdStr}_${String(user._id)}`;
+      return enqueueNotificationJob({
+        userId: user._id,
+        type: EVENT_TYPES.ANNOUNCEMENT_CREATED,
+        title: displayTitle,
+        body: "A new announcement has been posted. Please check the Announcements page.",
+        payload: { announcementId: announcementIdStr, title: displayTitle },
+        eventId,
+      });
+    })
+  );
+
+  return results.filter(Boolean).length;
+}
+
+async function handleAnnouncementCreated(payload) {
+  const { announcementId, title } = payload || {};
+  if (!announcementId) return;
+
+  const cursor = User1.find({})
+    .select("_id")
+    .lean()
+    .cursor();
+
+  const batch = [];
+  let createdCount = 0;
+
+  try {
+    for await (const user of cursor) {
+      batch.push(user);
+
+      if (batch.length === BATCH_SIZE) {
+        createdCount += await processAnnouncementBatch(batch, announcementId, title);
+        batch.length = 0;
+
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    }
+
+    if (batch.length > 0) {
+      createdCount += await processAnnouncementBatch(batch, announcementId, title);
+    }
+  } finally {
+    if (typeof cursor.close === "function") {
+      await cursor.close().catch(() => {});
+    }
+  }
+
+  void createdCount;
+}
+
 export function dispatchEvent(eventType, payload) {
   switch (eventType) {
     case EVENT_TYPES.COMPANY_APPROVED:
       handleCompanyApproved(payload).catch((err) =>
+        console.error("EVENT_HANDLER_FAILED", err)
+      );
+      break;
+    case EVENT_TYPES.ANNOUNCEMENT_CREATED:
+      handleAnnouncementCreated(payload).catch((err) =>
         console.error("EVENT_HANDLER_FAILED", err)
       );
       break;

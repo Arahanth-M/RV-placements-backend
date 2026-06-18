@@ -1,11 +1,12 @@
 # =============================================================================
 # Server 2 (AI Interview Infra) — OWNS THE ONLY REDIS INSTANCE
 # =============================================================================
-# Services: redis, backend-interview, interview-worker, execution-worker
+# Services: redis, backend-interview, interview-worker, notification-worker, execution-worker
 # No nginx, frontend, or backend-main on this host.
 #
 # All BullMQ queues, caches, leaderboard stats, and notification SSE pub/sub
 # share this single Redis. backend-main (compose.main.yml) connects here remotely.
+# notification-worker processes the notificationQueue (company approvals, announcements).
 #
 # -----------------------------------------------------------------------------
 # LOCAL TEST FLOW (same machine, simulates production topology)
@@ -106,6 +107,22 @@ services:
       - interview-network
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+
+  notification-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["node", "workers/notificationWorker.js"]
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - interview-network
 
   execution-worker:
     container_name: rvp-execution-worker

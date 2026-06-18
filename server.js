@@ -168,17 +168,32 @@ if (process.env.NODE_ENV !== "test") {
     );
 
     const skipEmbeddedWorker = process.env.DISABLE_EMBEDDED_INTERVIEW_WORKER === "1";
+    const skipEmbeddedNotificationWorker =
+      process.env.DISABLE_EMBEDDED_NOTIFICATION_WORKER === "1";
 
     if (skipEmbeddedWorker) {
       console.log("[interview] Embedded BullMQ worker disabled.");
-      return;
+    } else {
+      try {
+        await import("./workers/interviewWorker.js");
+        console.log("[interview] BullMQ interview worker started.");
+      } catch (err) {
+        console.error("[interview] Failed to start embedded worker:", err?.message || err);
+      }
     }
 
-    try {
-      await import("./workers/interviewWorker.js");
-      console.log("[interview] BullMQ interview worker started.");
-    } catch (err) {
-      console.error("[interview] Failed to start embedded worker:", err?.message || err);
+    if (skipEmbeddedNotificationWorker) {
+      console.log("[notifications] Embedded BullMQ worker disabled.");
+    } else {
+      try {
+        await import("./workers/notificationWorker.js");
+        console.log("[notifications] BullMQ notification worker started.");
+      } catch (err) {
+        console.error(
+          "[notifications] Failed to start embedded worker:",
+          err?.message || err
+        );
+      }
     }
   });
 }

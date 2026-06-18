@@ -63,6 +63,23 @@ if (process.env.NODE_ENV !== "test") {
     app.listen(port, () => {
       console.log(`[backend-main] listening on port ${port}`);
     });
+
+    const skipEmbeddedNotificationWorker =
+      process.env.DISABLE_EMBEDDED_NOTIFICATION_WORKER === "1";
+
+    if (skipEmbeddedNotificationWorker) {
+      console.log("[notifications] Embedded BullMQ worker disabled.");
+    } else {
+      try {
+        await import("./workers/notificationWorker.js");
+        console.log("[notifications] BullMQ notification worker started.");
+      } catch (err) {
+        console.error(
+          "[notifications] Failed to start embedded worker:",
+          err?.message || err
+        );
+      }
+    }
   });
 }
 

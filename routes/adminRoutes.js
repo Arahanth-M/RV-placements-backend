@@ -28,7 +28,6 @@ import Student from "../models/Student.js";
 import Submission from "../models/Submission.js";
 import CompanyStatic from "../models/CompanyStatic.js";
 import CompanyVisit from "../models/CompanyVisit.js";
-import Notification from "../models/Notification.js";
 import { getAdminStats } from "../controllers/adminStatsController.js";
 import { invalidateAdminDashboardStatsCache } from "../services/adminDashboardStatsCache.js";
 import {

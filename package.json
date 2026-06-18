@@ -9,6 +9,7 @@
     "start:interview": "node server-interview.js",
     "dev": "nodemon server.js",
     "worker:interview": "node workers/interviewWorker.js",
+    "worker:notification": "node workers/notificationWorker.js",
     "worker:execution": "node workers/executionWorker.js",
     "score:calibrate": "node scripts/calibrateInterviewScoring.js",
     "score:calibrate:live": "node scripts/calibrateInterviewScoring.js --live",

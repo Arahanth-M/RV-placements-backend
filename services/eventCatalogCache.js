@@ -5,13 +5,13 @@
  * - Admin POST/PUT/DELETE invalidate so the next list fetch is fresh.
  * TTL is a safety net if invalidation is missed.
  */
-import Event from "../models/Event.js";
+import Event1 from "../models/Event1.js";
 import "../models/User1.js";
 import { redisUrl } from "../src/utils/redisClient.js";
 import { getJSON, setJSON, deleteKey } from "../src/utils/redisHelpers.js";
 
-/** Bump when GET /api/events response shape changes. */
-const CACHE_KEY = "rv:events:catalog:v1";
+/** Bump when GET /api/events response shape or backing collection changes. */
+const CACHE_KEY = "rv:events:catalog:v2";
 /** Seconds; aligns with other student/event caches */
 const TTL_SECONDS = 900;
 
@@ -20,7 +20,7 @@ const TTL_SECONDS = 900;
  * @returns {Promise<object[]>}
  */
 export async function loadEventsCatalogFromDb() {
-  return Event.find()
+  return Event1.find()
     .sort({ lastDateToRegister: 1, createdAt: -1 })
     .populate("createdBy", "username email")
     .select("-__v")
