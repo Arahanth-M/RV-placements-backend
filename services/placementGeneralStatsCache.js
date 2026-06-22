@@ -9,8 +9,9 @@ import {
   DEFAULT_GENERAL_STATS_YEAR,
 } from "../utils/generalStatsYears.js";
 import { serializeGeneralStatsDoc } from "./placementGeneralStatsImportService.js";
+import { attachBusinessModelStats } from "./placementBusinessModelStatsService.js";
 
-const KEY_PREFIX = "rv:placement-general-stats:v1:";
+const KEY_PREFIX = "rv:placement-general-stats:v2:";
 const TTL_SECONDS = 3600;
 
 function cacheKeyForYear(year) {
@@ -38,25 +39,39 @@ export async function getGeneralStatsByYearFromDb(year) {
   return serializeGeneralStatsDoc(doc);
 }
 
+function stripCachedBusinessModelFields(stats) {
+  if (!stats || typeof stats !== "object") return stats;
+  const {
+    businessModelSummary: _a,
+    businessModelByDepartment: _b,
+    businessModelMeta: _c,
+    byBusinessModel: _d,
+    ...base
+  } = stats;
+  return base;
+}
+
 /**
  * @param {number} year
  */
 export async function getGeneralStatsByYear(year) {
+  let base;
   if (!redisUrl) {
-    return getGeneralStatsByYearFromDb(year);
+    base = await getGeneralStatsByYearFromDb(year);
+  } else {
+    const key = cacheKeyForYear(year);
+    const cached = await getJSON(key);
+    if (isValidStatsPayload(cached)) {
+      base = stripCachedBusinessModelFields(cached);
+    } else {
+      base = await getGeneralStatsByYearFromDb(year);
+      if (base) {
+        await setJSON(key, base, TTL_SECONDS);
+      }
+    }
   }
 
-  const key = cacheKeyForYear(year);
-  const cached = await getJSON(key);
-  if (isValidStatsPayload(cached)) {
-    return cached;
-  }
-
-  const fresh = await getGeneralStatsByYearFromDb(year);
-  if (fresh) {
-    await setJSON(key, fresh, TTL_SECONDS);
-  }
-  return fresh;
+  return base ? attachBusinessModelStats(base) : null;
 }
 
 export async function listGeneralStatsMeta() {
