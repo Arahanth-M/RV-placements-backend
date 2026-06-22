@@ -37,7 +37,7 @@ import {
   normalizePlacementClusterQuery,
   placementHubClusterFromPpoBranchCode,
 } from "../utils/placementCluster.js";
-import { PPO_BRANCH_CODES, PPO_BRANCH_CODES_ARRAY } from "../utils/ppoBranchCodes.js";
+import { PPO_BRANCH_CODES, PPO_BRANCH_CODES_ARRAY, isValidPpoBranchCode, normalizePpoBranchCode } from "../utils/ppoBranchCodes.js";
 import escapeRegexLiteral from "../utils/regexEscape.js";
 import { invalidateCompanyDetailCache } from "./companyDetailCache.js";
 import {
@@ -1024,14 +1024,17 @@ function buildPlacementBranchStatsByYearFromVisits(visits, placementContextRaw =
     /** @type {Map<string, { gotIn: number, converted: number, convertedNotApplicable: boolean }>} */
     const byCode = new Map();
     for (const row of rawRows) {
-      const bc = String(row?.branchCode || "")
-        .trim()
-        .toLowerCase();
-      if (!PPO_BRANCH_CODES.has(bc)) continue;
+      const bc = normalizePpoBranchCode(row?.branchCode);
+      if (!isValidPpoBranchCode(bc)) continue;
+      const prev = byCode.get(bc) || {
+        gotIn: 0,
+        converted: 0,
+        convertedNotApplicable: false,
+      };
       byCode.set(bc, {
-        gotIn: Math.max(0, Number(row?.gotIn) || 0),
-        converted: Math.max(0, Number(row?.converted) || 0),
-        convertedNotApplicable: Boolean(row?.convertedNotApplicable),
+        gotIn: prev.gotIn + Math.max(0, Number(row?.gotIn) || 0),
+        converted: prev.converted + Math.max(0, Number(row?.converted) || 0),
+        convertedNotApplicable: prev.convertedNotApplicable || Boolean(row?.convertedNotApplicable),
       });
     }
     out[year] = PPO_BRANCH_CODES_ARRAY.map((branchCode) => {
@@ -3027,8 +3030,8 @@ export function shouldIncrementPpoConvertedForSpcConversion(
   mergedVisitLegacy,
   branchCodeRaw
 ) {
-  const code = String(branchCodeRaw || "").trim().toLowerCase();
-  if (!PPO_BRANCH_CODES.has(code)) return false;
+  const code = normalizePpoBranchCode(branchCode);
+  if (!isValidPpoBranchCode(code)) return false;
   if (!String(existingPlacement?.ppoConversionType || "").trim()) return true;
 
   const rows = Array.isArray(mergedVisitLegacy?.ppoBranchStats)
@@ -3061,8 +3064,8 @@ export async function incrementPpoBranchGotInForAnchoredVisit(
   convertedDelta = 0,
   options = {}
 ) {
-  const code = String(branchCode || "").trim().toLowerCase();
-  if (!PPO_BRANCH_CODES.has(code)) {
+  const code = normalizePpoBranchCode(branchCode);
+  if (!isValidPpoBranchCode(code)) {
     return { ok: false, reason: "invalid_branch" };
   }
   const cid = toObjectId(companyId);
@@ -3100,8 +3103,8 @@ export async function incrementPpoBranchGotInForAnchoredVisit(
   /** @type {Map<string, { branchCode: string, gotIn: number, converted: number, convertedNotApplicable: boolean }>} */
   const byCode = new Map();
   for (const row of rawRows) {
-    const bc = String(row?.branchCode || "").trim().toLowerCase();
-    if (!PPO_BRANCH_CODES.has(bc)) continue;
+    const bc = normalizePpoBranchCode(row?.branchCode);
+    if (!isValidPpoBranchCode(bc)) continue;
     const gotIn = Math.max(0, Number.parseInt(String(row?.gotIn ?? 0), 10)) || 0;
     const converted = Math.max(0, Number.parseInt(String(row?.converted ?? 0), 10)) || 0;
     const convertedNotApplicable = Boolean(row?.convertedNotApplicable);
@@ -3162,8 +3165,8 @@ export async function incrementPlacementAndPpoConvertedForSpcConversionDetails(
   placementListContextRaw = null,
   options = {}
 ) {
-  const code = String(branchCode || "").trim().toLowerCase();
-  if (!PPO_BRANCH_CODES.has(code)) {
+  const code = normalizePpoBranchCode(branchCode);
+  if (!isValidPpoBranchCode(code)) {
     return { ok: false, reason: "invalid_branch" };
   }
   const cid = toObjectId(companyId);
@@ -3208,8 +3211,8 @@ export async function incrementPlacementAndPpoConvertedForSpcConversionDetails(
   /** @type {Map<string, { branchCode: string, gotIn: number }>} */
   const placeByCode = new Map();
   for (const row of rawPlacement) {
-    const bc = String(row?.branchCode || "").trim().toLowerCase();
-    if (!PPO_BRANCH_CODES.has(bc)) continue;
+    const bc = normalizePpoBranchCode(row?.branchCode);
+    if (!isValidPpoBranchCode(bc)) continue;
     const gotIn = Math.max(0, Number.parseInt(String(row?.gotIn ?? 0), 10)) || 0;
     placeByCode.set(bc, { branchCode: bc, gotIn });
   }
@@ -3225,8 +3228,8 @@ export async function incrementPlacementAndPpoConvertedForSpcConversionDetails(
   /** @type {Map<string, { branchCode: string, gotIn: number, converted: number, convertedNotApplicable: boolean }>} */
   const ppoByCode = new Map();
   for (const row of rawPpo) {
-    const bc = String(row?.branchCode || "").trim().toLowerCase();
-    if (!PPO_BRANCH_CODES.has(bc)) continue;
+    const bc = normalizePpoBranchCode(row?.branchCode);
+    if (!isValidPpoBranchCode(bc)) continue;
     const gotIn = Math.max(0, Number.parseInt(String(row?.gotIn ?? 0), 10)) || 0;
     const converted = Math.max(0, Number.parseInt(String(row?.converted ?? 0), 10)) || 0;
     const convertedNotApplicable = Boolean(row?.convertedNotApplicable);
@@ -3278,8 +3281,8 @@ export async function incrementPlacementGotInBranchForAnchoredVisit(
   placementListContextRaw = null,
   options = {}
 ) {
-  const code = String(branchCode || "").trim().toLowerCase();
-  if (!PPO_BRANCH_CODES.has(code)) {
+  const code = normalizePpoBranchCode(branchCode);
+  if (!isValidPpoBranchCode(code)) {
     return { ok: false, reason: "invalid_branch" };
   }
   const cid = toObjectId(companyId);
@@ -3314,8 +3317,8 @@ export async function incrementPlacementGotInBranchForAnchoredVisit(
   /** @type {Map<string, { branchCode: string, gotIn: number }>} */
   const byCode = new Map();
   for (const row of rawRows) {
-    const bc = String(row?.branchCode || "").trim().toLowerCase();
-    if (!PPO_BRANCH_CODES.has(bc)) continue;
+    const bc = normalizePpoBranchCode(row?.branchCode);
+    if (!isValidPpoBranchCode(bc)) continue;
     const gotIn = Math.max(0, Number.parseInt(String(row?.gotIn ?? 0), 10)) || 0;
     byCode.set(bc, { branchCode: bc, gotIn });
   }

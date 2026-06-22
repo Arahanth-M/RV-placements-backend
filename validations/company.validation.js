@@ -1,6 +1,28 @@
 import Joi from "joi";
 import { COMPANY_VISIT_CLUSTER_CANONICAL } from "../utils/companyVisitClusterCanonical.js";
-import { PPO_BRANCH_CODES_ARRAY } from "../utils/ppoBranchCodes.js";
+import {
+  PPO_BRANCH_CODES,
+  PPO_BRANCH_CODES_ARRAY,
+  PPO_BRANCH_LEGACY_ALIASES,
+  normalizePpoBranchCode,
+} from "../utils/ppoBranchCodes.js";
+
+const acceptedBranchInputCodes = [
+  ...PPO_BRANCH_CODES_ARRAY,
+  ...Object.keys(PPO_BRANCH_LEGACY_ALIASES),
+];
+
+const branchCodeField = Joi.string()
+  .trim()
+  .lowercase()
+  .valid(...acceptedBranchInputCodes)
+  .custom((value, helpers) => {
+    const normalized = normalizePpoBranchCode(value);
+    if (!PPO_BRANCH_CODES.has(normalized)) {
+      return helpers.error("any.invalid");
+    }
+    return normalized;
+  });
 
 const t = (max) => Joi.string().trim().max(max);
 
@@ -71,11 +93,7 @@ const optionalCompanyBody = {
   ppoBranchStats: Joi.array()
     .items(
       Joi.object({
-        branchCode: Joi.string()
-          .trim()
-          .lowercase()
-          .valid(...PPO_BRANCH_CODES_ARRAY)
-          .required(),
+        branchCode: branchCodeField.required(),
         gotIn: Joi.number().integer().min(0).required(),
         converted: Joi.number().integer().min(0).required(),
       }).unknown(false)
