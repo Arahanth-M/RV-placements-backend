@@ -672,7 +672,82 @@ export const generateRoundFeedback = async (sessionId, roundNumber) => {
 };
 
 const ANALYTICS_SESSION_SELECT =
-  "companyId companyName finalReport.overallScore rounds.type rounds.questions.score history.score updatedAt state";
+  "companyId companyName role totalRounds roundsPlan finalReport.overallScore finalReport.readinessScore finalReport.readinessLabel finalReport.verdict rounds.type rounds.questions.score history.score history.round updatedAt state";
+
+function collectSessionRoundTypes(session, rounds) {
+  const fromRounds = rounds
+    .map((round) => String(round?.type || "").trim())
+    .filter(Boolean);
+  if (fromRounds.length > 0) {
+    return [...new Set(fromRounds)];
+  }
+  const plan = Array.isArray(session?.roundsPlan) ? session.roundsPlan : [];
+  const fromPlan = plan.map((entry) => String(entry || "").trim()).filter(Boolean);
+  if (fromPlan.length > 0) {
+    return [...new Set(fromPlan)];
+  }
+  const history = Array.isArray(session?.history) ? session.history : [];
+  return [
+    ...new Set(
+      history.map((item) => String(item?.round || "").trim()).filter(Boolean)
+    ),
+  ];
+}
+
+function countSessionQuestions(session, rounds) {
+  let count = 0;
+  for (const round of rounds) {
+    for (const q of round.questions || []) {
+      const s = Number(q?.score);
+      if (Number.isFinite(s)) count += 1;
+    }
+  }
+  if (count > 0) return count;
+
+  const history = Array.isArray(session?.history) ? session.history : [];
+  for (const item of history) {
+    const s = Number(item?.score);
+    if (Number.isFinite(s)) count += 1;
+  }
+  if (count > 0) return count;
+  return history.length > 0 ? history.length : null;
+}
+
+function resolveSessionTotalRounds(session, rounds) {
+  const declared = Number(session?.totalRounds);
+  if (Number.isFinite(declared) && declared > 0) return declared;
+  if (rounds.length > 0) return rounds.length;
+  const plan = Array.isArray(session?.roundsPlan) ? session.roundsPlan : [];
+  if (plan.length > 0) return plan.length;
+  const types = collectSessionRoundTypes(session, rounds);
+  return types.length > 0 ? types.length : null;
+}
+
+function resolveSessionReadiness(session, sessionScore) {
+  const fr = session?.finalReport;
+  const readinessScore = Number(fr?.readinessScore);
+  const readinessLabel = String(fr?.readinessLabel || "").trim();
+  if (Number.isFinite(readinessScore) || readinessLabel) {
+    return {
+      readinessScore: Number.isFinite(readinessScore)
+        ? Math.round(readinessScore)
+        : null,
+      readinessLabel: readinessLabel || null,
+    };
+  }
+  if (sessionScore == null) {
+    return { readinessScore: null, readinessLabel: null };
+  }
+  return {
+    readinessScore: Math.max(0, Math.min(100, Math.round(sessionScore * 10))),
+    readinessLabel:
+      sessionScore > 8
+        ? "Ready"
+        : sessionScore >= 6
+          ? "Needs improvement"
+          : "Not ready",
+  };
+}
 
 const resolveAnalyticsCompanyName = (session, nameById) => {
   const directName =
@@ -702,6 +777,8 @@ export const buildUserInterviewAnalytics = async (userId) => {
 
   const skillTotals = {};
   const progress = [];
+  const companyTotals = {};
+  const readinessRows = [];
 
   for (const session of sessions) {
     const rounds = Array.isArray(session.rounds) ? session.rounds : [];
@@ -747,21 +824,82 @@ export const buildUserInterviewAnalytics = async (userId) => {
     }
 
     if (sessionScore != null) {
+      const roundedScore = Math.round(sessionScore * 10) / 10;
+      const roundTypes = collectSessionRoundTypes(session, rounds);
+      const questionsAnswered = countSessionQuestions(session, rounds);
+      const totalRounds = resolveSessionTotalRounds(session, rounds);
+      const { readinessScore, readinessLabel } = resolveSessionReadiness(
+        session,
+        roundedScore
+      );
+
       progress.push({
-        score: Math.round(sessionScore * 10) / 10,
+        score: roundedScore,
         companyName,
+        role: String(session.role || "").trim() || null,
+        totalRounds,
+        roundTypes,
+        questionsAnswered,
+        readinessScore,
+        readinessLabel,
       });
+
+      if (!companyTotals[companyName]) {
+        companyTotals[companyName] = { attempts: 0, sum: 0, best: 0 };
+      }
+      const bucket = companyTotals[companyName];
+      bucket.attempts += 1;
+      bucket.sum += roundedScore;
+      bucket.best = Math.max(bucket.best, roundedScore);
+
+      if (
+        fr &&
+        (Number.isFinite(Number(fr.readinessScore)) ||
+          String(fr.readinessLabel || "").trim())
+      ) {
+        readinessRows.push({
+          companyName,
+          overallScore: roundedScore,
+          readinessScore: Number.isFinite(Number(fr.readinessScore))
+            ? Math.round(Number(fr.readinessScore))
+            : null,
+          readinessLabel: String(fr.readinessLabel || "").trim() || null,
+        });
+      }
     }
   }
 
   const skillBreakdown = {};
+  const roundTypeDetail = [];
   for (const [type, { sum, count }] of Object.entries(skillTotals)) {
     if (count > 0) {
-      skillBreakdown[type] = Math.round((sum / count) * 10) / 10;
+      const avgScore = Math.round((sum / count) * 10) / 10;
+      skillBreakdown[type] = avgScore;
+      roundTypeDetail.push({
+        type,
+        avgScore,
+        questionsAnswered: count,
+      });
     }
   }
+  roundTypeDetail.sort((a, b) => b.avgScore - a.avgScore || a.type.localeCompare(b.type));
 
-  return { skillBreakdown, progress };
+  const companyBreakdown = Object.entries(companyTotals)
+    .map(([companyName, value]) => ({
+      companyName,
+      attempts: value.attempts,
+      avgScore: Math.round((value.sum / value.attempts) * 10) / 10,
+      bestScore: value.best,
+    }))
+    .sort((a, b) => b.attempts - a.attempts || b.avgScore - a.avgScore);
+
+  return {
+    skillBreakdown,
+    progress,
+    companyBreakdown,
+    roundTypeDetail,
+    readinessRows,
+  };
 };
 
 /** Read-through Redis cache for analytics (5 min TTL). */

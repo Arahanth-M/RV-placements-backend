@@ -264,7 +264,7 @@ function parseDepartmentStrengthFromWorkbook(workbook, deptColIndexes) {
     const headers = Array.isArray(matrix[0])
       ? matrix[0].map((h) => String(h ?? "").trim().toLowerCase())
       : [];
-    const deptIdx = headers.findIndex((h) => h === "department" || h === "branch" || h === "dept");
+    const deptIdx = headers.findIndex((h) => h === "department" || h === "branch" || h === "program" || h === "dept");
     const studentsIdx = headers.findIndex(
       (h) =>
         h === "students" ||

@@ -1,6 +1,28 @@
 import Joi from "joi";
 import { COMPANY_DETAIL_VISIT_YEARS } from "../utils/placementYears.js";
-import { PPO_BRANCH_CODES_ARRAY } from "../utils/ppoBranchCodes.js";
+import {
+  PPO_BRANCH_CODES,
+  PPO_BRANCH_CODES_ARRAY,
+  PPO_BRANCH_LEGACY_ALIASES,
+  normalizePpoBranchCode,
+} from "../utils/ppoBranchCodes.js";
+
+const acceptedBranchInputCodes = [
+  ...PPO_BRANCH_CODES_ARRAY,
+  ...Object.keys(PPO_BRANCH_LEGACY_ALIASES),
+];
+
+const branchCodeField = Joi.string()
+  .trim()
+  .lowercase()
+  .valid(...acceptedBranchInputCodes)
+  .custom((value, helpers) => {
+    const normalized = normalizePpoBranchCode(value);
+    if (!PPO_BRANCH_CODES.has(normalized)) {
+      return helpers.error("any.invalid");
+    }
+    return normalized;
+  });
 
 const stringArray = Joi.array().items(Joi.string().max(50000)).max(500);
 
@@ -40,11 +62,7 @@ export const spcConversionDetailsSchema = Joi.object({
     .integer()
     .valid(...COMPANY_DETAIL_VISIT_YEARS)
     .required(),
-  branchCode: Joi.string()
-    .trim()
-    .lowercase()
-    .valid(...PPO_BRANCH_CODES_ARRAY)
-    .required(),
+  branchCode: branchCodeField.required(),
   email: Joi.string().trim().email().required(),
   name: Joi.string().trim().min(1).required(),
   usn: Joi.string().trim().min(1).required(),
@@ -74,11 +92,7 @@ export const spcCompanyRolesQuerySchema = Joi.object({
     .valid(...COMPANY_DETAIL_VISIT_YEARS)
     .required(),
   placementContext: Joi.string().trim().max(80).allow("").optional(),
-  branchCode: Joi.string()
-    .trim()
-    .lowercase()
-    .valid(...PPO_BRANCH_CODES_ARRAY, "")
-    .optional(),
+  branchCode: branchCodeField.optional().allow(""),
 }).unknown(false);
 
 /** SPC "Add placement data" — optional `companyId` + `placementYear` + `branchCode` to bump visit got-in counts. */
@@ -100,11 +114,7 @@ export const spcSubmitPlacementSchema = Joi.object({
     .integer()
     .valid(...COMPANY_DETAIL_VISIT_YEARS)
     .required(),
-  branchCode: Joi.string()
-    .trim()
-    .lowercase()
-    .valid(...PPO_BRANCH_CODES_ARRAY)
-    .required(),
+  branchCode: branchCodeField.required(),
   placementContext: Joi.string().trim().max(80).allow("").optional(),
   placementListContext: Joi.string().trim().max(80).allow("").optional(),
 })
@@ -143,11 +153,7 @@ export const spcUpdatePlacementSchema = Joi.object({
     .valid(...COMPANY_DETAIL_VISIT_YEARS)
     .allow(null)
     .optional(),
-  branchCode: Joi.string()
-    .trim()
-    .lowercase()
-    .valid(...PPO_BRANCH_CODES_ARRAY, "")
-    .optional(),
+  branchCode: branchCodeField.optional().allow(""),
   role: Joi.string().trim().max(200).allow("").optional(),
   stipend: Joi.string().trim().allow("").optional(),
   base: Joi.string().trim().allow("").optional(),

@@ -16,7 +16,7 @@ import {
   shouldIncrementPpoConvertedForSpcConversion,
 } from "../services/companyService.js";
 import { COMPANY_DETAIL_VISIT_YEARS } from "../utils/placementYears.js";
-import { PPO_BRANCH_CODES } from "../utils/ppoBranchCodes.js";
+import { PPO_BRANCH_CODES, isValidPpoBranchCode, normalizePpoBranchCode } from "../utils/ppoBranchCodes.js";
 import User1 from "../models/User1.js";
 import authJWT from "../middleware/authJWT.js";
 import requireSPC from "../middleware/requireSPC.js";
@@ -895,7 +895,7 @@ router.post(
     const roleRaw = String(req.body?.role ?? "").trim();
     const companyIdRaw = String(req.body?.companyId || "").trim();
     const placementYearRaw = req.body?.placementYear;
-    const branchCodeRaw = String(req.body?.branchCode || "").trim().toLowerCase();
+    const branchCodeRaw = normalizePpoBranchCode(req.body?.branchCode);
     const placementCtxForVisit =
       String(req.body?.placementContext ?? req.body?.placementListContext ?? "")
         .trim() || null;
@@ -908,13 +908,13 @@ router.post(
     const yearOk =
       Number.isInteger(placementYearNum) &&
       COMPANY_DETAIL_VISIT_YEARS.includes(placementYearNum);
-    const branchOk = Boolean(branchCodeRaw && PPO_BRANCH_CODES.has(branchCodeRaw));
+    const branchOk = Boolean(branchCodeRaw && isValidPpoBranchCode(branchCodeRaw));
     const wantsVisitBump = Boolean(cid && yearOk && branchOk);
 
     if (!cid || !yearOk || !branchOk) {
       return res.status(400).json({
         message:
-          "Select a company from the suggestions list with a valid placement year and branch.",
+          "Select a company from the suggestions list with a valid placement year and program.",
       });
     }
 

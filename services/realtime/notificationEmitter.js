@@ -14,7 +14,22 @@ export function subscribe(userId, res) {
 
   clients.get(key).add(res);
 
+  try {
+    res.write(": connected\n\n");
+  } catch {
+    // Client already gone
+  }
+
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(": heartbeat\n\n");
+    } catch {
+      clearInterval(heartbeat);
+    }
+  }, 25_000);
+
   const onClose = () => {
+    clearInterval(heartbeat);
     const set = clients.get(key);
     if (!set) return;
     set.delete(res);

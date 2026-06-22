@@ -15,7 +15,8 @@ const summaryKey = (userId, page, limit) =>
 
 const detailKey = (sessionId) => `rvp:interview:detail:${String(sessionId)}`;
 
-const analyticsKey = (userId) => `rvp:interview:analytics:${String(userId)}`;
+// v2: progress rows include role, rounds, round types, questions, readiness
+const analyticsKey = (userId) => `rvp:interview:analytics:v2:${String(userId)}`;
 
 const processingKey = (sessionId) => `rvp:interview:processing:${String(sessionId)}`;
 

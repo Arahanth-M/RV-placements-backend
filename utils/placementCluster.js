@@ -42,16 +42,16 @@ export function normalizePlacementClusterQuery(raw) {
  * @param {unknown} raw — visit.cluster on company_visits
  * @returns {string}
  */
-/** Map SPC / PPO student branch code → placement hub key (cs | ec | me | chem). */
+/** Map SPC / PPO student program code → placement hub key (cs | ec | me | chem). */
 export function placementHubClusterFromPpoBranchCode(branchCodeRaw) {
   const bc = String(branchCodeRaw ?? "")
     .trim()
     .toLowerCase();
   if (!bc) return null;
-  if (["cd", "cy", "ise", "cse", "aiml"].includes(bc)) return "cs";
-  if (["ece", "ete", "eie", "eee"].includes(bc)) return "ec";
-  if (["ase", "iem", "me"].includes(bc)) return "me";
-  if (["bt", "ch", "civil"].includes(bc)) return "chem";
+  if (["cd", "cy", "cs", "is", "ai", "ise", "cse", "aiml"].includes(bc)) return "cs";
+  if (["ec", "et", "ei", "ee", "ece", "ete", "eie", "eee"].includes(bc)) return "ec";
+  if (["as", "im", "me", "ase", "iem"].includes(bc)) return "me";
+  if (["bt", "ch", "cv", "civil"].includes(bc)) return "chem";
   return null;
 }
 

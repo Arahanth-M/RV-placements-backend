@@ -73,7 +73,7 @@ import {
 import { invalidateLeaderboardCache } from "./leaderboardRoutes.js";
 import { dispatchEvent } from "../services/events/eventDispatcher.js";
 import { EVENT_TYPES } from "../services/events/eventTypes.js";
-import { PPO_BRANCH_CODES, PPO_BRANCH_CODES_ARRAY } from "../utils/ppoBranchCodes.js";
+import { PPO_BRANCH_CODES, PPO_BRANCH_CODES_ARRAY, normalizePpoBranchCode } from "../utils/ppoBranchCodes.js";
 import {
   importStudentsFromXlsxBuffer,
   STUDENT_BATCH_COLUMN_GUIDE,
@@ -1579,19 +1579,19 @@ adminRouter.put(
       const normalized = [];
       const seen = new Set();
       for (const row of ppoBranchStats) {
-        const code = String(row?.branchCode || "").trim().toLowerCase();
+        const code = normalizePpoBranchCode(row?.branchCode);
         if (!PPO_BRANCH_CODES.has(code)) {
-          return res.status(400).json({ error: `Invalid branch code: ${code}` });
+          return res.status(400).json({ error: `Invalid program code: ${code}` });
         }
         if (seen.has(code)) {
-          return res.status(400).json({ error: `Duplicate branch code: ${code}` });
+          return res.status(400).json({ error: `Duplicate program code: ${code}` });
         }
         seen.add(code);
         const gotIn = Number.parseInt(String(row?.gotIn ?? 0), 10);
         const converted = Number.parseInt(String(row?.converted ?? 0), 10);
         const convertedNotApplicable = Boolean(row?.convertedNotApplicable);
         if (Number.isNaN(gotIn) || gotIn < 0 || Number.isNaN(converted) || converted < 0) {
-          return res.status(400).json({ error: `Invalid stats for branch: ${code}` });
+          return res.status(400).json({ error: `Invalid stats for program: ${code}` });
         }
         normalized.push({
           branchCode: code,
@@ -1626,17 +1626,17 @@ adminRouter.put(
       const normalizedInput = [];
       const seen = new Set();
       for (const row of placementGotInBranchStats) {
-        const code = String(row?.branchCode || "").trim().toLowerCase();
+        const code = normalizePpoBranchCode(row?.branchCode);
         if (!PPO_BRANCH_CODES.has(code)) {
-          return res.status(400).json({ error: `Invalid branch code: ${code}` });
+          return res.status(400).json({ error: `Invalid program code: ${code}` });
         }
         if (seen.has(code)) {
-          return res.status(400).json({ error: `Duplicate branch code: ${code}` });
+          return res.status(400).json({ error: `Duplicate program code: ${code}` });
         }
         seen.add(code);
         const gotIn = Number.parseInt(String(row?.gotIn ?? 0), 10);
         if (Number.isNaN(gotIn) || gotIn < 0) {
-          return res.status(400).json({ error: `Invalid gotIn for branch: ${code}` });
+          return res.status(400).json({ error: `Invalid gotIn for program: ${code}` });
         }
         normalizedInput.push({ branchCode: code, gotIn });
       }
