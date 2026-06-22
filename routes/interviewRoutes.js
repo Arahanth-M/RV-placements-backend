@@ -72,6 +72,7 @@ import { executeCode, normalizeExecutionLanguage } from "../services/codeExecuti
 import { buildHiddenTestResultsForClient } from "../services/codeExecution/executionUtils.js";
 import {
   INTERVIEW_LIMIT_REASON,
+  getInterviewWeeklyLimitMaxForUser,
   isInterviewWeeklyLimitEnabled,
 } from "../config/interviewLimits.js";
 
@@ -89,6 +90,18 @@ const getAuthenticatedUserRole = (req) =>
 const isInterviewLimitBypassRole = (req) => {
   if (req.user?.isAdminSession === true) return true;
   return getAuthenticatedUserRole(req) === "admin";
+};
+
+const resolveInterviewLimitOptions = (req) => {
+  const userId = getAuthenticatedUserId(req);
+  const email = req.user?.email;
+  if (!isInterviewWeeklyLimitEnabled() || isInterviewLimitBypassRole(req)) {
+    return { bypassLimit: true };
+  }
+  return {
+    bypassLimit: false,
+    weeklyMax: getInterviewWeeklyLimitMaxForUser({ userId, email }),
+  };
 };
 
 /** DSA rounds never show or plan more than two questions (legacy sessions may still store a higher count). */
@@ -553,8 +566,8 @@ router.get("/eligibility", async (req, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const bypassLimit = !isInterviewWeeklyLimitEnabled() || isInterviewLimitBypassRole(req);
-    const eligibility = await getInterviewStartEligibility(userId, { bypassLimit });
+    const limitOptions = resolveInterviewLimitOptions(req);
+    const eligibility = await getInterviewStartEligibility(userId, limitOptions);
 
     return res.json(eligibility);
   } catch (error) {
@@ -579,8 +592,9 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    if (isInterviewWeeklyLimitEnabled() && !isInterviewLimitBypassRole(req)) {
-      const eligibility = await getInterviewStartEligibility(userId);
+    const limitOptions = resolveInterviewLimitOptions(req);
+    if (!limitOptions.bypassLimit) {
+      const eligibility = await getInterviewStartEligibility(userId, limitOptions);
       if (!eligibility.canStart) {
         return res.status(403).json({
           code: eligibility.reason || INTERVIEW_LIMIT_REASON,
@@ -588,6 +602,8 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
           completedCount: eligibility.completedCount,
           nextAvailableAt: eligibility.nextAvailableAt,
           lastCompletedAt: eligibility.lastCompletedAt,
+          weeklyLimitMax: eligibility.weeklyLimitMax,
+          completionsInWindow: eligibility.completionsInWindow,
         });
       }
     }
