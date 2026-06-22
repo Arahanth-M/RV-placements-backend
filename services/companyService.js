@@ -319,6 +319,7 @@ const DYNAMIC_KEY_SET = new Set([
   "offCampus",
   "approvedAt",
   "jobDescription",
+  "recruitment_process",
 ]);
 
 /**

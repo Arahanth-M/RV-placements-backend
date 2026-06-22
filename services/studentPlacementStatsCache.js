@@ -10,7 +10,7 @@ import User1 from "../models/User1.js";
 import { redisUrl } from "../src/utils/redisClient.js";
 import { getJSON, setJSON, deleteKeysByPrefix } from "../src/utils/redisHelpers.js";
 
-const KEY_PREFIX = "rv:admin:placement-stats:v1:";
+const KEY_PREFIX = "rv:admin:placement-stats:v3:";
 /** 1 hour safety TTL when invalidation is not triggered */
 const TTL_SECONDS = 3600;
 
@@ -35,7 +35,38 @@ function isValidStatsPayload(value) {
   ) {
     return false;
   }
+  if (
+    value.lastUpdatedAt != null &&
+    typeof value.lastUpdatedAt !== "string" &&
+    !(value.lastUpdatedAt instanceof Date)
+  ) {
+    return false;
+  }
   return true;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string|null}
+ */
+function toIsoOrNull(value) {
+  if (value == null) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+/**
+ * @param {unknown} a
+ * @param {unknown} b
+ * @returns {string|null}
+ */
+function maxIsoTimestamp(a, b) {
+  const aIso = toIsoOrNull(a);
+  const bIso = toIsoOrNull(b);
+  if (!aIso) return bIso;
+  if (!bIso) return aIso;
+  return new Date(aIso) >= new Date(bIso) ? aIso : bIso;
 }
 
 /**
@@ -71,6 +102,7 @@ export async function buildStudentPlacementStatsFromDb(yearRaw) {
       years: yearValues,
       selectedYear: null,
       branches: [],
+      lastUpdatedAt: null,
     };
   }
 
@@ -106,6 +138,7 @@ export async function buildStudentPlacementStatsFromDb(yearRaw) {
         createdBy: { $ifNull: ["$createdBy", ""] },
         branchCode: { $ifNull: ["$branchCode", "unknown"] },
         createdAt: { $ifNull: ["$createdAt", null] },
+        updatedAt: { $ifNull: ["$updatedAt", null] },
       },
     },
     {
@@ -135,12 +168,12 @@ export async function buildStudentPlacementStatsFromDb(yearRaw) {
   const [usersById, usersByEmail] = await Promise.all([
     createdByObjectIds.length > 0
       ? User1.find({ _id: { $in: createdByObjectIds } })
-          .select("_id email username")
+          .select("_id email username role")
           .lean()
       : Promise.resolve([]),
     createdByEmails.length > 0
       ? User1.find({ email: { $in: createdByEmails } })
-          .select("_id email username")
+          .select("_id email username role")
           .lean()
       : Promise.resolve([]),
   ]);
@@ -152,6 +185,7 @@ export async function buildStudentPlacementStatsFromDb(yearRaw) {
     const payload = {
       name: String(user?.username || "").trim(),
       email: String(user?.email || "").trim().toLowerCase(),
+      role: String(user?.role || "").trim().toLowerCase(),
     };
     if (idKey) creatorBaseByKey.set(idKey, payload);
     if (emailKey) creatorBaseByKey.set(emailKey, payload);
@@ -184,19 +218,49 @@ export async function buildStudentPlacementStatsFromDb(yearRaw) {
   );
 
   const branchMap = new Map();
+  const branchMetaMap = new Map();
+  let lastUpdatedAt = null;
   for (const row of rows) {
+    const rowUpdatedAt = toIsoOrNull(row.updatedAt);
+    const rowCreatedAt = toIsoOrNull(row.createdAt);
+    const recordUpdatedAt = rowUpdatedAt || rowCreatedAt;
+    lastUpdatedAt = maxIsoTimestamp(lastUpdatedAt, recordUpdatedAt);
+
     const branchCode =
       String(row.branchCode || "unknown").trim().toLowerCase() || "unknown";
     if (!branchMap.has(branchCode)) {
       branchMap.set(branchCode, []);
+      branchMetaMap.set(branchCode, {
+        lastUpdatedAt: null,
+        latestSpcPlacement: null,
+      });
     }
+    const branchMeta = branchMetaMap.get(branchCode);
+    branchMeta.lastUpdatedAt = maxIsoTimestamp(branchMeta.lastUpdatedAt, recordUpdatedAt);
+
     const createdByKey = String(row.createdBy || "").trim();
     const createdByEmailKey = createdByKey.toLowerCase();
     const creatorBase =
       creatorBaseByKey.get(createdByKey) ||
-      creatorBaseByKey.get(createdByEmailKey) || { name: "", email: "" };
+      creatorBaseByKey.get(createdByEmailKey) || { name: "", email: "", role: "" };
     const creatorEmail = String(creatorBase.email || "").trim().toLowerCase();
     const creatorStudent = creatorEmail ? creatorStudentByEmail.get(creatorEmail) : null;
+    const creatorRole = String(creatorBase.role || "").trim().toLowerCase();
+
+    if (creatorRole === "spc" && rowCreatedAt) {
+      const currentLatest = branchMeta.latestSpcPlacement;
+      if (
+        !currentLatest?.createdAt ||
+        new Date(rowCreatedAt) > new Date(currentLatest.createdAt)
+      ) {
+        branchMeta.latestSpcPlacement = {
+          companyPlaced: String(row.companyPlaced || "").trim(),
+          createdAt: rowCreatedAt,
+          studentName: String(row.name || "").trim(),
+          addedByName: String(creatorStudent?.name || creatorBase.name || "").trim(),
+        };
+      }
+    }
 
     branchMap.get(branchCode).push({
       name: row.name || "",
@@ -213,21 +277,32 @@ export async function buildStudentPlacementStatsFromDb(yearRaw) {
       addedByName: creatorStudent?.name || creatorBase.name || "",
       addedByUsn: creatorStudent?.usn || "",
       addedByEmail: creatorEmail || createdByEmailKey || "",
+      createdAt: rowCreatedAt,
+      updatedAt: rowUpdatedAt,
     });
   }
 
   const branches = Array.from(branchMap.entries())
     .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([branchCode, students]) => ({
-      branchCode,
-      count: students.length,
-      students,
-    }));
+    .map(([branchCode, students]) => {
+      const meta = branchMetaMap.get(branchCode) || {
+        lastUpdatedAt: null,
+        latestSpcPlacement: null,
+      };
+      return {
+        branchCode,
+        count: students.length,
+        lastUpdatedAt: meta.lastUpdatedAt,
+        latestSpcPlacement: meta.latestSpcPlacement,
+        students,
+      };
+    });
 
   return {
     years: yearValues,
     selectedYear,
     branches,
+    lastUpdatedAt,
   };
 }
 

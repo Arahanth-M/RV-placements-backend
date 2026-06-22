@@ -50,6 +50,31 @@ export const adminMustDoTopicUpdateSchema = Joi.object({
   topic: Joi.string().trim().max(500).required(),
 }).unknown(true);
 
+const recruitmentRoundSchema = Joi.object({
+  roundNumber: Joi.alternatives().try(Joi.number().integer().min(1), Joi.string().trim()).optional(),
+  occurred: Joi.boolean().required(),
+  type: Joi.string()
+    .valid("technical", "aptitude", "resume_based", "projects", "other")
+    .optional(),
+  mode: Joi.string().valid("online", "offline").optional(),
+  otherTypeLabel: Joi.string().trim().max(200).allow("").optional(),
+  attended: Joi.alternatives().try(Joi.number().integer().min(0), Joi.string().trim()).optional(),
+  cleared: Joi.alternatives().try(Joi.number().integer().min(0), Joi.string().trim()).optional(),
+}).unknown(true);
+
+export const adminRecruitmentProcessSchema = Joi.object({
+  recruitment_process: Joi.object({
+    onlineAssessment: Joi.object({
+      occurred: Joi.boolean().required(),
+      mode: Joi.string().valid("online", "offline").optional(),
+      topics: Joi.string().trim().max(2000).allow("").optional(),
+      attended: Joi.alternatives().try(Joi.number().integer().min(0), Joi.string().trim()).optional(),
+      cleared: Joi.alternatives().try(Joi.number().integer().min(0), Joi.string().trim()).optional(),
+    }).required(),
+    rounds: Joi.array().items(recruitmentRoundSchema).max(20).required(),
+  }).required(),
+}).unknown(true);
+
 export const adminCompanyStatsSchema = Joi.object({
   totalStudentsApplied: nonNegIntField.optional(),
   totalClearedOA: nonNegIntField.optional(),
@@ -119,6 +144,7 @@ export default {
   adminInterviewQuestionUpdateSchema,
   adminInterviewProcessUpdateSchema,
   adminMustDoTopicUpdateSchema,
+  adminRecruitmentProcessSchema,
   adminCompanyStatsSchema,
   adminCompanyTotalGotInAdjustmentSchema,
   adminCompanyRolesSchema,

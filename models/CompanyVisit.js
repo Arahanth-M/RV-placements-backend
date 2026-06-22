@@ -56,6 +56,8 @@ const companyVisitSchema = new mongoose.Schema(
     views: { type: Number, default: 0, min: 0 },
     internshipExperience: [{ type: String, trim: true }],
     mcqQuestions: [{ type: mongoose.Schema.Types.Mixed }],
+    /** Structured hiring pipeline (OA + rounds); written only via SPC/Admin recruitment-process API. */
+    recruitment_process: { type: mongoose.Schema.Types.Mixed, default: undefined },
   },
   { timestamps: true, strict: false }
 );

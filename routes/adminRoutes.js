@@ -12,12 +12,14 @@ import {
   adminInterviewQuestionUpdateSchema,
   adminInterviewProcessUpdateSchema,
   adminMustDoTopicUpdateSchema,
+  adminRecruitmentProcessSchema,
   adminCompanyStatsSchema,
   adminCompanyTotalGotInAdjustmentSchema,
   adminCompanyRolesSchema,
   adminCompanyGeneralSchema,
   adminPlacementHubSettingsSchema,
 } from "../validations/admin.validation.js";
+import { spcCompanySuggestQuerySchema } from "../validations/placement.validation.js";
 import {
   getPlacementHubSettingsForApi,
   updatePlacementHubOpenDreamThresholds,
@@ -67,6 +69,7 @@ import {
   mutateMustDoTopicForCompanyCluster,
   normalizeCompanyDetailYear,
   persistMergedCompany,
+  suggestCompaniesForSpc,
   updateCompanyStatic,
   updateCompanyVisit,
 } from "../services/companyService.js";
@@ -92,6 +95,7 @@ import {
   generateSubmissionAnswer,
   isSubmissionAddAnswerSupported,
 } from "../services/submissionAnswerService.js";
+import { sanitizeRecruitmentProcess, withRecruitmentProcessSubmitter } from "../utils/recruitmentProcess.js";
 import {
   assertMergeContentValidForSubmissionType,
   enhanceSubmissionContent,
@@ -383,6 +387,21 @@ adminRouter.get("/stats/users", async (req, res) => {
   }
 });
 
+adminRouter.get(
+  "/companies/suggest",
+  validateRequest({ querySchema: spcCompanySuggestQuerySchema }),
+  async (req, res) => {
+    try {
+      const { q, limit } = req.query;
+      const items = await suggestCompaniesForSpc(q, limit);
+      return res.json({ items });
+    } catch (error) {
+      console.error("❌ Error in admin company suggest:", error.message);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
 // Branch-wise placed students grouped by placement year (admin-only)
 adminRouter.get("/students/placement-stats", async (req, res) => {
   try {
@@ -416,6 +435,7 @@ adminRouter.get("/students/placement-stats/export", async (req, res) => {
           Role: student.role || "",
           "PPO Conversion Type": student.ppoConversionType || "",
           "Added By": student.addedByEmail || "",
+          "Last Updated": student.updatedAt || student.createdAt || "",
         })
       );
       const ws = XLSX.utils.json_to_sheet(rows);
@@ -1885,6 +1905,120 @@ adminRouter.put(
 
 
 // Reject submission (delete it from database)
+submissionModRouter.put(
+  "/companies/:id/recruitment-process",
+  validateRequest(adminRecruitmentProcessSchema),
+  async (req, res) => {
+    try {
+      const { y, placementListContext, companyVisitIdHint, placementCluster } =
+        adminVisitContextFromReq(req);
+      const loaded = await getCompanyMergedForAdminById(
+        req.params.id,
+        y,
+        placementListContext,
+        companyVisitIdHint,
+        placementCluster
+      );
+      if (!loaded?.merged) {
+        return res.status(404).json({ error: "Company not found" });
+      }
+      if (!loaded.visit?._id) {
+        return res.status(404).json({ error: "Company visit not found for this year." });
+      }
+
+      const sanitized = sanitizeRecruitmentProcess(req.body?.recruitment_process);
+      if (!sanitized.ok) {
+        return res.status(400).json({ error: sanitized.error });
+      }
+
+      const loginEmail = String(req.user?.email || "").trim().toLowerCase();
+      const studentLean =
+        loginEmail !== ""
+          ? await Student.findOne({ email: loginEmail }).select("name email usn").lean()
+          : null;
+      const processToSave = withRecruitmentProcessSubmitter(
+        sanitized.value,
+        req.user,
+        studentLean
+      );
+
+      await CompanyVisit.updateOne(
+        { _id: loaded.visit._id },
+        {
+          $set: {
+            recruitment_process: processToSave,
+            migratedAt: new Date(),
+          },
+        }
+      );
+      await invalidateCompanyDetailCache(req.params.id);
+
+      const out = (
+        await getCompanyMergedForAdminById(
+          req.params.id,
+          y,
+          placementListContext,
+          companyVisitIdHint,
+          placementCluster
+        )
+      )?.merged;
+      return res.json({
+        message: "Recruitment process saved.",
+        company: out,
+      });
+    } catch (error) {
+      console.error("❌ Error saving recruitment process:", error.message);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
+submissionModRouter.delete("/companies/:id/recruitment-process", async (req, res) => {
+  try {
+    const { y, placementListContext, companyVisitIdHint, placementCluster } =
+      adminVisitContextFromReq(req);
+    const loaded = await getCompanyMergedForAdminById(
+      req.params.id,
+      y,
+      placementListContext,
+      companyVisitIdHint,
+      placementCluster
+    );
+    if (!loaded?.merged) {
+      return res.status(404).json({ error: "Company not found" });
+    }
+    if (!loaded.visit?._id) {
+      return res.status(404).json({ error: "Company visit not found for this year." });
+    }
+
+    await CompanyVisit.updateOne(
+      { _id: loaded.visit._id },
+      {
+        $unset: { recruitment_process: "" },
+        $set: { migratedAt: new Date() },
+      }
+    );
+    await invalidateCompanyDetailCache(req.params.id);
+
+    const out = (
+      await getCompanyMergedForAdminById(
+        req.params.id,
+        y,
+        placementListContext,
+        companyVisitIdHint,
+        placementCluster
+      )
+    )?.merged;
+    return res.json({
+      message: "Recruitment process removed.",
+      company: out,
+    });
+  } catch (error) {
+    console.error("❌ Error deleting recruitment process:", error.message);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
 submissionModRouter.delete("/submissions/:id/reject", async (req, res) => {
   try {
     const submission = await Submission.findById(req.params.id);
