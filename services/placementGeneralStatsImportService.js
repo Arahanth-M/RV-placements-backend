@@ -83,7 +83,7 @@ function normalizeMonth(monthRaw) {
  * @param {number|null} ctc
  * @returns {string}
  */
-function ctcBucket(ctc) {
+export function ctcBucket(ctc) {
   if (ctc == null) return "Unknown";
   const l = ctc / 100000;
   if (l < 10) return "< ₹10L";
@@ -97,7 +97,7 @@ function ctcBucket(ctc) {
  * @param {string} name
  * @returns {string}
  */
-function normalizeTopCompanyName(name) {
+export function normalizeTopCompanyName(name) {
   const n = String(name || "").trim();
   if (/oracle|oralce/i.test(n)) return "Oracle / OFSS";
   if (n.startsWith("Boeing")) return "Boeing";
@@ -130,6 +130,182 @@ function monthlyTimelineMeta(month) {
 function formatCtcLakhs(lakhs) {
   const rounded = Math.round(lakhs * 10) / 10;
   return Number.isInteger(rounded) ? `₹${rounded}L` : `₹${rounded.toFixed(1)}L`;
+}
+
+/** @type {Record<string, string>} */
+const DEPT_DISPLAY_BY_COL = Object.fromEntries(DEPT_COLUMNS);
+
+/**
+ * @param {unknown} val
+ * @returns {number|null}
+ */
+function parseStrengthCell(val) {
+  if (val == null || val === "") return null;
+  if (typeof val === "number" && Number.isFinite(val) && val > 0) return Math.round(val);
+  const n = Number.parseInt(String(val).replace(/,/g, "").trim(), 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * @param {unknown[]} row
+ * @returns {boolean}
+ */
+function rowHasStrengthLabel(row) {
+  if (!Array.isArray(row)) return false;
+  const joined = row
+    .slice(0, 5)
+    .map((c) => String(c ?? "").toLowerCase())
+    .join(" ");
+  return /strength|students|student|batch|intake|sanctioned|enrolled|roll strength|no\. of students|nos\. of students/.test(
+    joined,
+  );
+}
+
+/**
+ * @param {unknown[]} row
+ * @param {{ col: string, idx: number }[]} deptColIndexes
+ * @returns {Record<string, number>|null}
+ */
+function extractDepartmentStrengthFromRow(row, deptColIndexes) {
+  if (!Array.isArray(row)) return null;
+  /** @type {Record<string, number>} */
+  const out = {};
+  let hits = 0;
+  for (const { col, idx } of deptColIndexes) {
+    if (idx < 0) continue;
+    const n = parseStrengthCell(row[idx]);
+    if (n != null) {
+      out[DEPT_DISPLAY_BY_COL[col] || col] = n;
+      hits += 1;
+    }
+  }
+  return hits >= 2 ? out : null;
+}
+
+/**
+ * @param {unknown[][]} matrix
+ * @param {number} headerRowIdx
+ * @param {{ col: string, idx: number }[]} deptColIndexes
+ * @returns {Record<string, number>}
+ */
+function parseDepartmentStrengthMap(matrix, headerRowIdx, deptColIndexes) {
+  for (let i = 0; i < headerRowIdx; i += 1) {
+    const row = matrix[i];
+    if (!rowHasStrengthLabel(row)) continue;
+    const parsed = extractDepartmentStrengthFromRow(row, deptColIndexes);
+    if (parsed) return parsed;
+  }
+
+  if (headerRowIdx > 0) {
+    const prev = matrix[headerRowIdx - 1];
+    const joined = Array.isArray(prev)
+      ? prev.map((c) => String(c ?? "").toLowerCase()).join("|")
+      : "";
+    if (!joined.includes("company name")) {
+      const parsed = extractDepartmentStrengthFromRow(prev, deptColIndexes);
+      if (parsed) return parsed;
+    }
+  }
+
+  for (let i = matrix.length - 1; i > headerRowIdx; i -= 1) {
+    const row = matrix[i];
+    if (!Array.isArray(row)) continue;
+    const first = String(row[0] ?? "").trim();
+    if (!first) continue;
+    if (!rowHasStrengthLabel(row)) continue;
+    const parsed = extractDepartmentStrengthFromRow(row, deptColIndexes);
+    if (parsed) return parsed;
+  }
+
+  return {};
+}
+
+/**
+ * @param {import("xlsx").WorkBook} workbook
+ * @param {{ col: string, idx: number }[]} deptColIndexes
+ * @returns {Record<string, number>}
+ */
+function parseDepartmentStrengthFromWorkbook(workbook, deptColIndexes) {
+  for (const sheetName of workbook.SheetNames) {
+    const matrix = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
+      header: 1,
+      defval: null,
+      raw: true,
+    });
+    if (!Array.isArray(matrix) || matrix.length === 0) continue;
+
+    let headerRowIdx = null;
+    for (let i = 0; i < Math.min(matrix.length, 15); i += 1) {
+      const row = matrix[i];
+      if (!Array.isArray(row)) continue;
+      const joined = row.map((c) => String(c ?? "").toLowerCase()).join("|");
+      if (
+        joined.includes("company name") &&
+        joined.includes("be total") &&
+        (joined.includes("ctc") || joined.includes("stipend"))
+      ) {
+        headerRowIdx = i;
+        break;
+      }
+    }
+
+    if (headerRowIdx != null) {
+      const fromMain = parseDepartmentStrengthMap(matrix, headerRowIdx, deptColIndexes);
+      if (Object.keys(fromMain).length > 0) return fromMain;
+    }
+
+    for (let i = 0; i < matrix.length; i += 1) {
+      const row = matrix[i];
+      if (!rowHasStrengthLabel(row)) continue;
+      const parsed = extractDepartmentStrengthFromRow(row, deptColIndexes);
+      if (parsed) return parsed;
+    }
+
+    const headers = Array.isArray(matrix[0])
+      ? matrix[0].map((h) => String(h ?? "").trim().toLowerCase())
+      : [];
+    const deptIdx = headers.findIndex((h) => h === "department" || h === "branch" || h === "dept");
+    const studentsIdx = headers.findIndex(
+      (h) =>
+        h === "students" ||
+        h === "strength" ||
+        h === "batch strength" ||
+        h === "no. of students" ||
+        h === "nos. of students" ||
+        h === "count",
+    );
+    if (deptIdx >= 0 && studentsIdx >= 0) {
+      /** @type {Record<string, number>} */
+      const fromTable = {};
+      for (let r = 1; r < matrix.length; r += 1) {
+        const row = matrix[r];
+        if (!Array.isArray(row)) continue;
+        const deptRaw = String(row[deptIdx] ?? "").trim();
+        const n = parseStrengthCell(row[studentsIdx]);
+        if (!deptRaw || n == null) continue;
+        const colMatch = DEPT_COLUMNS.find(
+          ([col, display]) =>
+            deptRaw.toLowerCase() === col.toLowerCase() ||
+            deptRaw.toLowerCase() === display.toLowerCase(),
+        );
+        const department = colMatch ? colMatch[1] : deptRaw;
+        fromTable[department] = n;
+      }
+      if (Object.keys(fromTable).length >= 2) return fromTable;
+    }
+  }
+
+  return {};
+}
+
+/**
+ * @param {number} offers
+ * @param {number|null|undefined} students
+ * @returns {number|null}
+ */
+function placementPctForDepartment(offers, students) {
+  if (students == null || students <= 0) return null;
+  return Math.min(100, Math.round((offers / students) * 1000) / 10);
 }
 
 /**
@@ -303,9 +479,23 @@ export function buildGeneralStatsFromXlsxBuffer(buffer, year) {
   for (const o of offers) {
     deptOffersMap[o.department] = (deptOffersMap[o.department] || 0) + 1;
   }
+  const departmentStrength = parseDepartmentStrengthFromWorkbook(workbook, deptColIndexes);
   const byDepartment = Object.entries(deptOffersMap)
-    .map(([department, count]) => ({ department, offers: count }))
-    .sort((a, b) => b.offers - a.offers);
+    .map(([department, count]) => {
+      const students = departmentStrength[department] ?? null;
+      return {
+        department,
+        offers: count,
+        students,
+        placementPct: placementPctForDepartment(count, students),
+      };
+    })
+    .sort((a, b) => {
+      const aPct = a.placementPct ?? -1;
+      const bPct = b.placementPct ?? -1;
+      if (aPct !== bPct) return bPct - aPct;
+      return b.offers - a.offers;
+    });
 
   /** @type {Record<string, number>} */
   const bucketCounts = {};
@@ -320,26 +510,110 @@ export function buildGeneralStatsFromXlsxBuffer(buffer, year) {
     color: CTC_BUCKET_COLORS[range],
   }));
 
+  const ctcRangeKeys = Object.keys(CTC_BUCKET_COLORS);
+  /** @type {Record<string, Record<string, number>>} */
+  const deptCtcBucketMap = {};
+  for (const o of offers) {
+    if (o.ctc == null) continue;
+    const range = ctcBucket(o.ctc);
+    if (!deptCtcBucketMap[o.department]) {
+      deptCtcBucketMap[o.department] = Object.fromEntries(ctcRangeKeys.map((k) => [k, 0]));
+    }
+    deptCtcBucketMap[o.department][range] += 1;
+  }
+  const ctcByDepartment = Object.entries(deptCtcBucketMap)
+    .map(([department, buckets]) => {
+      const total = ctcRangeKeys.reduce((sum, key) => sum + (buckets[key] || 0), 0);
+      return { department, ...buckets, total };
+    })
+    .sort((a, b) => b.total - a.total);
+
+  /** @type {Record<string, { offers: number, deptCounts: Record<string, number>, ctcBuckets: Record<string, number> }>} */
+  const companyPlacementAgg = {};
+  for (const row of rows) {
+    const company = normalizeTopCompanyName(row.companyName);
+    if (!companyPlacementAgg[company]) {
+      companyPlacementAgg[company] = { offers: 0, deptCounts: {}, ctcBuckets: {} };
+    }
+    companyPlacementAgg[company].offers += row.beTotal;
+    const bucket = row.ctc != null ? ctcBucket(row.ctc) : "Unknown";
+    companyPlacementAgg[company].ctcBuckets[bucket] =
+      (companyPlacementAgg[company].ctcBuckets[bucket] || 0) + row.beTotal;
+    for (const [col, displayName] of DEPT_COLUMNS) {
+      const cnt = row.deptCounts[col] || 0;
+      if (cnt > 0) {
+        companyPlacementAgg[company].deptCounts[displayName] =
+          (companyPlacementAgg[company].deptCounts[displayName] || 0) + cnt;
+      }
+    }
+  }
+  const companyPlacementRows = Object.entries(companyPlacementAgg)
+    .sort((a, b) => b[1].offers - a[1].offers || a[0].localeCompare(b[0]))
+    .map(([company, data]) => ({
+      company,
+      offers: data.offers,
+      deptCounts: data.deptCounts,
+      ctcBuckets: data.ctcBuckets,
+    }));
+
   /** @type {Record<string, number>} */
   const companyTotals = {};
-  for (const row of rows) {
-    const display = normalizeTopCompanyName(row.companyName);
-    companyTotals[display] = (companyTotals[display] || 0) + row.beTotal;
+  for (const row of companyPlacementRows) {
+    companyTotals[row.company] = row.offers;
   }
-  const topCompanies = Object.entries(companyTotals)
+  const companyOfferTotals = Object.entries(companyTotals)
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .slice(0, 12)
-    .map(([company, count]) => ({ company, offers: count }));
+    .map(([company, offers]) => ({ company, offers }));
+  const topCompanies = companyOfferTotals.slice(0, 12);
 
   /** @type {Record<string, number>} */
   const monthCounts = {};
   for (const o of offers) {
     monthCounts[o.month] = (monthCounts[o.month] || 0) + 1;
   }
+  /** @type {Record<string, Set<string>>} */
+  const monthCompanySets = {};
+  for (const row of rows) {
+    if (!monthCompanySets[row.month]) monthCompanySets[row.month] = new Set();
+    monthCompanySets[row.month].add(row.companyName);
+  }
   const monthlyTimeline = MONTH_ORDER.filter((m) => monthCounts[m] > 0).map((m) => ({
     ...monthlyTimelineMeta(m),
     offers: monthCounts[m],
+    companies: monthCompanySets[m]?.size ?? 0,
   }));
+
+  /** @type {Record<string, Record<string, { offers: number, companies: Set<string> }>>} */
+  const monthDeptAgg = {};
+  for (const row of rows) {
+    const month = row.month;
+    if (!monthDeptAgg[month]) monthDeptAgg[month] = {};
+    for (const [col, displayName] of DEPT_COLUMNS) {
+      const cnt = row.deptCounts[col] || 0;
+      if (cnt <= 0) continue;
+      if (!monthDeptAgg[month][displayName]) {
+        monthDeptAgg[month][displayName] = { offers: 0, companies: new Set() };
+      }
+      monthDeptAgg[month][displayName].offers += cnt;
+      monthDeptAgg[month][displayName].companies.add(row.companyName);
+    }
+  }
+  const monthlyByDepartment = MONTH_ORDER.filter((m) => monthDeptAgg[m]).map((m) => {
+    const departments = Object.entries(monthDeptAgg[m])
+      .map(([department, { offers, companies }]) => ({
+        department,
+        offers,
+        companies: companies.size,
+      }))
+      .sort((a, b) => b.offers - a.offers || a.department.localeCompare(b.department));
+    return {
+      ...monthlyTimelineMeta(m),
+      month: m,
+      departments,
+      totalOffers: monthCounts[m] ?? 0,
+      totalCompanies: monthCompanySets[m]?.size ?? 0,
+    };
+  });
 
   /** @type {Record<string, { sum: number, count: number }>} */
   const deptCtcMap = {};
@@ -386,8 +660,12 @@ export function buildGeneralStatsFromXlsxBuffer(buffer, year) {
     },
     byDepartment,
     ctcDistribution,
+    ctcByDepartment,
+    companyPlacementRows,
+    companyOfferTotals,
     topCompanies,
     monthlyTimeline,
+    monthlyByDepartment,
     departmentAvgCtc,
   };
 
@@ -406,8 +684,12 @@ export function statsDocumentFromPayload(stats, uploadedBy = "", sourceFileName 
     kpis: stats.kpis,
     byDepartment: stats.byDepartment,
     ctcDistribution: stats.ctcDistribution,
+    ctcByDepartment: stats.ctcByDepartment,
+    companyPlacementRows: stats.companyPlacementRows,
+    companyOfferTotals: stats.companyOfferTotals,
     topCompanies: stats.topCompanies,
     monthlyTimeline: stats.monthlyTimeline,
+    monthlyByDepartment: stats.monthlyByDepartment,
     departmentAvgCtc: stats.departmentAvgCtc,
     uploadedBy,
     sourceFileName,
@@ -426,8 +708,12 @@ export function serializeGeneralStatsDoc(doc) {
     kpis: plain.kpis,
     byDepartment: plain.byDepartment,
     ctcDistribution: plain.ctcDistribution,
+    ctcByDepartment: Array.isArray(plain.ctcByDepartment) ? plain.ctcByDepartment : [],
+    companyPlacementRows: Array.isArray(plain.companyPlacementRows) ? plain.companyPlacementRows : [],
+    companyOfferTotals: Array.isArray(plain.companyOfferTotals) ? plain.companyOfferTotals : [],
     topCompanies: plain.topCompanies,
     monthlyTimeline: plain.monthlyTimeline,
+    monthlyByDepartment: Array.isArray(plain.monthlyByDepartment) ? plain.monthlyByDepartment : [],
     departmentAvgCtc: plain.departmentAvgCtc,
     lastUpdatedAt: plain.updatedAt || plain.createdAt || null,
     uploadedBy: plain.uploadedBy || "",
