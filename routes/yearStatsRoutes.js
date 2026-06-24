@@ -3,6 +3,7 @@ import authJWT from "../middleware/authJWT.js";
 import { createYearStatsModel } from "../models/YearStats.js";
 import { redisUrl } from "../src/utils/redisClient.js";
 import { getJSON, setJSON } from "../src/utils/redisHelpers.js";
+import { sortYearStatsRows } from "../utils/yearStatsSort.js";
 
 const yearStatsRouter = express.Router();
 const YEAR_STATS_CACHE_TTL_SECONDS = 365 * 24 * 60 * 60; // 1 year (static data)
@@ -35,7 +36,7 @@ yearStatsRouter.get("/:year", requireAuthForRestrictedYears, async (req, res) =>
     if (redisUrl) {
       const cached = await getJSON(cacheKey);
       if (Array.isArray(cached)) {
-        return res.json(cached);
+        return res.json(sortYearStatsRows(cached));
       }
     }
 
@@ -43,7 +44,7 @@ yearStatsRouter.get("/:year", requireAuthForRestrictedYears, async (req, res) =>
     const YearStatsModel = createYearStatsModel(yearNum);
     
     // Fetch all documents from the collection
-    const stats = await YearStatsModel.find({}).lean();
+    const stats = sortYearStatsRows(await YearStatsModel.find({}).lean());
 
     if (redisUrl) {
       await setJSON(cacheKey, stats, YEAR_STATS_CACHE_TTL_SECONDS);

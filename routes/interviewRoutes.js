@@ -74,6 +74,11 @@ import {
   INTERVIEW_LIMIT_REASON,
   isInterviewWeeklyLimitEnabled,
 } from "../config/interviewLimits.js";
+import {
+  getInterviewLimitRequestStatus,
+  resolveInterviewWeeklyLimitMax,
+  submitInterviewLimitRequest,
+} from "../services/interviewLimitRequestService.js";
 
 const router = express.Router();
 router.use(authJWT);
@@ -89,6 +94,19 @@ const getAuthenticatedUserRole = (req) =>
 const isInterviewLimitBypassRole = (req) => {
   if (req.user?.isAdminSession === true) return true;
   return getAuthenticatedUserRole(req) === "admin";
+};
+
+const resolveInterviewLimitOptions = async (req) => {
+  const userId = getAuthenticatedUserId(req);
+  const email = req.user?.email;
+  if (!isInterviewWeeklyLimitEnabled() || isInterviewLimitBypassRole(req)) {
+    return { bypassLimit: true };
+  }
+  const weeklyMax = await resolveInterviewWeeklyLimitMax({ userId, email });
+  return {
+    bypassLimit: false,
+    weeklyMax,
+  };
 };
 
 /** DSA rounds never show or plan more than two questions (legacy sessions may still store a higher count). */
@@ -553,13 +571,61 @@ router.get("/eligibility", async (req, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const bypassLimit = !isInterviewWeeklyLimitEnabled() || isInterviewLimitBypassRole(req);
-    const eligibility = await getInterviewStartEligibility(userId, { bypassLimit });
+    const limitOptions = await resolveInterviewLimitOptions(req);
+    const eligibility = await getInterviewStartEligibility(userId, limitOptions);
+    const limitRequest = await getInterviewLimitRequestStatus(userId);
 
-    return res.json(eligibility);
+    return res.json({ ...eligibility, limitRequest });
   } catch (error) {
     console.error("❌ Error fetching interview eligibility:", error.message);
     return res.status(500).json({ error: "Failed to fetch interview eligibility" });
+  }
+});
+
+router.get("/limit-request/status", async (req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const status = await getInterviewLimitRequestStatus(userId);
+    return res.json(status);
+  } catch (error) {
+    console.error("❌ Error fetching interview limit request status:", error.message);
+    return res.status(500).json({ error: "Failed to fetch request status" });
+  }
+});
+
+router.post("/limit-request", async (req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const result = await submitInterviewLimitRequest(userId, req.user);
+    if (!result.ok) {
+      if (result.reason === "not_limited") {
+        return res.status(400).json({ error: result.message || "Interview limit not reached." });
+      }
+      if (result.reason === "already_requested") {
+        return res.status(409).json({
+          error: "You already have a pending request.",
+          status: result.status,
+        });
+      }
+      return res.status(400).json({ error: "Could not submit request." });
+    }
+
+    return res.status(201).json({
+      ok: true,
+      status: result.status,
+      message:
+        "Your request was sent to the admin team. You can take another interview after they approve it, or when your weekly limit resets.",
+    });
+  } catch (error) {
+    console.error("❌ Error submitting interview limit request:", error.message);
+    return res.status(500).json({ error: "Failed to submit request" });
   }
 });
 
@@ -579,8 +645,9 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    if (isInterviewWeeklyLimitEnabled() && !isInterviewLimitBypassRole(req)) {
-      const eligibility = await getInterviewStartEligibility(userId);
+    const limitOptions = await resolveInterviewLimitOptions(req);
+    if (!limitOptions.bypassLimit) {
+      const eligibility = await getInterviewStartEligibility(userId, limitOptions);
       if (!eligibility.canStart) {
         return res.status(403).json({
           code: eligibility.reason || INTERVIEW_LIMIT_REASON,
@@ -588,6 +655,8 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
           completedCount: eligibility.completedCount,
           nextAvailableAt: eligibility.nextAvailableAt,
           lastCompletedAt: eligibility.lastCompletedAt,
+          weeklyLimitMax: eligibility.weeklyLimitMax,
+          completionsInWindow: eligibility.completionsInWindow,
         });
       }
     }

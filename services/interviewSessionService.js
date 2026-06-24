@@ -22,7 +22,8 @@ import { INTERVIEW_STATES } from "./interviewStateMachine.js";
 import {
   INTERVIEW_LIMIT_REASON,
   buildInterviewLimitReachedMessage,
-  computeWeeklyInterviewEligibility,
+  computeRollingWindowInterviewEligibility,
+  getInterviewWeeklyLimitMs,
 } from "../config/interviewLimits.js";
 import {
   getCachedInterviewAnalytics,
@@ -279,9 +280,29 @@ export const getLastCompletedInterviewForUser = async (userId) => {
     .lean();
 };
 
+export const getCompletedInterviewTimestampsForUserSince = async (userId, since) => {
+  const id = String(userId || "").trim();
+  if (!id) return [];
+  const sinceDate = since instanceof Date ? since : new Date(since);
+  if (Number.isNaN(sinceDate.getTime())) return [];
+
+  const sessions = await InterviewSession.find({
+    userId: id,
+    state: INTERVIEW_STATES.INTERVIEW_COMPLETE,
+    updatedAt: { $gte: sinceDate },
+  })
+    .select("updatedAt")
+    .sort({ updatedAt: 1 })
+    .lean();
+
+  return sessions
+    .map((session) => session?.updatedAt)
+    .filter((value) => value != null);
+};
+
 /**
  * @param {string} userId
- * @param {{ bypassLimit?: boolean }} [options]
+ * @param {{ bypassLimit?: boolean, weeklyMax?: number }} [options]
  */
 export const getInterviewStartEligibility = async (userId, options = {}) => {
   const id = String(userId || "").trim();
@@ -296,9 +317,18 @@ export const getInterviewStartEligibility = async (userId, options = {}) => {
     };
   }
 
-  const [completedCount, lastCompleted] = await Promise.all([
+  const weeklyMax = Math.max(1, Number(options.weeklyMax) || 1);
+  const windowMs = getInterviewWeeklyLimitMs();
+
+  const [completedCount, lastCompleted, recentCompletionTimestamps] = await Promise.all([
     countCompletedInterviewsForUser(id),
     getLastCompletedInterviewForUser(id),
+    options.bypassLimit
+      ? Promise.resolve([])
+      : getCompletedInterviewTimestampsForUserSince(
+          id,
+          new Date(Date.now() - windowMs)
+        ),
   ]);
 
   if (options.bypassLimit) {
@@ -311,11 +341,16 @@ export const getInterviewStartEligibility = async (userId, options = {}) => {
       lastCompletedAt: lastCompleted?.updatedAt
         ? new Date(lastCompleted.updatedAt).toISOString()
         : null,
+      weeklyLimitMax: null,
+      completionsInWindow: null,
+      elevatedLimit: false,
     };
   }
 
-  const weeklyEligibility = computeWeeklyInterviewEligibility({
-    lastCompletedAt: lastCompleted?.updatedAt ?? null,
+  const weeklyEligibility = computeRollingWindowInterviewEligibility({
+    completedAtTimestamps: recentCompletionTimestamps,
+    windowMs,
+    maxPerWindow: weeklyMax,
   });
 
   if (!weeklyEligibility.canStart) {
@@ -324,11 +359,14 @@ export const getInterviewStartEligibility = async (userId, options = {}) => {
       canStart: false,
       reason: INTERVIEW_LIMIT_REASON,
       completedCount,
-      message: buildInterviewLimitReachedMessage(nextAvailableAt),
+      message: buildInterviewLimitReachedMessage(nextAvailableAt, weeklyMax),
       nextAvailableAt,
       lastCompletedAt: weeklyEligibility.lastCompletedAt
         ? weeklyEligibility.lastCompletedAt.toISOString()
         : null,
+      weeklyLimitMax: weeklyMax,
+      completionsInWindow: weeklyEligibility.completionsInWindow,
+      elevatedLimit: weeklyMax > 1,
     };
   }
 
@@ -341,6 +379,9 @@ export const getInterviewStartEligibility = async (userId, options = {}) => {
     lastCompletedAt: weeklyEligibility.lastCompletedAt
       ? weeklyEligibility.lastCompletedAt.toISOString()
       : null,
+    weeklyLimitMax: weeklyMax,
+    completionsInWindow: weeklyEligibility.completionsInWindow,
+    elevatedLimit: weeklyMax > 1,
   };
 };
 

@@ -23,6 +23,10 @@ import {
   updatePlacementHubOpenDreamThresholds,
 } from "../services/placementHubSettingsService.js";
 import { listAdminStudentRequests } from "../services/adminStudentRequestsService.js";
+import {
+  approveInterviewLimitRequest,
+  dismissInterviewLimitRequest,
+} from "../services/interviewLimitRequestService.js";
 import User1 from "../models/User1.js";
 import Student from "../models/Student.js";
 import Submission from "../models/Submission.js";
@@ -689,6 +693,36 @@ adminRouter.get("/student-requests", async (_req, res) => {
     return res.json(data);
   } catch (err) {
     console.error("GET /api/admin/student-requests:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+adminRouter.post("/interview-limit-requests/:requestId/approve", async (req, res) => {
+  try {
+    const result = await approveInterviewLimitRequest(req.params.requestId, req.user);
+    if (!result.ok) {
+      return res.status(result.reason === "not_found" ? 404 : 400).json({
+        error: result.reason === "not_found" ? "Request not found." : "Could not approve request.",
+      });
+    }
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("POST /api/admin/interview-limit-requests/:id/approve:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+adminRouter.post("/interview-limit-requests/:requestId/dismiss", async (req, res) => {
+  try {
+    const result = await dismissInterviewLimitRequest(req.params.requestId, req.user);
+    if (!result.ok) {
+      return res.status(result.reason === "not_found" ? 404 : 400).json({
+        error: result.reason === "not_found" ? "Request not found." : "Could not dismiss request.",
+      });
+    }
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("POST /api/admin/interview-limit-requests/:id/dismiss:", err);
     return res.status(500).json({ error: "Server error" });
   }
 });
