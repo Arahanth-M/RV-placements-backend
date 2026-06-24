@@ -2,7 +2,7 @@
 export const INTERVIEW_LIMIT_REASON = "INTERVIEW_LIMIT_REACHED";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
-const DEFAULT_ELEVATED_WEEKLY_MAX = 3;
+export const DEFAULT_ELEVATED_WEEKLY_MAX = 3;
 
 export const getInterviewWeeklyLimitDays = () => {
   const raw = process.env.INTERVIEW_WEEKLY_LIMIT_DAYS;

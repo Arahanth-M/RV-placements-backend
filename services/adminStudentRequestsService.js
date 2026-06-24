@@ -1,5 +1,6 @@
 import CompanyStatic from "../models/CompanyStatic.js";
 import Student from "../models/Student.js";
+import { listPendingInterviewLimitRequestsForAdmin } from "./interviewLimitRequestService.js";
 
 function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
@@ -9,7 +10,7 @@ function normalizeEmail(email) {
  * Admin dashboard: company detail requests + profile discrepancy reports.
  */
 export async function listAdminStudentRequests() {
-  const [companyRows, discrepancyRows] = await Promise.all([
+  const [companyRows, discrepancyRows, interviewLimitRequests] = await Promise.all([
     CompanyStatic.find({
       detailRequestUsers: { $exists: true, $ne: [] },
     })
@@ -20,6 +21,7 @@ export async function listAdminStudentRequests() {
       .select("name usn email updatedAt")
       .sort({ updatedAt: -1 })
       .lean(),
+    listPendingInterviewLimitRequestsForAdmin(),
   ]);
 
   const requesterEmails = new Set();
@@ -72,6 +74,7 @@ export async function listAdminStudentRequests() {
   return {
     companyDetailRequests,
     profileDiscrepancies,
+    interviewLimitRequests,
     totals: {
       companyDetailRequestCount: companyDetailRequests.reduce(
         (sum, row) => sum + row.requestCount,
@@ -79,6 +82,7 @@ export async function listAdminStudentRequests() {
       ),
       companiesWithRequests: companyDetailRequests.length,
       profileDiscrepancyCount: profileDiscrepancies.length,
+      interviewLimitRequestCount: interviewLimitRequests.length,
     },
   };
 }

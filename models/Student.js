@@ -30,6 +30,13 @@ const studentSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    /** Admin-approved weekly AI interview cap (null = default platform limit). */
+    interviewWeeklyLimitMax: {
+      type: Number,
+      min: 1,
+      max: 20,
+      default: null,
+    },
   },
   {
     timestamps: true,
