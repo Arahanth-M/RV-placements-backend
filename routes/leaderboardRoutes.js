@@ -11,7 +11,7 @@ const LEADERBOARD_CACHE_KEY = "rv:leaderboard:top_contributors";
 const LEADERBOARD_TTL_SECONDS = 3 * 60 * 60; // 3 hours
 const PREVIOUS_DAY_TOP_CACHE_KEY_PREFIX = "rv:leaderboard:previous_day_top";
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-const LEADERBOARD_LOCK_MESSAGE = "LeaderBoard is warming up. Will be live soon";
+const LEADERBOARD_LOCK_MESSAGE = "Access to the leaderboard is restricted by the organization. Please contact the admin team for access.";
 
 async function ensureLeaderboardAccess(req, res) {
   const isAdminSession = req.user?.isAdminSession === true || req.user?.role === "admin";
