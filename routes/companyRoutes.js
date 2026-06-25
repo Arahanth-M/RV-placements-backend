@@ -218,13 +218,13 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
     if (!isAdminSession) {
       const loginEmail = String(req.user?.email || "").trim().toLowerCase();
       if (!loginEmail) {
-        return res.status(403).json({ error: "Stay connected, we will be back soon" });
+        return res.status(403).json({ error: "access is restricted by organization" });
       }
       const studentRecord = await Student.findOne({ email: loginEmail })
         .select("_id")
         .lean();
       if (!studentRecord) {
-        return res.status(403).json({ error: "Stay connected, we will be back soon" });
+        return res.status(403).json({ error: "access is restricted by organization" });
       }
     }
 
