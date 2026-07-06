@@ -15,7 +15,7 @@ export const submissionInputSchema = Joi.object({
   content: Joi.string().min(1).max(70000).required(),
   placementYear: Joi.number().integer().valid(2026, 2027, 2028).optional(),
   placementListContext: Joi.string()
-    .valid("dream", "open_dream", "summer_internship")
+    .valid("dream", "open_dream", "summer_internship","internship_only", "off_campus")
     .optional(),
   companyVisitId: Joi.string()
     .trim()
