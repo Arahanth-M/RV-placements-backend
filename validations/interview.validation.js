@@ -52,9 +52,41 @@ export const interviewRunPreviewSchema = Joi.object({
     .required(),
 }).unknown(true);
 
+const slotKeySchema = Joi.string()
+  .trim()
+  .pattern(/^\d{4}-\d{2}-\d{2}T\d{2}$/)
+  .required();
+
+export const interviewSlotBookSchema = Joi.object({
+  slotKey: slotKeySchema,
+}).unknown(true);
+
+export const interviewSlotRescheduleSchema = Joi.object({
+  bookingId: Joi.string().trim().min(1).max(128).required(),
+  newSlotKey: slotKeySchema,
+}).unknown(true);
+
+export const interviewSlotStatusSchema = Joi.object({
+  customRounds: Joi.array()
+    .min(1)
+    .max(4)
+    .items(
+      Joi.object({
+        type: Joi.string()
+          .valid("DSA", "System Design", "SQL", "CS Fundamentals", "HR")
+          .required(),
+        difficulty: Joi.string().valid("easy", "medium", "hard").optional(),
+      })
+    )
+    .required(),
+}).unknown(true);
+
 export default {
   interviewStartSchema,
   interviewSubmitAnswerSchema,
   interviewMoveRoundSchema,
   interviewRunPreviewSchema,
+  interviewSlotBookSchema,
+  interviewSlotRescheduleSchema,
+  interviewSlotStatusSchema,
 };
