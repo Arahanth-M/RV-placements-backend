@@ -50,6 +50,7 @@ import {
   MAX_SUBMISSION_APPROVE_BATCH_SIZE,
 } from "../services/submissionApprovalService.js";
 import { normalizePlacementClusterQuery } from "../utils/placementCluster.js";
+import { normalizePlacementUniversityQuery } from "../utils/placementUniversity.js";
 
 async function invalidateSubmitterListCaches(submission) {
   const email = submitterEmailFromSubmission(submission);
@@ -272,15 +273,24 @@ function adminStatsVisitResolutionArgs(req) {
   const companyVisitIdHint =
     vidRaw != null && String(vidRaw).trim() !== "" ? String(vidRaw).trim() : null;
   const placementCluster = normalizePlacementClusterQuery(req.query?.placementCluster);
-  return { placementListContext, companyVisitIdHint, placementCluster };
+  const placementUniversity = normalizePlacementUniversityQuery(
+    req.query?.placementUniversity ?? req.query?.university
+  );
+  return { placementListContext, companyVisitIdHint, placementCluster, placementUniversity };
 }
 
 /** Placement year + visit row for admin company edits (year / hub / visit id from query). */
 function adminVisitContextFromReq(req) {
   const y = adminVisitYearFromQuery(req);
-  const { placementListContext, companyVisitIdHint, placementCluster } =
+  const { placementListContext, companyVisitIdHint, placementCluster, placementUniversity } =
     adminStatsVisitResolutionArgs(req);
-  return { y, placementListContext, companyVisitIdHint, placementCluster };
+  return {
+    y,
+    placementListContext,
+    companyVisitIdHint,
+    placementCluster,
+    placementUniversity,
+  };
 }
 
 /** Placement-year filter for admin company listing (`?year=2026|2027|all`). */
@@ -1141,13 +1151,14 @@ adminRouter.put(
   validateRequest(adminOaQuestionUpdateSchema),
   async (req, res) => {
   try {
-    const { y, placementListContext, companyVisitIdHint, placementCluster } = adminVisitContextFromReq(req);
+    const { y, placementListContext, companyVisitIdHint, placementCluster, placementUniversity } = adminVisitContextFromReq(req);
     const loaded = await getCompanyMergedForAdminById(
       req.params.id,
       y,
       placementListContext,
       companyVisitIdHint,
-      placementCluster
+      placementCluster,
+      placementUniversity
     );
     if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
     const merged = { ...loaded.merged };
@@ -1175,7 +1186,8 @@ adminRouter.put(
       y,
       placementListContext,
       companyVisitIdHint,
-      placementCluster
+      placementCluster,
+      placementUniversity
     );
     const out = (
       await getCompanyMergedForAdminById(
@@ -1183,7 +1195,8 @@ adminRouter.put(
         y,
         placementListContext,
         companyVisitIdHint,
-        placementCluster
+        placementCluster,
+      placementUniversity
       )
     )?.merged;
     res.json({ message: "OA question updated", company: out });
@@ -1198,13 +1211,14 @@ adminRouter.put(
 
 adminRouter.delete("/companies/:id/oa-questions/:index", async (req, res) => {
   try {
-    const { y, placementListContext, companyVisitIdHint, placementCluster } = adminVisitContextFromReq(req);
+    const { y, placementListContext, companyVisitIdHint, placementCluster, placementUniversity } = adminVisitContextFromReq(req);
     const loaded = await getCompanyMergedForAdminById(
       req.params.id,
       y,
       placementListContext,
       companyVisitIdHint,
-      placementCluster
+      placementCluster,
+      placementUniversity
     );
     if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
     const merged = JSON.parse(JSON.stringify(loaded.merged));
@@ -1225,7 +1239,8 @@ adminRouter.delete("/companies/:id/oa-questions/:index", async (req, res) => {
       y,
       placementListContext,
       companyVisitIdHint,
-      placementCluster
+      placementCluster,
+      placementUniversity
     );
     const out = (
       await getCompanyMergedForAdminById(
@@ -1233,7 +1248,8 @@ adminRouter.delete("/companies/:id/oa-questions/:index", async (req, res) => {
         y,
         placementListContext,
         companyVisitIdHint,
-        placementCluster
+        placementCluster,
+      placementUniversity
       )
     )?.merged;
     res.json({ message: "OA question deleted", company: out });
@@ -1248,13 +1264,14 @@ adminRouter.put(
   validateRequest(adminInterviewQuestionUpdateSchema),
   async (req, res) => {
   try {
-    const { y, placementListContext, companyVisitIdHint, placementCluster } = adminVisitContextFromReq(req);
+    const { y, placementListContext, companyVisitIdHint, placementCluster, placementUniversity } = adminVisitContextFromReq(req);
     const loaded = await getCompanyMergedForAdminById(
       req.params.id,
       y,
       placementListContext,
       companyVisitIdHint,
-      placementCluster
+      placementCluster,
+      placementUniversity
     );
     if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
     const merged = JSON.parse(JSON.stringify(loaded.merged));
@@ -1282,7 +1299,8 @@ adminRouter.put(
       y,
       placementListContext,
       companyVisitIdHint,
-      placementCluster
+      placementCluster,
+      placementUniversity
     );
     const out = (
       await getCompanyMergedForAdminById(
@@ -1290,7 +1308,8 @@ adminRouter.put(
         y,
         placementListContext,
         companyVisitIdHint,
-        placementCluster
+        placementCluster,
+      placementUniversity
       )
     )?.merged;
     res.json({ message: "Interview question updated", company: out });
@@ -1305,13 +1324,14 @@ adminRouter.put(
 
 adminRouter.delete("/companies/:id/interview-questions/:index", async (req, res) => {
   try {
-    const { y, placementListContext, companyVisitIdHint, placementCluster } = adminVisitContextFromReq(req);
+    const { y, placementListContext, companyVisitIdHint, placementCluster, placementUniversity } = adminVisitContextFromReq(req);
     const loaded = await getCompanyMergedForAdminById(
       req.params.id,
       y,
       placementListContext,
       companyVisitIdHint,
-      placementCluster
+      placementCluster,
+      placementUniversity
     );
     if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
     const merged = JSON.parse(JSON.stringify(loaded.merged));
@@ -1332,7 +1352,8 @@ adminRouter.delete("/companies/:id/interview-questions/:index", async (req, res)
       y,
       placementListContext,
       companyVisitIdHint,
-      placementCluster
+      placementCluster,
+      placementUniversity
     );
     const out = (
       await getCompanyMergedForAdminById(
@@ -1340,7 +1361,8 @@ adminRouter.delete("/companies/:id/interview-questions/:index", async (req, res)
         y,
         placementListContext,
         companyVisitIdHint,
-        placementCluster
+        placementCluster,
+      placementUniversity
       )
     )?.merged;
     res.json({ message: "Interview question deleted", company: out });
@@ -1355,13 +1377,14 @@ adminRouter.put(
   validateRequest(adminInterviewProcessUpdateSchema),
   async (req, res) => {
   try {
-    const { y, placementListContext, companyVisitIdHint, placementCluster } = adminVisitContextFromReq(req);
+    const { y, placementListContext, companyVisitIdHint, placementCluster, placementUniversity } = adminVisitContextFromReq(req);
     const loaded = await getCompanyMergedForAdminById(
       req.params.id,
       y,
       placementListContext,
       companyVisitIdHint,
-      placementCluster
+      placementCluster,
+      placementUniversity
     );
     if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
     const merged = JSON.parse(JSON.stringify(loaded.merged));
@@ -1390,7 +1413,8 @@ adminRouter.put(
       y,
       placementListContext,
       companyVisitIdHint,
-      placementCluster
+      placementCluster,
+      placementUniversity
     );
     const out = (
       await getCompanyMergedForAdminById(
@@ -1398,7 +1422,8 @@ adminRouter.put(
         y,
         placementListContext,
         companyVisitIdHint,
-        placementCluster
+        placementCluster,
+      placementUniversity
       )
     )?.merged;
     res.json({ message: "Interview process updated", company: out });
@@ -1413,13 +1438,14 @@ adminRouter.put(
 
 adminRouter.delete("/companies/:id/interview-process/:index", async (req, res) => {
   try {
-    const { y, placementListContext, companyVisitIdHint, placementCluster } = adminVisitContextFromReq(req);
+    const { y, placementListContext, companyVisitIdHint, placementCluster, placementUniversity } = adminVisitContextFromReq(req);
     const loaded = await getCompanyMergedForAdminById(
       req.params.id,
       y,
       placementListContext,
       companyVisitIdHint,
-      placementCluster
+      placementCluster,
+      placementUniversity
     );
     if (!loaded?.merged) return res.status(404).json({ error: "Company not found" });
     const merged = JSON.parse(JSON.stringify(loaded.merged));
@@ -1436,7 +1462,8 @@ adminRouter.delete("/companies/:id/interview-process/:index", async (req, res) =
       y,
       placementListContext,
       companyVisitIdHint,
-      placementCluster
+      placementCluster,
+      placementUniversity
     );
     const out = (
       await getCompanyMergedForAdminById(
@@ -1444,7 +1471,8 @@ adminRouter.delete("/companies/:id/interview-process/:index", async (req, res) =
         y,
         placementListContext,
         companyVisitIdHint,
-        placementCluster
+        placementCluster,
+      placementUniversity
       )
     )?.merged;
     res.json({ message: "Interview process entry deleted", company: out });
@@ -1460,14 +1488,15 @@ adminRouter.put(
   async (req, res) => {
     try {
       const y = adminVisitYearFromQuery(req);
-      const { placementListContext, companyVisitIdHint, placementCluster } =
+      const { placementListContext, companyVisitIdHint, placementCluster, placementUniversity } =
         adminStatsVisitResolutionArgs(req);
       const loaded = await getCompanyMergedForAdminById(
         req.params.id,
         y,
         placementListContext,
         companyVisitIdHint,
-        placementCluster
+        placementCluster,
+      placementUniversity
       );
       if (!loaded?.merged || !loaded?.visit) {
         return res.status(404).json({ error: "Company visit not found" });
@@ -1501,7 +1530,8 @@ adminRouter.put(
           y,
           placementListContext,
           companyVisitIdHint,
-          placementCluster
+          placementCluster,
+      placementUniversity
         )
       )?.merged;
       res.json({ message: "Must do topic updated", company: out });
@@ -1527,7 +1557,8 @@ adminRouter.delete("/companies/:id/must-do-topics/:index", async (req, res) => {
       y,
       placementListContext,
       companyVisitIdHint,
-      placementCluster
+      placementCluster,
+      placementUniversity
     );
     if (!loaded?.merged || !loaded?.visit) {
       return res.status(404).json({ error: "Company visit not found" });
@@ -1558,7 +1589,8 @@ adminRouter.delete("/companies/:id/must-do-topics/:index", async (req, res) => {
         y,
         placementListContext,
         companyVisitIdHint,
-        placementCluster
+        placementCluster,
+      placementUniversity
       )
     )?.merged;
     res.json({ message: "Must do topic deleted", company: out });
@@ -1575,7 +1607,7 @@ adminRouter.put(
   async (req, res) => {
   try {
     const y = adminVisitYearFromQuery(req);
-    const { placementListContext, companyVisitIdHint, placementCluster } = adminStatsVisitResolutionArgs(req);
+    const { placementListContext, companyVisitIdHint, placementCluster, placementUniversity } = adminStatsVisitResolutionArgs(req);
     const staticRow = await CompanyStatic.findById(req.params.id).lean();
     if (!staticRow) return res.status(404).json({ error: "Company not found" });
     const {
@@ -1713,7 +1745,8 @@ adminRouter.put(
             y,
             placementListContext,
             companyVisitIdHint,
-            placementCluster
+            placementCluster,
+      placementUniversity
           ))?.merged || null;
       }
       const gotIn =
@@ -1739,7 +1772,8 @@ adminRouter.put(
       y,
       placementListContext,
       companyVisitIdHint,
-      placementCluster
+      placementCluster,
+      placementUniversity
     );
     await updateCompanyVisit(req.params.id, payload, y, statsVisitCtx?.visit);
     const out = (await getCompanyMergedForAdminById(
@@ -1747,7 +1781,8 @@ adminRouter.put(
       y,
       placementListContext,
       companyVisitIdHint,
-      placementCluster
+      placementCluster,
+      placementUniversity
     ))?.merged;
     res.json({ message: "Stats updated", company: out });
   } catch (error) {
@@ -1762,7 +1797,7 @@ adminRouter.patch(
   async (req, res) => {
     try {
       const y = adminVisitYearFromQuery(req);
-      const { placementListContext, companyVisitIdHint, placementCluster } = adminStatsVisitResolutionArgs(req);
+      const { placementListContext, companyVisitIdHint, placementCluster, placementUniversity } = adminStatsVisitResolutionArgs(req);
       const delta = Number(req.body?.delta);
       await ensureAdminVisitForYear(req.params.id, y);
       const statsVisitCtx = await getCompanyMergedForAdminById(
@@ -1770,7 +1805,8 @@ adminRouter.patch(
         y,
         placementListContext,
         companyVisitIdHint,
-        placementCluster
+        placementCluster,
+      placementUniversity
       );
       const gotInDoc = await adjustVisitTotalGotIn(req.params.id, delta, y, statsVisitCtx?.visit);
       if (!gotInDoc) {
@@ -1798,7 +1834,7 @@ adminRouter.put(
   validateRequest(adminCompanyRolesSchema),
   async (req, res) => {
   try {
-    const { y, placementListContext, companyVisitIdHint, placementCluster } = adminVisitContextFromReq(req);
+    const { y, placementListContext, companyVisitIdHint, placementCluster, placementUniversity } = adminVisitContextFromReq(req);
     const { roles } = req.body || {};
     if (!Array.isArray(roles)) {
       return res.status(400).json({ error: "roles must be an array" });
@@ -1856,7 +1892,8 @@ adminRouter.put(
       y,
       placementListContext,
       companyVisitIdHint,
-      placementCluster
+      placementCluster,
+      placementUniversity
     );
     await updateCompanyVisit(req.params.id, { roles: normalizedRoles }, y, rolesVisitCtx?.visit);
     const loaded = await getCompanyMergedForAdminById(
@@ -1864,7 +1901,8 @@ adminRouter.put(
       y,
       placementListContext,
       companyVisitIdHint,
-      placementCluster
+      placementCluster,
+      placementUniversity
     );
     const rolesAfterUpdate = loaded?.merged?.roles || [];
     const rolesResponse = (rolesAfterUpdate || []).map((role) => ({
@@ -1888,7 +1926,7 @@ adminRouter.put(
   validateRequest(adminCompanyGeneralSchema),
   async (req, res) => {
   try {
-    const { y, placementListContext, companyVisitIdHint, placementCluster } = adminVisitContextFromReq(req);
+    const { y, placementListContext, companyVisitIdHint, placementCluster, placementUniversity } = adminVisitContextFromReq(req);
     const { eligibility, business_model, type, offCampus, date_of_visit, cluster } =
       req.body || {};
 
@@ -1915,7 +1953,8 @@ adminRouter.put(
       y,
       placementListContext,
       companyVisitIdHint,
-      placementCluster
+      placementCluster,
+      placementUniversity
     );
     const out = (
       await getCompanyMergedForAdminById(
@@ -1923,7 +1962,8 @@ adminRouter.put(
         y,
         placementListContext,
         companyVisitIdHint,
-        placementCluster
+        placementCluster,
+      placementUniversity
       )
     )?.merged;
 
@@ -1944,14 +1984,15 @@ submissionModRouter.put(
   validateRequest(adminRecruitmentProcessSchema),
   async (req, res) => {
     try {
-      const { y, placementListContext, companyVisitIdHint, placementCluster } =
+      const { y, placementListContext, companyVisitIdHint, placementCluster, placementUniversity } =
         adminVisitContextFromReq(req);
       const loaded = await getCompanyMergedForAdminById(
         req.params.id,
         y,
         placementListContext,
         companyVisitIdHint,
-        placementCluster
+        placementCluster,
+      placementUniversity
       );
       if (!loaded?.merged) {
         return res.status(404).json({ error: "Company not found" });
@@ -1993,7 +2034,8 @@ submissionModRouter.put(
           y,
           placementListContext,
           companyVisitIdHint,
-          placementCluster
+          placementCluster,
+      placementUniversity
         )
       )?.merged;
       return res.json({
@@ -2009,14 +2051,15 @@ submissionModRouter.put(
 
 submissionModRouter.delete("/companies/:id/recruitment-process", async (req, res) => {
   try {
-    const { y, placementListContext, companyVisitIdHint, placementCluster } =
+    const { y, placementListContext, companyVisitIdHint, placementCluster, placementUniversity } =
       adminVisitContextFromReq(req);
     const loaded = await getCompanyMergedForAdminById(
       req.params.id,
       y,
       placementListContext,
       companyVisitIdHint,
-      placementCluster
+      placementCluster,
+      placementUniversity
     );
     if (!loaded?.merged) {
       return res.status(404).json({ error: "Company not found" });
@@ -2040,7 +2083,8 @@ submissionModRouter.delete("/companies/:id/recruitment-process", async (req, res
         y,
         placementListContext,
         companyVisitIdHint,
-        placementCluster
+        placementCluster,
+      placementUniversity
       )
     )?.merged;
     return res.json({

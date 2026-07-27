@@ -23,11 +23,16 @@ const companyVisitSchema = new mongoose.Schema(
     /** Optional; e.g. from `companies1_copy` / backfill. Type preserved (Date, string, etc.) */
     messageDate: { type: mongoose.Schema.Types.Mixed },
     /**
-     * Hub / branch cluster for this visit row (part of composite uniqueness with companyId + year + type).
+     * Hub / branch cluster for this visit row (part of composite uniqueness with companyId + year + type + university).
      * Often stored as a full department name (e.g. `"Computer Science and Engineering"`), not `cs`/`ec`.
      * Empty string when unset — APIs treat empty as CS for legacy compatibility.
      */
     cluster: { type: String, trim: true, default: "" },
+    /**
+     * College / university hub for multi-college isolation (`A`–`E`).
+     * Part of composite uniqueness with companyId + year + type + cluster.
+     */
+    university: { type: String, trim: true, uppercase: true, default: "" },
     branch: { type: String, trim: true, default: "" },
     count: { type: String, trim: true },
     selectedCandidates: [{ type: mongoose.Schema.Types.Mixed }],
@@ -63,8 +68,9 @@ const companyVisitSchema = new mongoose.Schema(
 );
 
 companyVisitSchema.index({ year: 1 });
+companyVisitSchema.index({ university: 1, year: 1 });
 companyVisitSchema.index(
-  { companyId: 1, year: 1, type: 1, cluster: 1 },
+  { companyId: 1, year: 1, type: 1, cluster: 1, university: 1 },
   { unique: true }
 );
 
@@ -117,7 +123,7 @@ companyVisitSchema.post(
 const CompanyVisit = mongoose.model(
   "CompanyVisit",
   companyVisitSchema,
-  "company_visits"
+  "company_visits_uni"
 );
 
 export default CompanyVisit;

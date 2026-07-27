@@ -1,5 +1,6 @@
 import Joi from "joi";
 import { COMPANY_VISIT_CLUSTER_CANONICAL } from "../utils/companyVisitClusterCanonical.js";
+import { PLACEMENT_UNIVERSITY_KEYS } from "../utils/placementUniversity.js";
 import {
   PPO_BRANCH_CODES,
   PPO_BRANCH_CODES_ARRAY,
@@ -80,6 +81,10 @@ const optionalCompanyBody = {
   logo: t(2048),
   domain: t(255),
   cluster: Joi.string().valid(...COMPANY_VISIT_CLUSTER_CANONICAL),
+  university: Joi.string()
+    .trim()
+    .uppercase()
+    .valid(...PLACEMENT_UNIVERSITY_KEYS),
   helpfulCount: Joi.number().integer().min(0),
   helpfulUsers: Joi.array().items(t(320)).max(10000),
   detailRequestUsers: Joi.array().items(t(320)).max(10000),

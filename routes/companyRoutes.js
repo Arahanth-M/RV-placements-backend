@@ -33,6 +33,7 @@ import {
   clusterKeyFromPlacementVisitClusterField,
   normalizePlacementClusterQuery,
 } from "../utils/placementCluster.js";
+import { normalizePlacementUniversityQuery } from "../utils/placementUniversity.js";
 import { getPlacementHubSettingsForApi } from "../services/placementHubSettingsService.js";
 import mongoose from "mongoose";
 import { getAuthUserModel } from "../utils/authUserModel.js";
@@ -74,8 +75,14 @@ companyRouter.get("/", async (req, res) => {
   try {
     const selectedYear = req.query?.year;
     const requestedCluster = normalizePlacementClusterQuery(req.query?.cluster);
-    // New DB: `companies` + approved `company_visits` (year-aware when `?year=` is sent)
-    const companies = await listApprovedCompaniesLegacyMerged(selectedYear);
+    const requestedUniversity = normalizePlacementUniversityQuery(
+      req.query?.university ?? req.query?.placementUniversity
+    );
+    // New DB: `companies` + approved `company_visits_uni` (year + university aware)
+    const companies = await listApprovedCompaniesLegacyMerged(
+      selectedYear,
+      requestedUniversity
+    );
     const scopedCompanies =
       requestedCluster == null
         ? companies
@@ -137,7 +144,14 @@ companyRouter.get("/preview-logos", async (req, res) => {
   try {
     const selectedYear = req.query?.year;
     const cluster = normalizePlacementClusterQuery(req.query?.cluster);
-    const payload = await getCompanyCategoryPreviewLogos(selectedYear, cluster);
+    const university = normalizePlacementUniversityQuery(
+      req.query?.university ?? req.query?.placementUniversity
+    );
+    const payload = await getCompanyCategoryPreviewLogos(
+      selectedYear,
+      cluster,
+      university
+    );
     return res.json(payload);
   } catch (e) {
     console.error("❌ Error fetching preview logos:", e?.message);
@@ -203,6 +217,9 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
   const placementClusterResolved = normalizePlacementClusterQuery(
     req.query?.placementCluster
   );
+  const placementUniversityResolved = normalizePlacementUniversityQuery(
+    req.query?.placementUniversity ?? req.query?.university
+  );
   // Exact visit-id detail fetch must bypass cache because cache key does not include visit-id.
   const key = useExactVisitHint
     ? null
@@ -210,7 +227,8 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
         id,
         placementVisitYear,
         req.query?.placementContext,
-        placementClusterResolved
+        placementClusterResolved,
+        placementUniversityResolved
       );
 
   try {
@@ -256,7 +274,8 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
         const placementYearsAvailable = companyOid
           ? await getApprovedPlacementYearsForCompany(
               companyOid,
-              placementClusterResolved
+              placementClusterResolved,
+              placementUniversityResolved
             )
           : [];
         await Promise.all([
@@ -289,7 +308,8 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
       placementVisitYear,
       req.query?.placementContext,
       useExactVisitHint ? placementCompanyVisitIdRaw : null,
-      placementClusterResolved
+      placementClusterResolved,
+      placementUniversityResolved
     );
 
     if (!companyObj) {
@@ -302,7 +322,8 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
 
     const placementYearsAvailable = await getApprovedPlacementYearsForCompany(
       companyOid,
-      placementClusterResolved
+      placementClusterResolved,
+      placementUniversityResolved
     );
 
     await Promise.all([

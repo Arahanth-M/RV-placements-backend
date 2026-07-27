@@ -37,6 +37,10 @@ import {
   normalizePlacementClusterQuery,
   placementHubClusterFromPpoBranchCode,
 } from "../utils/placementCluster.js";
+import {
+  normalizePlacementUniversityQuery,
+  universityKeyFromVisitField,
+} from "../utils/placementUniversity.js";
 import { PPO_BRANCH_CODES, PPO_BRANCH_CODES_ARRAY, isValidPpoBranchCode, normalizePpoBranchCode } from "../utils/ppoBranchCodes.js";
 import escapeRegexLiteral from "../utils/regexEscape.js";
 import { invalidateCompanyDetailCache } from "./companyDetailCache.js";
@@ -243,19 +247,39 @@ export function normalizePlacementContextParam(raw) {
 }
 
 /**
- * Canonical `type` / `cluster` for `company_visits` composite uniqueness (empty string = default slot).
+ * Canonical `type` / `cluster` / `university` for `company_visits_uni` composite uniqueness
+ * (empty string = default slot).
  * @param {unknown} type
  * @param {unknown} cluster
- * @returns {{ type: string, cluster: string }}
+ * @param {unknown} [university]
+ * @returns {{ type: string, cluster: string, university: string }}
  */
-export function normalizeVisitKeyParts(type, cluster) {
+export function normalizeVisitKeyParts(type, cluster, university = "") {
+  const uni = normalizePlacementUniversityQuery(university);
   return {
     type: type == null || String(type).trim() === "" ? "" : String(type).trim(),
     cluster:
       cluster == null || String(cluster).trim() === ""
         ? ""
         : String(cluster).trim(),
+    university: uni == null ? "" : uni,
   };
+}
+
+/**
+ * Strict university filter for visit rows (A–E). When a university is requested,
+ * never fall back to another college.
+ * @template T
+ * @param {T[]} visits
+ * @param {unknown} placementUniversityRaw
+ * @returns {T[]}
+ */
+function filterVisitsByUniversity(visits, placementUniversityRaw) {
+  const universityFilter = normalizePlacementUniversityQuery(placementUniversityRaw);
+  if (universityFilter == null) return visits;
+  return (visits || []).filter(
+    (v) => universityKeyFromVisitField(v?.university) === universityFilter
+  );
 }
 
 /** Dropped from API responses; internal split-schema bookkeeping only. */
@@ -314,6 +338,7 @@ const DYNAMIC_KEY_SET = new Set([
   "date_of_visit",
   "messageDate",
   "cluster",
+  "university",
   "views",
   "status",
   "offCampus",
@@ -1374,7 +1399,8 @@ function mergeApprovedVisitsIntoSyntheticVisit(visitsSortedDesc) {
 export async function findAnyLatestVisitForCompanyYear(
   companyId,
   year = COMPANY_VISIT_YEAR,
-  placementClusterRaw = null
+  placementClusterRaw = null,
+  placementUniversityRaw = null
 ) {
   const match = buildCompanyVisitCompanyYearMatch(companyId, year);
   if (!match) return null;
@@ -1383,12 +1409,13 @@ export async function findAnyLatestVisitForCompanyYear(
     .lean();
   if (!candidatesRaw.length) return null;
   const clusterFilter = normalizePlacementClusterQuery(placementClusterRaw);
-  const scopedRaw =
+  let scopedRaw =
     clusterFilter == null
       ? candidatesRaw
       : candidatesRaw.filter(
           (v) => clusterKeyFromPlacementVisitClusterField(v?.cluster) === clusterFilter
         );
+  scopedRaw = filterVisitsByUniversity(scopedRaw, placementUniversityRaw);
   if (!scopedRaw.length) return null;
   return visitWithPlainRoleCtc(scopedRaw[0]);
 }
@@ -1692,7 +1719,8 @@ async function findAnyLatestVisitForCompanyYearMatchingContext(
   companyId,
   yearRaw,
   placementContextRaw,
-  placementClusterRaw = null
+  placementClusterRaw = null,
+  placementUniversityRaw = null
 ) {
   const ctx = normalizePlacementContextParam(placementContextRaw);
   const year = normalizeCompanyDetailYear(yearRaw);
@@ -1706,12 +1734,13 @@ async function findAnyLatestVisitForCompanyYearMatchingContext(
   if (!candidatesRaw.length) return null;
 
   const clusterFilter = normalizePlacementClusterQuery(placementClusterRaw);
-  const scopedRaw =
+  let scopedRaw =
     clusterFilter == null
       ? candidatesRaw
       : candidatesRaw.filter(
           (v) => clusterKeyFromPlacementVisitClusterField(v?.cluster) === clusterFilter
         );
+  scopedRaw = filterVisitsByUniversity(scopedRaw, placementUniversityRaw);
   if (!scopedRaw.length) return null;
   const candidates = scopedRaw.map((v) => visitWithPlainRoleCtc(v));
   return pickVisitCandidateForPlacementContext(candidates, ctx);
@@ -1745,9 +1774,11 @@ export async function findApprovedVisitForCompanyDetail(
   placementContextRaw = null,
   companyVisitIdHint = null,
   placementClusterRaw = null,
-  staticRowForVisitHint = null
+  staticRowForVisitHint = null,
+  placementUniversityRaw = null
 ) {
   const clusterFilter = normalizePlacementClusterQuery(placementClusterRaw);
+  const universityFilter = normalizePlacementUniversityQuery(placementUniversityRaw);
   const hint = toObjectId(companyVisitIdHint);
   const yearNorm = normalizeCompanyDetailYear(yearRaw);
 
@@ -1765,7 +1796,9 @@ export async function findApprovedVisitForCompanyDetail(
       visitEffectiveMatchYear(hintedRaw) === yearNorm &&
       visitRowBelongsToCompanyStatic(hintedRaw, staticRowForVisitHint) &&
       (!clusterFilter ||
-        clusterKeyFromPlacementVisitClusterField(hintedRaw?.cluster) === clusterFilter)
+        clusterKeyFromPlacementVisitClusterField(hintedRaw?.cluster) === clusterFilter) &&
+      (!universityFilter ||
+        universityKeyFromVisitField(hintedRaw?.university) === universityFilter)
     ) {
       return visitWithPlainRoleCtc(hintedRaw);
     }
@@ -1780,6 +1813,12 @@ export async function findApprovedVisitForCompanyDetail(
         clusterKeyFromPlacementVisitClusterField(v?.cluster) === clusterFilter
     );
     // Strict cluster isolation: if a cluster is requested, never fall back to another cluster.
+    if (scoped.length === 0) return null;
+    candidates = scoped;
+  }
+
+  if (universityFilter) {
+    const scoped = filterVisitsByUniversity(candidates, universityFilter);
     if (scoped.length === 0) return null;
     candidates = scoped;
   }
@@ -1800,8 +1839,11 @@ export async function findApprovedVisitForCompanyDetail(
         if (sameCompany) {
           const plain = visitWithPlainRoleCtc(hintedRaw);
           if (
-            !clusterFilter ||
-            clusterKeyFromPlacementVisitClusterField(plain?.cluster) === clusterFilter
+            (!clusterFilter ||
+              clusterKeyFromPlacementVisitClusterField(plain?.cluster) ===
+                clusterFilter) &&
+            (!universityFilter ||
+              universityKeyFromVisitField(plain?.university) === universityFilter)
           ) {
             return plain;
           }
@@ -1820,7 +1862,8 @@ export async function findApprovedVisitForCompanyDetail(
  */
 export async function getApprovedPlacementYearsForCompany(
   companyId,
-  placementClusterRaw = null
+  placementClusterRaw = null,
+  placementUniversityRaw = null
 ) {
   const cid = toObjectId(companyId);
   if (!cid) return [];
@@ -1829,18 +1872,20 @@ export async function getApprovedPlacementYearsForCompany(
     companyId: cid,
     status: "approved",
   })
-    .select("year cluster")
+    .select("year cluster university")
     .lean();
   const clusterFilter = normalizePlacementClusterQuery(placementClusterRaw);
-  const years = (clusterFilter == null
-    ? rows
-    : rows.filter(
-        (v) => clusterKeyFromPlacementVisitClusterField(v?.cluster) === clusterFilter
-      )
-  ).map((v) => Number(v?.year));
-  return [...new Set(years)]
-    .filter((y) => Number.isFinite(y) && allowed.has(y))
-    .sort((a, b) => a - b);
+  let scoped =
+    clusterFilter == null
+      ? rows
+      : rows.filter(
+          (v) => clusterKeyFromPlacementVisitClusterField(v?.cluster) === clusterFilter
+        );
+  scoped = filterVisitsByUniversity(scoped, placementUniversityRaw);
+  const years = scoped
+    .map((v) => Number(v.year))
+    .filter((y) => allowed.has(y));
+  return [...new Set(years)].sort((a, b) => a - b);
 }
 
 /**
@@ -1871,11 +1916,13 @@ export async function getCompanyDetailLegacyMergedById(
   placementYear = COMPANY_VISIT_YEAR,
   placementContextRaw = null,
   companyVisitIdHint = null,
-  placementClusterRaw = null
+  placementClusterRaw = null,
+  placementUniversityRaw = null
 ) {
   await loadPlacementHubSettingsCache();
   const ctx = normalizePlacementContextParam(placementContextRaw);
   const clusterFilter = normalizePlacementClusterQuery(placementClusterRaw);
+  const universityFilter = normalizePlacementUniversityQuery(placementUniversityRaw);
   const _id = toObjectId(id);
   if (!_id) {
     return { merged: null, visit: null, staticRow: null };
@@ -1890,13 +1937,19 @@ export async function getCompanyDetailLegacyMergedById(
     approvedOnly: true,
   });
   const mustDoTopicVisits = mustDoTopicVisitsByCompany.get(String(_id)) ?? [];
-  const scopedApprovedVisits =
+  let scopedApprovedVisits =
     clusterFilter == null
       ? allApprovedVisits
       : allApprovedVisits.filter(
           (v) =>
             clusterKeyFromPlacementVisitClusterField(v?.cluster) === clusterFilter
         );
+  if (universityFilter != null) {
+    scopedApprovedVisits = filterVisitsByUniversity(
+      scopedApprovedVisits,
+      universityFilter
+    );
+  }
   const totalGotInByYear = buildTotalGotInByYearFromVisits(scopedApprovedVisits);
   const placementBranchStatsByYear = buildPlacementBranchStatsByYearFromVisits(
     scopedApprovedVisits,
@@ -1908,7 +1961,8 @@ export async function getCompanyDetailLegacyMergedById(
     placementContextRaw,
     companyVisitIdHint,
     placementClusterRaw,
-    staticRow
+    staticRow,
+    placementUniversityRaw
   );
   if (visitApproved) {
     const visitForMerge = withClusterMustDoTopics(visitApproved, mustDoTopicVisits);
@@ -1949,7 +2003,8 @@ export async function getCompanyDetailLegacyMergedById(
   const anyVisit = await findAnyLatestVisitForCompanyYear(
     _id,
     placementYear,
-    placementClusterRaw
+    placementClusterRaw,
+    placementUniversityRaw
   );
   if (anyVisit) {
     return { merged: null, visit: null, staticRow: null };
@@ -1988,14 +2043,19 @@ export async function getCompanyDetailLegacyMergedById(
  * @returns {Promise<Record<string, unknown>[]>}
  */
 export async function listApprovedCompaniesLegacyMerged(
-  placementYear = null
+  placementYear = null,
+  placementUniversityRaw = null
 ) {
   await loadPlacementHubSettingsCache();
+  const universityFilter = normalizePlacementUniversityQuery(placementUniversityRaw);
   const pipeline = [
     {
       $match: {
         status: "approved",
         ...matchApprovedVisitYearInDetailYearsExpr(),
+        ...(universityFilter
+          ? { university: universityFilter }
+          : {}),
       },
     },
     { $group: { _id: "$companyId" } },
@@ -2049,7 +2109,12 @@ export async function listApprovedCompaniesLegacyMerged(
   for (const row of rows) {
     const staticRow = row.c;
     if (!staticRow) continue;
-    const allVisits = visitsByCompany.get(String(row._id)) ?? [];
+    const allVisitsRaw = visitsByCompany.get(String(row._id)) ?? [];
+    const allVisits =
+      universityFilter == null
+        ? allVisitsRaw
+        : filterVisitsByUniversity(allVisitsRaw, universityFilter);
+    if (!allVisits.length) continue;
     const visitsForListing = (() => {
       if (normalizedListingYear == null) {
         return [...allVisits].sort(sortVisitsForListing);
@@ -2072,7 +2137,7 @@ export async function listApprovedCompaniesLegacyMerged(
       return [...matchedYearVisits, ...rest].sort(sortVisitsForListing);
     })();
 
-    /** One list row per company per cluster (avoid duplicate company cards within same cluster). */
+    /** One list row per company per cluster (within the selected university). */
     const visitsByCluster = new Map();
     for (const visit of visitsForListing) {
       const clusterKey = listingHubClusterKey(visit);
@@ -2141,6 +2206,7 @@ export async function listApprovedCompaniesLegacyMerged(
       );
       list.push({
         ...merged,
+        university: universityKeyFromVisitField(visit?.university) ?? undefined,
         placementVisitYear: normalizeCompanyDetailYear(visit?.year) ?? undefined,
         placementCompanyVisitId: visit?._id ? String(visit._id) : undefined,
         totalGotInByYear,
@@ -2171,13 +2237,18 @@ export async function listApprovedCompaniesLegacyMerged(
  * {@link listApprovedCompaniesLegacyMerged} (any approved year in range).
  * @returns {Promise<Record<string, unknown>[]>}
  */
-async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
+async function listApprovedMinimalRowsForCategoryPreview(
+  placementYear = null,
+  placementUniversityRaw = null
+) {
   await loadPlacementHubSettingsCache();
+  const universityFilter = normalizePlacementUniversityQuery(placementUniversityRaw);
   const pipeline = [
     {
       $match: {
         status: "approved",
         ...matchApprovedVisitYearInDetailYearsExpr(),
+        ...(universityFilter ? { university: universityFilter } : {}),
       },
     },
     { $group: { _id: "$companyId" } },
@@ -2201,7 +2272,12 @@ async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
   for (const row of rows) {
     const staticRow = row.c;
     if (!staticRow) continue;
-    const allVisits = visitsByCompany.get(String(row._id)) ?? [];
+    const allVisitsRaw = visitsByCompany.get(String(row._id)) ?? [];
+    const allVisits =
+      universityFilter == null
+        ? allVisitsRaw
+        : filterVisitsByUniversity(allVisitsRaw, universityFilter);
+    if (!allVisits.length) continue;
     const listingYearNorm =
       placementYear != null && placementYear !== ""
         ? normalizeCompanyDetailYear(placementYear)
@@ -2305,10 +2381,18 @@ async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
  * Small JSON for 2026 category tiles: counts per bucket + up to 5 logo rows each.
  * @param {unknown} [placementYear]
  * @param {unknown} [clusterRaw] — optional `cs` / `ec` / `me` (same as GET /api/companies?cluster=)
+ * @param {unknown} [universityRaw] — optional A–E (same as GET /api/companies?university=)
  * @returns {Promise<{ counts: object, logos: object }>}
  */
-export async function getCompanyCategoryPreviewLogos(placementYear = null, clusterRaw = null) {
-  const rows = await listApprovedMinimalRowsForCategoryPreview(placementYear);
+export async function getCompanyCategoryPreviewLogos(
+  placementYear = null,
+  clusterRaw = null,
+  universityRaw = null
+) {
+  const rows = await listApprovedMinimalRowsForCategoryPreview(
+    placementYear,
+    universityRaw
+  );
   const withCategory = rows.map((c) => {
     const base = attachPlacementCategoryToCompany(c);
     return {
@@ -2350,7 +2434,8 @@ export async function getCompanyMergedForAdminById(
   placementYear = COMPANY_VISIT_YEAR,
   placementListContext = null,
   companyVisitIdHint = null,
-  placementClusterRaw = null
+  placementClusterRaw = null,
+  placementUniversityRaw = null
 ) {
   const _id = toObjectId(id);
   if (!_id) {
@@ -2362,6 +2447,7 @@ export async function getCompanyMergedForAdminById(
   }
   const year = normalizeCompanyDetailYear(placementYear);
   const clusterFilter = normalizePlacementClusterQuery(placementClusterRaw);
+  const universityFilter = normalizePlacementUniversityQuery(placementUniversityRaw);
   const visitHintOid = toObjectId(companyVisitIdHint);
   let visit = null;
   if (visitHintOid) {
@@ -2371,7 +2457,9 @@ export async function getCompanyMergedForAdminById(
       visitEffectiveMatchYear(hit) === year &&
       visitRowBelongsToCompanyStatic(hit, staticRow) &&
       (!clusterFilter ||
-        clusterKeyFromPlacementVisitClusterField(hit?.cluster) === clusterFilter)
+        clusterKeyFromPlacementVisitClusterField(hit?.cluster) === clusterFilter) &&
+      (!universityFilter ||
+        universityKeyFromVisitField(hit?.university) === universityFilter)
     ) {
       visit = visitWithPlainRoleCtc(hit);
     }
@@ -2387,9 +2475,15 @@ export async function getCompanyMergedForAdminById(
             _id,
             year,
             ctxTrim,
-            placementClusterRaw
+            placementClusterRaw,
+            placementUniversityRaw
           )
-        : await findAnyLatestVisitForCompanyYear(_id, year, placementClusterRaw);
+        : await findAnyLatestVisitForCompanyYear(
+            _id,
+            year,
+            placementClusterRaw,
+            placementUniversityRaw
+          );
   }
   const mustDoTopicVisitsByCompany = await fetchMustDoTopicVisitsByCompany([_id]);
   const mustDoTopicVisits = mustDoTopicVisitsByCompany.get(String(_id)) ?? [];
@@ -3495,13 +3589,14 @@ export async function createCompanyWithVisit(data) {
   const company = await CompanyStatic.create(staticDoc);
   const newCompanyId = company._id;
 
-  const keyParts = normalizeVisitKeyParts(d0.type, d0.cluster);
+  const keyParts = normalizeVisitKeyParts(d0.type, d0.cluster, d0.university);
   const visitDoc = omitUndefinedWrite({
     ...d0,
     companyId: newCompanyId,
     year: COMPANY_VISIT_YEAR,
     type: keyParts.type,
     cluster: keyParts.cluster,
+    university: keyParts.university,
     migratedAt: now,
     /** New visits must be reviewable in admin pending list (rows without status were previously invisible). */
     status: "pending",
@@ -3682,7 +3777,8 @@ export async function persistMergedCompany(
   placementYear = COMPANY_VISIT_YEAR,
   placementListContext = null,
   companyVisitIdHint = null,
-  placementClusterRaw = null
+  placementClusterRaw = null,
+  placementUniversityRaw = null
 ) {
   await updateCompanyStatic(companyId, mergedPayload);
   await ensureAdminVisitForYear(companyId, placementYear);
@@ -3691,7 +3787,8 @@ export async function persistMergedCompany(
     placementYear,
     placementListContext,
     companyVisitIdHint,
-    placementClusterRaw
+    placementClusterRaw,
+    placementUniversityRaw
   );
   await updateCompanyVisit(companyId, mergedPayload, placementYear, visit);
 }
