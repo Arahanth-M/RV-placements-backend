@@ -28,14 +28,27 @@ const MAX_TOPICS_LEN = 2000;
 const MAX_OTHER_LABEL_LEN = 200;
 
 /**
+ * Parse optional non-negative integer. Blank/null → null (unknown).
+ * Invalid non-blank → undefined (caller should reject).
+ * @param {unknown} value
+ * @returns {number|null|undefined}
+ */
+function parseOptionalNonNegInt(value) {
+  if (value === null || value === undefined) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const n = typeof value === "number" ? value : Number(raw.replace(/,/g, ""));
+  if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) return undefined;
+  return Math.floor(n);
+}
+
+/**
  * @param {unknown} value
  * @returns {number|null}
  */
 function parseNonNegInt(value) {
-  if (value === null || value === undefined || value === "") return null;
-  const n = typeof value === "number" ? value : parseInt(String(value).trim(), 10);
-  if (!Number.isFinite(n) || n < 0) return null;
-  return Math.floor(n);
+  const parsed = parseOptionalNonNegInt(value);
+  return parsed === undefined ? null : parsed;
 }
 
 /**
@@ -46,6 +59,29 @@ function parseNonNegInt(value) {
 function sanitizeTextField(text, maxLen) {
   if (text == null) return "";
   return String(text).trim().slice(0, maxLen);
+}
+
+/**
+ * Accept legacy `type` string or `types` array → unique valid list.
+ * @param {Record<string, unknown>} raw
+ * @returns {string[]}
+ */
+export function normalizeRoundTypesFromRaw(raw) {
+  /** @type {string[]} */
+  const out = [];
+  const seen = new Set();
+  const push = (value) => {
+    const type = sanitizeTextField(value, 32).toLowerCase();
+    if (!RECRUITMENT_ROUND_TYPES.includes(type) || seen.has(type)) return;
+    seen.add(type);
+    out.push(type);
+  };
+
+  if (Array.isArray(raw?.types)) {
+    for (const t of raw.types) push(t);
+  }
+  if (out.length === 0) push(raw?.type);
+  return out;
 }
 
 /**
@@ -79,21 +115,27 @@ export function sanitizeRecruitmentProcess(input) {
     if (!topics) {
       return { ok: false, error: "OA topics are required when online assessment occurred." };
     }
-    const attended = parseNonNegInt(rawOa.attended);
-    const cleared = parseNonNegInt(rawOa.cleared);
-    if (attended == null) {
-      return { ok: false, error: "OA attended count is required when online assessment occurred." };
+    const attended = parseOptionalNonNegInt(rawOa.attended);
+    const cleared = parseOptionalNonNegInt(rawOa.cleared);
+    if (attended === undefined) {
+      return {
+        ok: false,
+        error: "OA attended must be blank (unknown) or a whole number 0 or more.",
+      };
     }
-    if (cleared == null) {
-      return { ok: false, error: "OA cleared count is required when online assessment occurred." };
+    if (cleared === undefined) {
+      return {
+        ok: false,
+        error: "OA cleared must be blank (unknown) or a whole number 0 or more.",
+      };
     }
-    if (cleared > attended) {
+    if (attended != null && cleared != null && cleared > attended) {
       return { ok: false, error: "OA cleared count cannot exceed attended count." };
     }
     onlineAssessment.topics = topics;
     onlineAssessment.mode = mode;
-    onlineAssessment.attended = attended;
-    onlineAssessment.cleared = cleared;
+    if (attended != null) onlineAssessment.attended = attended;
+    if (cleared != null) onlineAssessment.cleared = cleared;
   }
 
   const rawRounds = /** @type {Record<string, unknown>} */ (input).rounds;
@@ -123,16 +165,20 @@ export function sanitizeRecruitmentProcess(input) {
 
     if (occurred) {
       anyRoundOccurred = true;
-      const type = sanitizeTextField(raw.type, 32).toLowerCase();
-      if (!RECRUITMENT_ROUND_TYPES.includes(type)) {
+      const types = normalizeRoundTypesFromRaw(
+        /** @type {Record<string, unknown>} */ (raw)
+      );
+      if (types.length === 0) {
         return {
           ok: false,
-          error: `Round ${roundNumber}: select a valid round type.`,
+          error: `Round ${roundNumber}: select at least one valid round type.`,
         };
       }
-      round.type = type;
+      round.types = types;
+      // Keep scalar `type` for older readers / timeline fallbacks.
+      round.type = types[0];
 
-      if (type === "other") {
+      if (types.includes("other")) {
         const otherTypeLabel = sanitizeTextField(raw.otherTypeLabel, MAX_OTHER_LABEL_LEN);
         if (!otherTypeLabel) {
           return {
@@ -152,28 +198,28 @@ export function sanitizeRecruitmentProcess(input) {
       }
       round.mode = mode;
 
-      const attended = parseNonNegInt(raw.attended);
-      const cleared = parseNonNegInt(raw.cleared);
-      if (attended == null) {
+      const attended = parseOptionalNonNegInt(raw.attended);
+      const cleared = parseOptionalNonNegInt(raw.cleared);
+      if (attended === undefined) {
         return {
           ok: false,
-          error: `Round ${roundNumber}: attended count is required.`,
+          error: `Round ${roundNumber}: attended must be blank (unknown) or a whole number 0 or more.`,
         };
       }
-      if (cleared == null) {
+      if (cleared === undefined) {
         return {
           ok: false,
-          error: `Round ${roundNumber}: cleared count is required.`,
+          error: `Round ${roundNumber}: cleared must be blank (unknown) or a whole number 0 or more.`,
         };
       }
-      if (cleared > attended) {
+      if (attended != null && cleared != null && cleared > attended) {
         return {
           ok: false,
           error: `Round ${roundNumber}: cleared count cannot exceed attended count.`,
         };
       }
-      round.attended = attended;
-      round.cleared = cleared;
+      if (attended != null) round.attended = attended;
+      if (cleared != null) round.cleared = cleared;
     }
 
     rounds.push(round);

@@ -104,6 +104,77 @@ describe("sanitizeRecruitmentProcess", () => {
     });
     expect(result.ok).toBe(false);
   });
+
+  it("accepts blank attended/cleared as unknown", () => {
+    const result = sanitizeRecruitmentProcess({
+      onlineAssessment: {
+        occurred: true,
+        mode: "online",
+        topics: "DSA",
+        attended: "",
+        cleared: "",
+      },
+      rounds: [
+        {
+          roundNumber: 1,
+          occurred: true,
+          types: ["technical"],
+          mode: "online",
+          attended: null,
+          cleared: "",
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.onlineAssessment.attended).toBeUndefined();
+      expect(result.value.onlineAssessment.cleared).toBeUndefined();
+      expect(result.value.rounds[0].attended).toBeUndefined();
+      expect(result.value.rounds[0].cleared).toBeUndefined();
+    }
+  });
+
+  it("accepts multiple round types", () => {
+    const result = sanitizeRecruitmentProcess({
+      onlineAssessment: { occurred: false },
+      rounds: [
+        {
+          roundNumber: 1,
+          occurred: true,
+          types: ["technical", "projects"],
+          mode: "online",
+          attended: 10,
+          cleared: 5,
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.rounds[0].types).toEqual(["technical", "projects"]);
+      expect(result.value.rounds[0].type).toBe("technical");
+    }
+  });
+
+  it("normalizes legacy single type into types array", () => {
+    const result = sanitizeRecruitmentProcess({
+      onlineAssessment: { occurred: false },
+      rounds: [
+        {
+          roundNumber: 1,
+          occurred: true,
+          type: "aptitude",
+          mode: "offline",
+          attended: 8,
+          cleared: 3,
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.rounds[0].types).toEqual(["aptitude"]);
+      expect(result.value.rounds[0].type).toBe("aptitude");
+    }
+  });
 });
 
 describe("isRecruitmentProcessEmpty", () => {

@@ -38,6 +38,7 @@ import {
   placementHubClusterFromPpoBranchCode,
 } from "../utils/placementCluster.js";
 import { PPO_BRANCH_CODES, PPO_BRANCH_CODES_ARRAY, isValidPpoBranchCode, normalizePpoBranchCode } from "../utils/ppoBranchCodes.js";
+import { minCgpaFromEligibilityText } from "../utils/extractMinCgpa.js";
 import escapeRegexLiteral from "../utils/regexEscape.js";
 import { invalidateCompanyDetailCache } from "./companyDetailCache.js";
 import {
@@ -287,6 +288,7 @@ const LEGACY_TO_DYNAMIC = {
 const DYNAMIC_KEY_SET = new Set([
   "type",
   "eligibility",
+  "minCgpa",
   "roles",
   "onlineQuestions",
   "onlineQuestions_solution",
@@ -539,6 +541,122 @@ function pickDreamHubListingVisit(clusterVisits, scopedVisits, normalizedListing
     if (yearHit) return yearHit;
   }
   return sorted[0] ?? null;
+}
+
+/**
+ * @param {unknown} visit
+ * @returns {number|null}
+ */
+function numericMinCgpaFromVisit(visit) {
+  if (!visit || typeof visit !== "object") return null;
+  const raw = visit.minCgpa;
+  if (raw == null || raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Like {@link pickVisitCandidateForPlacementContext}, but never falls back to a visit that
+ * does not match the hub context. Used for CGPA filter maps so Dream FTE (minCgpa 7) is not
+ * used as the Summer/PPO cutoff when the PPO row lives in another year (e.g. IBM 2027 PPO=8).
+ * @param {Record<string, unknown>[]} candidates
+ * @param {string} ctx
+ */
+function pickVisitStrictlyForPlacementContext(candidates, ctx) {
+  if (!Array.isArray(candidates) || candidates.length === 0) return null;
+
+  if (ctx === "off_campus") {
+    const off = candidates.filter((v) => visitIsMarkedOffCampus(v));
+    return off[0] ?? null;
+  }
+
+  if (ctx === "internship_only") {
+    return candidates.filter((v) => visitQualifiesInternshipOnlyHubRow(v))[0] ?? null;
+  }
+
+  if (ctx === "summer_internship") {
+    const strict = candidates.filter((v) => visitQualifiesSummerInternshipListingRow(v));
+    if (strict[0]) return strict[0];
+    const ppo = candidates.filter((v) => visitIsPpo(v) && !visitIsMarkedOffCampus(v));
+    return ppo[0] ?? null;
+  }
+
+  if (ctx === "dream" || ctx === "open_dream") {
+    const fteRows = candidates.filter((v) => visitQualifiesDreamTierRow(v));
+    if (fteRows[0]) return fteRows[0];
+    const fteish = candidates.filter((v) => {
+      if (visitIsMarkedOffCampus(v)) return false;
+      return visitTypeCompactLower(v).includes("fte");
+    });
+    if (fteish[0]) return fteish[0];
+    const nonPpo = candidates.filter((v) => !visitIsPpo(v) && !visitIsMarkedOffCampus(v));
+    return nonPpo[0] ?? null;
+  }
+
+  return null;
+}
+
+/**
+ * Prefer a listing-year visit that matches the hub context; if none, use any-year match.
+ * Does not borrow minCgpa from a different visit type in the listing year.
+ * @param {Record<string, unknown>[]} scopedVisits
+ * @param {string} ctx
+ * @param {number|null} listingYear
+ */
+function pickScopedVisitForPlacementContext(scopedVisits, ctx, listingYear) {
+  if (!Array.isArray(scopedVisits) || scopedVisits.length === 0) return null;
+  const sorted = [...scopedVisits].sort(sortVisitsForListing);
+  if (listingYear != null) {
+    const yearPool = sorted.filter((v) => visitEffectiveMatchYear(v) === listingYear);
+    const yearHit = pickVisitStrictlyForPlacementContext(yearPool, ctx);
+    if (yearHit) return yearHit;
+  }
+  return pickVisitStrictlyForPlacementContext(sorted, ctx);
+}
+
+/**
+ * CGPA cutoffs for this company+cluster, keyed by placement hub tier / visit type.
+ * Used by list CGPA filters so Dream vs Summer vs Internship-only use the matching visit.
+ * @param {Record<string, unknown>[]} scopedVisits
+ * @param {number|null} listingYear
+ */
+function buildMinCgpaFilterMaps(scopedVisits, listingYear) {
+  const tiers = [
+    "dream",
+    "open_dream",
+    "summer_internship",
+    "internship_only",
+    "off_campus",
+  ];
+  /** @type {Record<string, number|null>} */
+  const minCgpaByTier = {};
+  for (const tier of tiers) {
+    const visit = pickScopedVisitForPlacementContext(scopedVisits, tier, listingYear);
+    minCgpaByTier[tier] = numericMinCgpaFromVisit(visit);
+  }
+
+  /** @type {Record<string, number|null>} */
+  const minCgpaByVisitType = {};
+  const sorted = [...(Array.isArray(scopedVisits) ? scopedVisits : [])].sort(
+    sortVisitsForListing
+  );
+  const yearPreferred =
+    listingYear != null
+      ? [
+          ...sorted.filter((v) => visitEffectiveMatchYear(v) === listingYear),
+          ...sorted.filter((v) => visitEffectiveMatchYear(v) !== listingYear),
+        ]
+      : sorted;
+  for (const visit of yearPreferred) {
+    const typeKey = String(visit?.type || "")
+      .trim()
+      .toLowerCase();
+    if (!typeKey) continue;
+    if (Object.prototype.hasOwnProperty.call(minCgpaByVisitType, typeKey)) continue;
+    minCgpaByVisitType[typeKey] = numericMinCgpaFromVisit(visit);
+  }
+
+  return { minCgpaByTier, minCgpaByVisitType };
 }
 
 /** Summer hub visit for list sort / subtitle when a strict PPO row exists. */
@@ -2139,6 +2257,10 @@ export async function listApprovedCompaniesLegacyMerged(
         scopedVisits,
         placementYear
       );
+      const { minCgpaByTier, minCgpaByVisitType } = buildMinCgpaFilterMaps(
+        scopedVisits,
+        normalizedListingYear
+      );
       list.push({
         ...merged,
         placementVisitYear: normalizeCompanyDetailYear(visit?.year) ?? undefined,
@@ -2160,6 +2282,8 @@ export async function listApprovedCompaniesLegacyMerged(
         placementInternshipOnlyDisplayType: internshipOnlyPref.displayType,
         placementInternshipOnlyDetailYear: internshipOnlyPref.detailYear,
         placementSummerDateOfVisit,
+        minCgpaByTier,
+        minCgpaByVisitType,
       });
     }
   }
@@ -3509,6 +3633,9 @@ export async function createCompanyWithVisit(data) {
   if (visitDoc.roles !== undefined) {
     visitDoc.roles = sanitizeRolesArrayForPersist(visitDoc.roles);
   }
+  if (Object.prototype.hasOwnProperty.call(visitDoc, "eligibility") || visitDoc.eligibility != null) {
+    visitDoc.minCgpa = minCgpaFromEligibilityText(visitDoc.eligibility);
+  }
 
   try {
     const vins = await CompanyVisit.create(visitDoc);
@@ -3549,6 +3676,10 @@ export async function updateCompanyVisit(
   }
   if ($set.roles !== undefined) {
     $set.roles = sanitizeRolesArrayForPersist($set.roles);
+  }
+  // Keep numeric cutoff in sync whenever eligibility prose is written.
+  if (Object.prototype.hasOwnProperty.call($set, "eligibility")) {
+    $set.minCgpa = minCgpaFromEligibilityText($set.eligibility);
   }
   const year = normalizeCompanyDetailYear(placementYear);
   $set.migratedAt = new Date();
@@ -3619,6 +3750,7 @@ export async function approveAndNormalizeSingleCompanyVisitById(
       : [],
     interviewProcess: Array.isArray(existing.interviewProcess) ? existing.interviewProcess : [],
     eligibility: existing.eligibility != null ? String(existing.eligibility) : "",
+    minCgpa: minCgpaFromEligibilityText(existing.eligibility),
     date_of_visit: existing.date_of_visit != null ? String(existing.date_of_visit) : "",
     messageDate: existing.messageDate ?? null,
     cluster: existing.cluster != null ? String(existing.cluster) : "",

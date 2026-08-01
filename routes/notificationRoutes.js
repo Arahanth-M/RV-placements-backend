@@ -11,6 +11,10 @@ import {
 } from "../services/notificationService.js";
 import authJWT from "../middleware/authJWT.js";
 import { subscribe } from "../services/realtime/notificationEmitter.js";
+import {
+  getNotificationSubscriptionStatus,
+  setNotificationSubscription,
+} from "../services/notificationPreferenceService.js";
 
 const notificationRouter = express.Router();
 
@@ -90,6 +94,72 @@ notificationRouter.get("/", async (req, res) => {
     res.status(200).json({ notifications, pageInfo });
   } catch (error) {
     console.error("❌ Error fetching notifications:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+notificationRouter.get("/subscription", async (req, res) => {
+  try {
+    const userId = userIdFromRequest(req, res);
+    if (!userId) return;
+
+    const status = await getNotificationSubscriptionStatus(userId);
+    res.status(200).json(status);
+  } catch (error) {
+    console.error("❌ Error fetching notification subscription:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+notificationRouter.post("/subscription", async (req, res) => {
+  try {
+    const userId = userIdFromRequest(req, res);
+    if (!userId) return;
+
+    if (req.user?.isAdminSession === true) {
+      return res.status(403).json({
+        error: "Admins cannot subscribe to email updates",
+        subscribed: false,
+      });
+    }
+
+    const result = await setNotificationSubscription(userId, true);
+    if (!result.ok) {
+      return res.status(result.reason === "not_found" ? 404 : 400).json({
+        error: "Could not subscribe",
+        subscribed: false,
+      });
+    }
+
+    res.status(200).json({
+      message: "Subscribed. You will receive email updates about new companies and changes.",
+      subscribed: true,
+    });
+  } catch (error) {
+    console.error("❌ Error subscribing to notifications:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+notificationRouter.delete("/subscription", async (req, res) => {
+  try {
+    const userId = userIdFromRequest(req, res);
+    if (!userId) return;
+
+    const result = await setNotificationSubscription(userId, false);
+    if (!result.ok) {
+      return res.status(result.reason === "not_found" ? 404 : 400).json({
+        error: "Could not unsubscribe",
+        subscribed: false,
+      });
+    }
+
+    res.status(200).json({
+      message: "Unsubscribed from email updates. You will still get in-app notifications.",
+      subscribed: false,
+    });
+  } catch (error) {
+    console.error("❌ Error unsubscribing from notifications:", error);
     res.status(500).json({ error: "Server error" });
   }
 });

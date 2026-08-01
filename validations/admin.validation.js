@@ -78,6 +78,11 @@ const recruitmentRoundSchema = Joi.object({
   type: Joi.string()
     .valid("technical", "aptitude", "resume_based", "projects", "other")
     .optional(),
+  types: Joi.array()
+    .items(Joi.string().valid("technical", "aptitude", "resume_based", "projects", "other"))
+    .min(1)
+    .max(5)
+    .optional(),
   mode: Joi.string().valid("online", "offline").optional(),
   otherTypeLabel: Joi.string().trim().max(200).allow("").optional(),
   attended: Joi.alternatives().try(Joi.number().integer().min(0), Joi.string().trim()).optional(),

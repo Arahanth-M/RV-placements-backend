@@ -19,6 +19,11 @@ const companyVisitSchema = new mongoose.Schema(
     interviewProcess: [{ type: String, trim: true }],
     must_do_topics: [{ type: String, trim: true }],
     eligibility: { type: String, trim: true },
+    /**
+     * Numeric CGPA cutoff extracted from `eligibility` free text (0–10 scale).
+     * Null when eligibility has no parseable cutoff.
+     */
+    minCgpa: { type: Number, min: 0, max: 10, default: null },
     date_of_visit: { type: String, trim: true },
     /** Optional; e.g. from `companies1_copy` / backfill. Type preserved (Date, string, etc.) */
     messageDate: { type: mongoose.Schema.Types.Mixed },

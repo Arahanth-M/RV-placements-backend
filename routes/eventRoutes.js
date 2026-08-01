@@ -17,6 +17,8 @@ import {
   loadEventsCatalogFromDb,
   invalidateEventCatalogCache,
 } from "../services/eventCatalogCache.js";
+import { dispatchEvent } from "../services/events/eventDispatcher.js";
+import { EVENT_TYPES } from "../services/events/eventTypes.js";
 
 const eventRouter = express.Router();
 
@@ -171,6 +173,12 @@ eventRouter.post("/", authJWT, requireAdmin, validateRequest(eventCreateSchema),
       .select("-__v");
 
     await invalidateEventCatalogCache();
+
+    dispatchEvent(EVENT_TYPES.EVENT_CREATED, {
+      eventId: event._id,
+      eventTitle: event.title,
+      eventUrl: event.url,
+    });
 
     res.status(201).json(populatedEvent);
   } catch (error) {
