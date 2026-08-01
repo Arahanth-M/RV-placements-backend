@@ -1,3 +1,5 @@
+import { collegeIdFromEmail } from "./collegeScope.js";
+
 /**
  * Claims embedded in the access JWT at login. authJWT verifies the signature only
  * (no DB) and attaches this object to req.user.
@@ -18,6 +20,7 @@ export function buildJwtPayloadFromUser(user, options = {}) {
   return {
     userId,
     email,
+    collegeId: collegeIdFromEmail(email),
     _id: String(doc._id),
     username,
     picture,

@@ -15,6 +15,7 @@ import {
   adminLimiter,
   submissionLimiter,
   resumeLimiter,
+  prepPathLimiter,
 } from "../middleware/rateLimiter.js";
 import sanitizeInput from "../middleware/sanitizeInput.js";
 dotenv.config();
@@ -110,6 +111,7 @@ export function attachMainRouteRateLimiters(app) {
   app.use(routes.ADMIN, adminLimiter);
   app.use(routes.SUBMISSIONS, submissionLimiter);
   app.use(routes.RESUME, resumeLimiter);
+  app.use(routes.PREP_PATH, prepPathLimiter);
 }
 
 export function createExpressApp() {

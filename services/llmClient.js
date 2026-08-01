@@ -92,12 +92,33 @@ export const callLLM = async (messages, options = {}) => {
     return completion?.choices?.[0]?.message?.content?.trim() || "";
   } catch (error) {
     const message = getErrorMessage(error);
-    const isRateLimit = String(message).toLowerCase().includes("rate limit") || error?.status === 429;
+    const lower = String(message).toLowerCase();
+    const isRateLimit =
+      lower.includes("rate limit") ||
+      lower.includes("rate_limit") ||
+      lower.includes("tokens per minute") ||
+      lower.includes("tpm") ||
+      error?.status === 429 ||
+      error?.status === 413;
 
-    // Retry once with 8b model if 70b hits rate limit
-    if (isRateLimit && options?.model !== "llama-3.1-8b-instant" && options?.model !== "llama3-8b-8192") {
-      console.warn(`⚠️ [Groq] Rate limit hit on ${options?.model || DEFAULT_ORCHESTRATOR_MODEL}. Falling back to 8b model...`);
-      return callLLM(messages, { ...options, model: "llama-3.1-8b-instant" });
+    const alreadyOnFallback =
+      options?.model === "llama-3.1-8b-instant" ||
+      options?.model === "llama3-8b-8192";
+
+    // Retry once with 8b (+ smaller max_tokens) if 70b hits rate/TPM limits
+    if (isRateLimit && !alreadyOnFallback) {
+      console.warn(
+        `⚠️ [Groq] Rate/TPM limit on ${options?.model || DEFAULT_ORCHESTRATOR_MODEL}. Falling back to 8b...`
+      );
+      const nextMax =
+        typeof options?.max_tokens === "number" && Number.isFinite(options.max_tokens)
+          ? Math.min(options.max_tokens, 3500)
+          : options?.max_tokens;
+      return callLLM(messages, {
+        ...options,
+        model: "llama-3.1-8b-instant",
+        max_tokens: nextMax,
+      });
     }
 
     throw new Error(`Groq LLM request failed: ${message}`);

@@ -1,3 +1,9 @@
+import optionalAuthJWT from "../middleware/optionalAuthJWT.js";
+import {
+  applyCollegeScopeToCompanyPayload,
+  collegeIdFromUser,
+  DEFAULT_COLLEGE_ID,
+} from "../utils/collegeScope.js";
 import express from "express";
 import authJWT from "../middleware/authJWT.js";
 import validateRequest from "../middleware/validateRequest.js";
@@ -17,6 +23,7 @@ import {
   getCompanyDetailRequestStatus,
   submitCompanyDetailRequest,
 } from "../services/companyDetailRequestService.js";
+import CompanyStatic from "../models/CompanyStatic.js";
 import {
   addHelpfulVote,
   createCompanyWithVisit,
@@ -62,20 +69,27 @@ companyRouter.post("/", authJWT, validateRequest(companyCreateSchema), async (re
         name: req.user.username,
         email: req.user.email,
       },
+      collegeId: collegeIdFromUser(req.user),
     });
-    const merged = mergeToLegacyShape(company, visit);
+    const merged = applyCollegeScopeToCompanyPayload(
+      mergeToLegacyShape(company, visit),
+      collegeIdFromUser(req.user)
+    );
     return res.status(201).json(merged);
   } catch (err) {
     console.error("Error creating company:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
-companyRouter.get("/", async (req, res) => {
+companyRouter.get("/", optionalAuthJWT, async (req, res) => {
   try {
     const selectedYear = req.query?.year;
     const requestedCluster = normalizePlacementClusterQuery(req.query?.cluster);
+    const collegeId = req.user
+      ? collegeIdFromUser(req.user)
+      : DEFAULT_COLLEGE_ID;
     // New DB: `companies` + approved `company_visits` (year-aware when `?year=` is sent)
-    const companies = await listApprovedCompaniesLegacyMerged(selectedYear);
+    const companies = await listApprovedCompaniesLegacyMerged(selectedYear, collegeId);
     const scopedCompanies =
       requestedCluster == null
         ? companies
@@ -90,8 +104,8 @@ companyRouter.get("/", async (req, res) => {
       const withCategory = attachPlacementCategoryToCompany({ ...rest, focusTags });
       return projectCompanyListResponse({
         ...withCategory,
-        category: c.category,
-        totalCtcRupees: c.totalCtcRupees,
+        category: withCategory.category ?? c.category,
+        totalCtcRupees: withCategory.totalCtcRupees ?? c.totalCtcRupees,
         placementAnyYearPpoOnCampus: c.placementAnyYearPpoOnCampus,
         placementHasDreamTierVisit: c.placementHasDreamTierVisit,
         placementDreamTierForListingYear: c.placementDreamTierForListingYear,
@@ -141,6 +155,29 @@ companyRouter.get("/preview-logos", async (req, res) => {
     return res.json(payload);
   } catch (e) {
     console.error("❌ Error fetching preview logos:", e?.message);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+/**
+ * Lightweight company name list for autocomplete (PrepPath, etc.).
+ * CompanyStatic only — no visit merge. Must stay above `GET /:id`.
+ */
+companyRouter.get("/names", async (_req, res) => {
+  try {
+    const rows = await CompanyStatic.find({})
+      .select({ _id: 1, name: 1 })
+      .sort({ name: 1 })
+      .lean();
+    const list = (Array.isArray(rows) ? rows : [])
+      .map((c) => ({
+        _id: c._id,
+        name: String(c?.name || "").trim(),
+      }))
+      .filter((c) => c._id && c.name);
+    return res.json(list);
+  } catch (e) {
+    console.error("❌ Error fetching company names:", e?.message);
     return res.status(500).json({ error: "Server error" });
   }
 });
@@ -215,6 +252,7 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
 
   try {
     const isAdminSession = req.user?.isAdminSession === true || req.user?.role === "admin";
+    const collegeId = collegeIdFromUser(req.user);
     if (!isAdminSession) {
       const loginEmail = String(req.user?.email || "").trim().toLowerCase();
       if (!loginEmail) {
@@ -266,14 +304,15 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
           touchUserActivity(),
         ]);
         console.log("HIT — company found in Redis and served from cache:", id, "y=", placementVisitYear);
+        const scoped = applyCollegeScopeToCompanyPayload(parsed, collegeId);
         const withMeta = {
-          ...parsed,
+          ...scoped,
           placementVisitYear,
           placementYearsAvailable,
         };
         return res.json(
           attachPlacementCategoryToCompany(withMeta, {
-            clusterKey: placementClusterResolved ?? parsed?.cluster,
+            clusterKey: placementClusterResolved ?? scoped?.cluster,
             placementYear: placementVisitYear,
           })
         );
@@ -347,7 +386,7 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
     delete companyObj.onlineQuestion_solution;
     delete companyObj.onlineQuestion_solutions;
 
-    const company = attachPlacementCategoryToCompany(
+    const companyForCache = attachPlacementCategoryToCompany(
       {
         ...companyObj,
         placementVisitYear,
@@ -366,7 +405,7 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
 
     if (key) {
       try {
-        const forCache = { ...company };
+        const forCache = { ...companyForCache };
         delete forCache.placementYearsAvailable;
         delete forCache.placementVisitYear;
         await redis.set(key, JSON.stringify(forCache), {
@@ -377,7 +416,15 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
       }
     }
 
-    return res.json(company);
+    const scoped = applyCollegeScopeToCompanyPayload(companyForCache, collegeId);
+    return res.json(
+      attachPlacementCategoryToCompany(scoped, {
+        clusterKey:
+          placementClusterResolved ??
+          clusterKeyFromPlacementVisitClusterField(scoped?.cluster),
+        placementYear: placementVisitYear,
+      })
+    );
   } catch (err) {
     if (err.name === "CastError") {
       return res.status(404).json({ error: "Company not found" });

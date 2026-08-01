@@ -56,6 +56,8 @@ const companyVisitSchema = new mongoose.Schema(
       {
         branchCode: { type: String, trim: true, lowercase: true },
         gotIn: { type: Number, default: 0, min: 0 },
+        /** Optional college scope (e.g. rvce / rvitm) when multi-college rows are stored. */
+        collegeId: { type: String, trim: true, default: "" },
       },
     ],
     views: { type: Number, default: 0, min: 0 },
@@ -122,7 +124,8 @@ companyVisitSchema.post(
 const CompanyVisit = mongoose.model(
   "CompanyVisit",
   companyVisitSchema,
-  "company_visits"
+  // Multi-college visit rows (includes roles[].collegeId + placementGotInBranchStats[].collegeId).
+  "company_visits_with_rvitm"
 );
 
 export default CompanyVisit;

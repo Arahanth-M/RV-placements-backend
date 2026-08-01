@@ -20,6 +20,9 @@ import {
   interviewSubmitAnswerSchema,
   interviewMoveRoundSchema,
   interviewRunPreviewSchema,
+  interviewSlotBookSchema,
+  interviewSlotRescheduleSchema,
+  interviewSlotStatusSchema,
 } from "../validations/interview.validation.js";
 import {
   createSession,
@@ -79,6 +82,15 @@ import {
   resolveInterviewWeeklyLimitMax,
   submitInterviewLimitRequest,
 } from "../services/interviewLimitRequestService.js";
+import {
+  assertDsaSlotBookingForStart,
+  bookSlot,
+  cancelBooking,
+  getSlotAvailability,
+  getSlotBookingStatus,
+  listUserBookings,
+  rescheduleBooking,
+} from "../services/interviewSlotBookingService.js";
 
 const router = express.Router();
 router.use(authJWT);
@@ -665,6 +677,19 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
       return res.status(400).json({
         error: "companyId is required",
       });
+    }
+
+    try {
+      await assertDsaSlotBookingForStart(userId, customRounds);
+    } catch (slotErr) {
+      if (slotErr?.code === "DSA_SLOT_REQUIRED") {
+        return res.status(403).json({
+          code: "DSA_SLOT_REQUIRED",
+          error: slotErr.message,
+          requiresSlotBooking: true,
+        });
+      }
+      throw slotErr;
     }
 
     const mergePlacementByType = parseMergePlacementByType(mergePlacementByTypeRaw);
@@ -1720,6 +1745,117 @@ router.delete("/discard/:sessionId", async (req, res) => {
   } catch (error) {
     console.error("❌ Error discarding interview:", error.message);
     return res.status(500).json({ error: "Failed to discard interview" });
+  }
+});
+
+router.get("/slot-bookings/availability", async (req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const availability = await getSlotAvailability();
+    return res.json({
+      success: true,
+      slots: availability?.slots || [],
+      dayCounts: availability?.dayCounts || {},
+    });
+  } catch (error) {
+    console.error("[slot-bookings] availability failed", error?.message || error);
+    return res.status(500).json({ error: "Failed to load slot availability." });
+  }
+});
+
+router.get("/slot-bookings/mine", async (req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const bookings = await listUserBookings(userId, { includePast: true });
+    return res.json({ success: true, bookings });
+  } catch (error) {
+    console.error("[slot-bookings] mine failed", error?.message || error);
+    return res.status(500).json({ error: "Failed to load your bookings." });
+  }
+});
+
+router.post(
+  "/slot-bookings/status",
+  validateRequest(interviewSlotStatusSchema),
+  async (req, res) => {
+    try {
+      const userId = getAuthenticatedUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      const status = await getSlotBookingStatus(userId, req.body.customRounds || []);
+      return res.json({ success: true, ...status });
+    } catch (error) {
+      console.error("[slot-bookings] status failed", error?.message || error);
+      return res.status(500).json({ error: "Failed to check slot status." });
+    }
+  }
+);
+
+router.post("/slot-bookings", validateRequest(interviewSlotBookSchema), async (req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const booking = await bookSlot(userId, req.body.slotKey);
+    return res.status(201).json({ success: true, booking });
+  } catch (error) {
+    const code = error?.code;
+    if (
+      code === "INVALID_SLOT" ||
+      code === "SLOT_NOT_BOOKABLE" ||
+      code === "SLOT_FULL" ||
+      code === "ALREADY_BOOKED"
+    ) {
+      return res.status(400).json({ success: false, code, error: error.message });
+    }
+    console.error("[slot-bookings] book failed", error?.message || error);
+    return res.status(500).json({ error: "Failed to book slot." });
+  }
+});
+
+router.post(
+  "/slot-bookings/reschedule",
+  validateRequest(interviewSlotRescheduleSchema),
+  async (req, res) => {
+    try {
+      const userId = getAuthenticatedUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      const booking = await rescheduleBooking(userId, req.body.bookingId, req.body.newSlotKey);
+      return res.json({ success: true, booking });
+    } catch (error) {
+      const code = error?.code;
+      if (
+        code === "NOT_FOUND" ||
+        code === "CANCEL_TOO_LATE" ||
+        code === "SLOT_NOT_BOOKABLE" ||
+        code === "SLOT_FULL" ||
+        code === "ALREADY_BOOKED"
+      ) {
+        const status = code === "NOT_FOUND" ? 404 : 400;
+        return res.status(status).json({ success: false, code, error: error.message });
+      }
+      console.error("[slot-bookings] reschedule failed", error?.message || error);
+      return res.status(500).json({ error: "Failed to reschedule slot." });
+    }
+  }
+);
+
+router.delete("/slot-bookings/:bookingId", async (req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const booking = await cancelBooking(userId, req.params.bookingId);
+    return res.json({ success: true, booking });
+  } catch (error) {
+    const code = error?.code;
+    if (code === "NOT_FOUND") {
+      return res.status(404).json({ success: false, code, error: error.message });
+    }
+    if (code === "CANCEL_TOO_LATE") {
+      return res.status(400).json({ success: false, code, error: error.message });
+    }
+    console.error("[slot-bookings] cancel failed", error?.message || error);
+    return res.status(500).json({ error: "Failed to cancel booking." });
   }
 });
 

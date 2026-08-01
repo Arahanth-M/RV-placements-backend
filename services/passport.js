@@ -42,9 +42,11 @@ passport.use(
           return done(null, false, { reason: "not_allowed" });
         }
 
-        const isRvce = normalizedEmail.endsWith("@rvce.edu.in");
+        const isAllowedCollegeDomain =
+          normalizedEmail.endsWith("@rvce.edu.in") ||
+          normalizedEmail.endsWith(".rvitm@rvei.edu.in");
 
-        if (!isRvce) {
+        if (!isAllowedCollegeDomain) {
           return done(null, false, { reason: "domain" });
         }
 

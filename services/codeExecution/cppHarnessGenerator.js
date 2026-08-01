@@ -361,9 +361,11 @@ export const generateCppMainSource = ({ functionSignature, testCases }) => {
 
   const includes = [
     "#include <nlohmann/json.hpp>",
+    "#include <bits/stdc++.h>",
     "#include <fstream>",
     "#include <string>",
     "#include <vector>",
+    "#include <algorithm>",
     "#include <cstdint>",
     "#include <chrono>",
     "#include <iostream>",
@@ -374,6 +376,8 @@ export const generateCppMainSource = ({ functionSignature, testCases }) => {
   return `${includes.join("\n")}
 
 using json = nlohmann::json;
+// LeetCode-style submissions often use bare \`vector\` / \`max\` without \`std::\`.
+using namespace std;
 
 static const char* EXECUTION_SUCCESS = "EXECUTION_SUCCESS";
 static const char* EXECUTION_RUNTIME_ERROR = "EXECUTION_RUNTIME_ERROR";

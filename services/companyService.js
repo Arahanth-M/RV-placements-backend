@@ -49,6 +49,17 @@ import {
   scopeVisitsByBranchCluster,
   spcVisitScopeErrorMessage,
 } from "./spcVisitScope.js";
+import {
+  applyCollegeScopeToCompanyPayload,
+  collegeIdFromEmail,
+  collegeIdOfScopedRow,
+  filterPlacementGotInForCollege,
+  filterRolesForCollege,
+  mergePlacementGotInForCollege,
+  mergeRolesForCollege,
+  normalizeCollegeId,
+  sumPlacementGotIn,
+} from "../utils/collegeScope.js";
 
 export { mergeSpcOfferIntoVisitRoles } from "./spcCompensationMerge.js";
 
@@ -1078,13 +1089,18 @@ function pickPrimaryVisitForListing(visits, placementYearRaw = null) {
 
 /**
  * @param {Record<string, unknown>[]|undefined} visits
+ * @param {unknown} [collegeIdRaw] — when set, sum only that college's placementGotInBranchStats
  * @returns {Record<number, number>} one totalGotIn slot per {@link COMPANY_DETAIL_VISIT_YEARS}
  */
-function buildTotalGotInByYearFromVisits(visits) {
+function buildTotalGotInByYearFromVisits(visits, collegeIdRaw = null) {
   const out = Object.fromEntries(
     COMPANY_DETAIL_VISIT_YEARS.map((y) => [y, 0])
   );
   if (!Array.isArray(visits) || visits.length === 0) return out;
+  const collegeId =
+    collegeIdRaw != null && String(collegeIdRaw).trim() !== ""
+      ? normalizeCollegeId(collegeIdRaw)
+      : null;
 
   for (const year of COMPANY_DETAIL_VISIT_YEARS) {
     const perYear = visits
@@ -1098,7 +1114,14 @@ function buildTotalGotInByYearFromVisits(visits) {
         return idb.localeCompare(ida);
       });
     const latest = perYear[0];
-    out[year] = Number(latest?.totalGotIn) || 0;
+    const fromStats = sumPlacementGotIn(
+      latest?.placementGotInBranchStats,
+      collegeId
+    );
+    out[year] =
+      fromStats > 0 || Array.isArray(latest?.placementGotInBranchStats)
+        ? fromStats
+        : Number(latest?.totalGotIn) || 0;
   }
 
   return out;
@@ -1109,10 +1132,19 @@ function buildTotalGotInByYearFromVisits(visits) {
  * {@link pickVisitCandidateForPlacementContext} would choose for that year (mirrors GET `/companies/:id` merge).
  * @param {Record<string, unknown>[]|undefined} visits
  * @param {unknown} [placementContextRaw] — `placementContext` query (dream / open_dream / summer_internship)
+ * @param {unknown} [collegeIdRaw] — when set, only that college's stats
  * @returns {Record<number, { branchCode: string, gotIn: number, converted: number, convertedNotApplicable: boolean }[]>}
  */
-function buildPlacementBranchStatsByYearFromVisits(visits, placementContextRaw = null) {
+function buildPlacementBranchStatsByYearFromVisits(
+  visits,
+  placementContextRaw = null,
+  collegeIdRaw = null
+) {
   const ctx = normalizePlacementContextParam(placementContextRaw);
+  const collegeId =
+    collegeIdRaw != null && String(collegeIdRaw).trim() !== ""
+      ? normalizeCollegeId(collegeIdRaw)
+      : null;
   const emptyRows = () =>
     PPO_BRANCH_CODES_ARRAY.map((branchCode) => ({
       branchCode,
@@ -1138,7 +1170,9 @@ function buildPlacementBranchStatsByYearFromVisits(visits, placementContextRaw =
       });
     const picked = pickVisitCandidateForPlacementContext(perYear, ctx);
     const rawRows = Array.isArray(picked?.placementGotInBranchStats)
-      ? picked.placementGotInBranchStats
+      ? collegeId
+        ? filterPlacementGotInForCollege(picked.placementGotInBranchStats, collegeId)
+        : picked.placementGotInBranchStats
       : [];
     /** @type {Map<string, { gotIn: number, converted: number, convertedNotApplicable: boolean }>} */
     const byCode = new Map();
@@ -1982,6 +2016,10 @@ export async function incrementVisitViews(companyId, visitId, placementYear) {
 /**
  * @param {string} id
  * @param {number} [placementYear] — must be normalized (see {@link normalizeCompanyDetailYear})
+ * @param {unknown} [placementContextRaw]
+ * @param {unknown} [companyVisitIdHint]
+ * @param {unknown} [placementClusterRaw]
+ * @param {unknown} [collegeIdRaw] — when set, roles / got-in are college-scoped in `merged`
  * @returns {Promise<{ merged: Record<string, unknown> | null, visit: Record<string, unknown> | null, staticRow: Record<string, unknown> | null }>}
  */
 export async function getCompanyDetailLegacyMergedById(
@@ -1989,11 +2027,16 @@ export async function getCompanyDetailLegacyMergedById(
   placementYear = COMPANY_VISIT_YEAR,
   placementContextRaw = null,
   companyVisitIdHint = null,
-  placementClusterRaw = null
+  placementClusterRaw = null,
+  collegeIdRaw = null
 ) {
   await loadPlacementHubSettingsCache();
   const ctx = normalizePlacementContextParam(placementContextRaw);
   const clusterFilter = normalizePlacementClusterQuery(placementClusterRaw);
+  const collegeId =
+    collegeIdRaw != null && String(collegeIdRaw).trim() !== ""
+      ? normalizeCollegeId(collegeIdRaw)
+      : null;
   const _id = toObjectId(id);
   if (!_id) {
     return { merged: null, visit: null, staticRow: null };
@@ -2015,10 +2058,14 @@ export async function getCompanyDetailLegacyMergedById(
           (v) =>
             clusterKeyFromPlacementVisitClusterField(v?.cluster) === clusterFilter
         );
-  const totalGotInByYear = buildTotalGotInByYearFromVisits(scopedApprovedVisits);
+  const totalGotInByYear = buildTotalGotInByYearFromVisits(
+    scopedApprovedVisits,
+    collegeId
+  );
   const placementBranchStatsByYear = buildPlacementBranchStatsByYearFromVisits(
     scopedApprovedVisits,
-    placementContextRaw
+    placementContextRaw,
+    collegeId
   );
   const visitApproved = await findApprovedVisitForCompanyDetail(
     _id,
@@ -2030,11 +2077,14 @@ export async function getCompanyDetailLegacyMergedById(
   );
   if (visitApproved) {
     const visitForMerge = withClusterMustDoTopics(visitApproved, mustDoTopicVisits);
-    const merged = {
+    let merged = {
       ...mergeToLegacyShape(staticRow, visitForMerge),
       totalGotInByYear,
       placementBranchStatsByYear,
     };
+    if (collegeId) {
+      merged = applyCollegeScopeToCompanyPayload(merged, collegeId);
+    }
     const visitPlain = visitWithPlainRoleCtc(visitApproved);
     const headline = getCompanyDetailHeadlineTypeFromVisits(
       scopedApprovedVisits,
@@ -2073,11 +2123,14 @@ export async function getCompanyDetailLegacyMergedById(
     return { merged: null, visit: null, staticRow: null };
   }
   // No visit row for this year — legacy fallback: static only
-  const merged = {
+  let merged = {
     ...mergeToLegacyShape(staticRow, null),
     totalGotInByYear,
     placementBranchStatsByYear,
   };
+  if (collegeId) {
+    merged = applyCollegeScopeToCompanyPayload(merged, collegeId);
+  }
   merged.placementDreamTierVisitMissingForYear =
     ctx === "dream" || ctx === "open_dream"
       ? !hasDreamTierVisitForYear(scopedApprovedVisits, placementYear)
@@ -2106,9 +2159,14 @@ export async function getCompanyDetailLegacyMergedById(
  * @returns {Promise<Record<string, unknown>[]>}
  */
 export async function listApprovedCompaniesLegacyMerged(
-  placementYear = null
+  placementYear = null,
+  collegeIdRaw = null
 ) {
   await loadPlacementHubSettingsCache();
+  const collegeId =
+    collegeIdRaw != null && String(collegeIdRaw).trim() !== ""
+      ? normalizeCollegeId(collegeIdRaw)
+      : null;
   const pipeline = [
     {
       $match: {
@@ -2216,10 +2274,16 @@ export async function listApprovedCompaniesLegacyMerged(
         ? dateOfVisitFromVisitRow(summerVisit)
         : undefined;
 
-      const totalGotInByYear = buildTotalGotInByYearFromVisits(scopedVisits);
+      const totalGotInByYear = buildTotalGotInByYearFromVisits(
+        scopedVisits,
+        collegeId
+      );
       const mustDoTopicVisits = mustDoTopicVisitsByCompany.get(String(row._id)) ?? [];
       const visitForMerge = withClusterMustDoTopics(visit, mustDoTopicVisits);
-      const merged = mergeToLegacyShape(staticRow, visitForMerge);
+      let merged = mergeToLegacyShape(staticRow, visitForMerge);
+      if (collegeId) {
+        merged = applyCollegeScopeToCompanyPayload(merged, collegeId);
+      }
       merged.date_of_visit = dateOfVisitFromVisitRow(visit);
       const placementAnyYearPpoOnCampus =
         companyHasAnyYearSummerPpoFromVisits(scopedVisits);
@@ -2242,7 +2306,15 @@ export async function listApprovedCompaniesLegacyMerged(
           : hasInternshipOnlyVisitForYear(scopedVisits, normalizedListingYear);
       const placementMeta = getListPlacementCategoryMetaFromVisits(
         scopedVisits,
-        visitWithPlainRoleCtc(visit),
+        collegeId
+          ? {
+              ...visitWithPlainRoleCtc(visit),
+              roles: filterRolesForCollege(
+                visitWithPlainRoleCtc(visit)?.roles,
+                collegeId
+              ),
+            }
+          : visitWithPlainRoleCtc(visit),
         placementYear,
         clusterKey
       );
@@ -2467,6 +2539,8 @@ export async function getCompanyCategoryPreviewLogos(placementYear = null, clust
  * @param {number} [placementYear]
  * @param {string|null|undefined} [placementListContext] — when set (dream / open_dream / summer_internship), selects among multiple visit rows for that year.
  * @param {string|import("mongoose").Types.ObjectId|null|undefined} [companyVisitIdHint] — optional exact `company_visits` row (must match company + placement year).
+ * @param {unknown} [placementClusterRaw]
+ * @param {unknown} [collegeIdRaw] — when set, roles / got-in on `merged` are college-scoped
  * @returns {Promise<{ merged: Record<string, unknown> | null, staticRow: Record<string, unknown> | null, visit: Record<string, unknown> | null } | null>}
  */
 export async function getCompanyMergedForAdminById(
@@ -2474,7 +2548,8 @@ export async function getCompanyMergedForAdminById(
   placementYear = COMPANY_VISIT_YEAR,
   placementListContext = null,
   companyVisitIdHint = null,
-  placementClusterRaw = null
+  placementClusterRaw = null,
+  collegeIdRaw = null
 ) {
   const _id = toObjectId(id);
   if (!_id) {
@@ -2486,6 +2561,10 @@ export async function getCompanyMergedForAdminById(
   }
   const year = normalizeCompanyDetailYear(placementYear);
   const clusterFilter = normalizePlacementClusterQuery(placementClusterRaw);
+  const collegeId =
+    collegeIdRaw != null && String(collegeIdRaw).trim() !== ""
+      ? normalizeCollegeId(collegeIdRaw)
+      : null;
   const visitHintOid = toObjectId(companyVisitIdHint);
   let visit = null;
   if (visitHintOid) {
@@ -2518,7 +2597,10 @@ export async function getCompanyMergedForAdminById(
   const mustDoTopicVisitsByCompany = await fetchMustDoTopicVisitsByCompany([_id]);
   const mustDoTopicVisits = mustDoTopicVisitsByCompany.get(String(_id)) ?? [];
   const visitForMerge = withClusterMustDoTopics(visit, mustDoTopicVisits);
-  const merged = mergeToLegacyShape(staticRow, visitForMerge);
+  let merged = mergeToLegacyShape(staticRow, visitForMerge);
+  if (collegeId) {
+    merged = applyCollegeScopeToCompanyPayload(merged, collegeId);
+  }
   return { merged, staticRow, visit: visitForMerge ?? null };
 }
 
@@ -2972,7 +3054,8 @@ export async function getSpcCompanyRoleNamesForForm(
   companyId,
   yearRaw,
   placementContextRaw = null,
-  branchCodeRaw = null
+  branchCodeRaw = null,
+  collegeIdRaw = null
 ) {
   const cid =
     companyId instanceof mongoose.Types.ObjectId
@@ -2994,12 +3077,19 @@ export async function getSpcCompanyRoleNamesForForm(
   const ctx = normalizePlacementContextParam(placementContextRaw);
   const visit = pickVisitCandidateForSpcAnchor(pool, ctx, "placement_got_in");
   const visitRoles = visitWithPlainRoleCtc(visit)?.roles;
+  const collegeId =
+    collegeIdRaw != null && String(collegeIdRaw).trim() !== ""
+      ? normalizeCollegeId(collegeIdRaw)
+      : null;
+  const scopedRoles = collegeId
+    ? filterRolesForCollege(visitRoles, collegeId)
+    : visitRoles;
 
   /** @type {string[]} */
   const names = [];
   const seen = new Set();
-  if (Array.isArray(visitRoles)) {
-    for (const row of visitRoles) {
+  if (Array.isArray(scopedRoles)) {
+    for (const row of scopedRoles) {
       if (!row || typeof row !== "object") continue;
       const name = String(row.roleName ?? row.name ?? "").trim();
       if (shouldOmitRoleFromSpcFormDropdown(name)) continue;
@@ -3135,10 +3225,17 @@ export async function syncAnchoredVisitSpcConversionFields(
   if (!visitHint?._id || !staticRow) return { ok: false, reason: "visit_not_found" };
   const merged = mergeToLegacyShape(staticRow, visitHint);
 
-  const patch = buildSpcConversionVisitPatch(merged.roles || [], fields || {});
+  const collegeId =
+    options?.collegeId != null && String(options.collegeId).trim() !== ""
+      ? normalizeCollegeId(options.collegeId)
+      : null;
+  const rolesForPatch = collegeId
+    ? filterRolesForCollege(merged.roles || [], collegeId)
+    : merged.roles || [];
+  const patch = buildSpcConversionVisitPatch(rolesForPatch, fields || {});
   if (Object.keys(patch).length === 0) return { ok: true };
 
-  await updateCompanyVisit(cid, patch, year, visitHint);
+  await updateCompanyVisit(cid, patch, year, visitHint, collegeId ? { collegeId } : {});
   return { ok: true };
 }
 
@@ -3155,7 +3252,7 @@ export function shouldIncrementPpoConvertedForSpcConversion(
   mergedVisitLegacy,
   branchCodeRaw
 ) {
-  const code = normalizePpoBranchCode(branchCode);
+  const code = normalizePpoBranchCode(branchCodeRaw);
   if (!isValidPpoBranchCode(code)) return false;
   if (!String(existingPlacement?.ppoConversionType || "").trim()) return true;
 
@@ -3264,12 +3361,26 @@ export async function incrementPpoBranchGotInForAnchoredVisit(
     Object.assign(payload, aggregates);
   }
   if (hasSpcPatch) {
-    const visitPatch = buildSpcConversionVisitPatch(merged.roles || [], spc);
+    const collegeId =
+      options?.collegeId != null && String(options.collegeId).trim() !== ""
+        ? normalizeCollegeId(options.collegeId)
+        : null;
+    const rolesForPatch = collegeId
+      ? filterRolesForCollege(merged.roles || [], collegeId)
+      : merged.roles || [];
+    const visitPatch = buildSpcConversionVisitPatch(rolesForPatch, spc);
     if (visitPatch.ppoConversionType) payload.ppoConversionType = visitPatch.ppoConversionType;
     if (visitPatch.roles) payload.roles = visitPatch.roles;
+    await updateCompanyVisit(
+      cid,
+      payload,
+      year,
+      visitHint,
+      collegeId ? { collegeId } : {}
+    );
+  } else {
+    await updateCompanyVisit(cid, payload, year, visitHint);
   }
-
-  await updateCompanyVisit(cid, payload, year, visitHint);
 
   return { ok: true };
 }
@@ -3330,24 +3441,50 @@ export async function incrementPlacementAndPpoConvertedForSpcConversionDetails(
   }
   const merged = mergeToLegacyShape(staticRow, visitHint);
 
+  const collegeId =
+    options?.collegeId != null && String(options.collegeId).trim() !== ""
+      ? normalizeCollegeId(options.collegeId)
+      : null;
+
   const rawPlacement = Array.isArray(merged.placementGotInBranchStats)
     ? merged.placementGotInBranchStats
     : [];
-  /** @type {Map<string, { branchCode: string, gotIn: number }>} */
+  const otherCollegePlacement = collegeId
+    ? rawPlacement.filter((row) => collegeIdOfScopedRow(row) !== collegeId)
+    : [];
+  const scopedPlacement = collegeId
+    ? filterPlacementGotInForCollege(rawPlacement, collegeId)
+    : rawPlacement;
+
+  /** @type {Map<string, { branchCode: string, gotIn: number, collegeId?: string }>} */
   const placeByCode = new Map();
-  for (const row of rawPlacement) {
+  for (const row of scopedPlacement) {
     const bc = normalizePpoBranchCode(row?.branchCode);
     if (!isValidPpoBranchCode(bc)) continue;
     const gotIn = Math.max(0, Number.parseInt(String(row?.gotIn ?? 0), 10)) || 0;
-    placeByCode.set(bc, { branchCode: bc, gotIn });
+    /** @type {{ branchCode: string, gotIn: number, collegeId?: string }} */
+    const entry = { branchCode: bc, gotIn };
+    if (collegeId) entry.collegeId = collegeId;
+    placeByCode.set(bc, entry);
   }
-  const curPl = placeByCode.get(code) || { branchCode: code, gotIn: 0 };
+  const curPl = placeByCode.get(code) || {
+    branchCode: code,
+    gotIn: 0,
+    ...(collegeId ? { collegeId } : {}),
+  };
   curPl.gotIn = Math.max(0, curPl.gotIn) + dPl;
+  if (collegeId) curPl.collegeId = collegeId;
   placeByCode.set(code, curPl);
-  const normalizedPlacement = PPO_BRANCH_CODES_ARRAY.map((bc) =>
-    placeByCode.has(bc) ? placeByCode.get(bc) : { branchCode: bc, gotIn: 0 }
+  const normalizedPlacementScoped = PPO_BRANCH_CODES_ARRAY.map((bc) =>
+    placeByCode.has(bc)
+      ? placeByCode.get(bc)
+      : {
+          branchCode: bc,
+          gotIn: 0,
+          ...(collegeId ? { collegeId } : {}),
+        }
   );
-  const currentTotal = Math.max(0, Number.parseInt(String(merged.totalGotIn ?? 0), 10)) || 0;
+  const nextTotal = Math.max(0, sumPlacementGotIn(rawPlacement) + dPl);
 
   const rawPpo = Array.isArray(merged.ppoBranchStats) ? merged.ppoBranchStats : [];
   /** @type {Map<string, { branchCode: string, gotIn: number, converted: number, convertedNotApplicable: boolean }>} */
@@ -3374,19 +3511,24 @@ export async function incrementPlacementAndPpoConvertedForSpcConversionDetails(
   );
   const aggregates = recomputePpoConversionAggregatesFromNormalized(normalizedPpo);
 
-  const visitPatch = buildSpcConversionVisitPatch(merged.roles || [], visitSyncFields || {});
+  const rolesForPatch = collegeId
+    ? filterRolesForCollege(merged.roles || [], collegeId)
+    : merged.roles || [];
+  const visitPatch = buildSpcConversionVisitPatch(rolesForPatch, visitSyncFields || {});
 
   /** @type {Record<string, unknown>} */
   const payload = {
-    placementGotInBranchStats: normalizedPlacement,
-    totalGotIn: currentTotal + dPl,
+    placementGotInBranchStats: collegeId
+      ? normalizedPlacementScoped
+      : [...otherCollegePlacement, ...normalizedPlacementScoped],
+    totalGotIn: nextTotal,
     ppoBranchStats: normalizedPpo,
     ...aggregates,
   };
   if (visitPatch.ppoConversionType) payload.ppoConversionType = visitPatch.ppoConversionType;
   if (visitPatch.roles) payload.roles = visitPatch.roles;
 
-  await updateCompanyVisit(cid, payload, year, visitHint);
+  await updateCompanyVisit(cid, payload, year, visitHint, collegeId ? { collegeId } : {});
   return { ok: true };
 }
 
@@ -3436,28 +3578,50 @@ export async function incrementPlacementGotInBranchForAnchoredVisit(
   }
   const merged = mergeToLegacyShape(staticRow, visitHint);
 
+  const collegeId =
+    options?.collegeId != null && String(options.collegeId).trim() !== ""
+      ? normalizeCollegeId(options.collegeId)
+      : null;
+
   const rawRows = Array.isArray(merged.placementGotInBranchStats)
     ? merged.placementGotInBranchStats
     : [];
-  /** @type {Map<string, { branchCode: string, gotIn: number }>} */
+  const scopedRows = collegeId
+    ? filterPlacementGotInForCollege(rawRows, collegeId)
+    : rawRows;
+
+  /** @type {Map<string, { branchCode: string, gotIn: number, collegeId?: string }>} */
   const byCode = new Map();
-  for (const row of rawRows) {
+  for (const row of scopedRows) {
     const bc = normalizePpoBranchCode(row?.branchCode);
     if (!isValidPpoBranchCode(bc)) continue;
     const gotIn = Math.max(0, Number.parseInt(String(row?.gotIn ?? 0), 10)) || 0;
-    byCode.set(bc, { branchCode: bc, gotIn });
+    /** @type {{ branchCode: string, gotIn: number, collegeId?: string }} */
+    const entry = { branchCode: bc, gotIn };
+    if (collegeId) entry.collegeId = collegeId;
+    byCode.set(bc, entry);
   }
 
-  const cur = byCode.get(code) || { branchCode: code, gotIn: 0 };
+  const cur = byCode.get(code) || {
+    branchCode: code,
+    gotIn: 0,
+    ...(collegeId ? { collegeId } : {}),
+  };
   cur.gotIn = Math.max(0, Math.max(0, cur.gotIn) + d);
+  if (collegeId) cur.collegeId = collegeId;
   byCode.set(code, cur);
 
   const normalized = PPO_BRANCH_CODES_ARRAY.map((bc) =>
-    byCode.has(bc) ? byCode.get(bc) : { branchCode: bc, gotIn: 0 }
+    byCode.has(bc)
+      ? byCode.get(bc)
+      : {
+          branchCode: bc,
+          gotIn: 0,
+          ...(collegeId ? { collegeId } : {}),
+        }
   );
 
-  const currentTotal = Math.max(0, Number.parseInt(String(merged.totalGotIn ?? 0), 10)) || 0;
-  const nextTotal = Math.max(0, currentTotal + d);
+  const nextTotal = Math.max(0, sumPlacementGotIn(rawRows) + d);
 
   await updateCompanyVisit(
     cid,
@@ -3466,7 +3630,8 @@ export async function incrementPlacementGotInBranchForAnchoredVisit(
       totalGotIn: nextTotal,
     },
     year,
-    visitHint
+    visitHint,
+    collegeId ? { collegeId } : {}
   );
 
   return { ok: true };
@@ -3631,7 +3796,19 @@ export async function createCompanyWithVisit(data) {
     status: "pending",
   });
   if (visitDoc.roles !== undefined) {
-    visitDoc.roles = sanitizeRolesArrayForPersist(visitDoc.roles);
+    const collegeId =
+      data?.collegeId != null && String(data.collegeId).trim() !== ""
+        ? normalizeCollegeId(data.collegeId)
+        : data?.submittedBy?.email
+          ? collegeIdFromEmail(data.submittedBy.email)
+          : null;
+    const roles = sanitizeRolesArrayForPersist(visitDoc.roles);
+    visitDoc.roles =
+      collegeId && Array.isArray(roles)
+        ? roles.map((r) =>
+            r && typeof r === "object" ? { ...r, collegeId } : r
+          )
+        : roles;
   }
   if (Object.prototype.hasOwnProperty.call(visitDoc, "eligibility") || visitDoc.eligibility != null) {
     visitDoc.minCgpa = minCgpaFromEligibilityText(visitDoc.eligibility);
@@ -3654,17 +3831,21 @@ export async function createCompanyWithVisit(data) {
 /**
  * Update one anchored `company_visits` row for `companyId` + `placementYear`.
  * Only dynamic fields from `data` are applied. Does not touch `companies`.
+ * When `options.collegeId` is set, `roles` / `placementGotInBranchStats` replace only that
+ * college's slice (other colleges preserved).
  * @param {string|import("mongoose").Types.ObjectId} companyId
  * @param {Record<string, unknown>} data
  * @param {number} [placementYear]
  * @param {Record<string, unknown>|null} [hintVisitDoc]
+ * @param {{ collegeId?: unknown }} [options]
  * @returns {Promise<import("mongodb").UpdateResult>}
  */
 export async function updateCompanyVisit(
   companyId,
   data,
   placementYear = COMPANY_VISIT_YEAR,
-  hintVisitDoc = null
+  hintVisitDoc = null,
+  options = {}
 ) {
   const cid = toObjectId(companyId);
   if (!cid) {
@@ -3687,6 +3868,42 @@ export async function updateCompanyVisit(
   const anchor = await resolveVisitAnchorDoc(cid, placementYear, hintVisitDoc);
   if (!anchor?._id) {
     return { acknowledged: true, modifiedCount: 0, upsertedCount: 0, matchedCount: 0 };
+  }
+
+  const collegeId =
+    options?.collegeId != null && String(options.collegeId).trim() !== ""
+      ? normalizeCollegeId(options.collegeId)
+      : null;
+
+  if (
+    collegeId &&
+    ($set.roles !== undefined || $set.placementGotInBranchStats !== undefined)
+  ) {
+    const existing =
+      hintVisitDoc &&
+      hintVisitDoc._id &&
+      String(hintVisitDoc._id) === String(anchor._id)
+        ? hintVisitDoc
+        : await CompanyVisit.findById(anchor._id).lean();
+    if ($set.roles !== undefined) {
+      $set.roles = mergeRolesForCollege(
+        existing?.roles,
+        $set.roles,
+        collegeId
+      );
+    }
+    if ($set.placementGotInBranchStats !== undefined) {
+      $set.placementGotInBranchStats = mergePlacementGotInForCollege(
+        existing?.placementGotInBranchStats,
+        $set.placementGotInBranchStats,
+        collegeId
+      );
+      $set.totalGotIn = sumPlacementGotIn($set.placementGotInBranchStats);
+    }
+  }
+
+  if ($set.roles !== undefined) {
+    $set.roles = sanitizeRolesArrayForPersist($set.roles);
   }
   const result = await CompanyVisit.updateOne({ _id: anchor._id }, { $set });
   if (result.modifiedCount > 0) {
