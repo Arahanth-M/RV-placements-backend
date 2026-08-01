@@ -24,6 +24,8 @@
     "backfill:messageDate:visits:dry-run": "node scripts/backfill-messageDate-to-visits.js --dry-run",
     "backfill:mustDoTopics:cse-visits": "node scripts/backfill-must-do-topics-to-cse-visits.js",
     "backfill:mustDoTopics:cse-visits:dry-run": "node scripts/backfill-must-do-topics-to-cse-visits.js --dry-run",
+    "backfill:minCgpa:visits": "node scripts/backfill-minCgpa-from-eligibility.js",
+    "backfill:minCgpa:visits:dry-run": "node scripts/backfill-minCgpa-from-eligibility.js --dry-run",
     "seed:gap-interview-questions": "node scripts/seedGapGeneratedInterviewQuestions.js",
     "seed:gap-interview-questions:dry-run": "node scripts/seedGapGeneratedInterviewQuestions.js --dry-run",
     "interview-questions:audit-testcase-dupes": "node scripts/auditInterviewQuestionDuplicateTestCases.js",

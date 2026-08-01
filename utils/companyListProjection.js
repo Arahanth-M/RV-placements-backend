@@ -56,6 +56,34 @@ export function projectCompanyListResponse(c) {
     date_of_visit: c.date_of_visit,
     placementSummerDateOfVisit: c.placementSummerDateOfVisit,
     messageDate: c.messageDate,
+    eligibility: c.eligibility,
+    minCgpa: (() => {
+      const n = Number(c.minCgpa);
+      return Number.isFinite(n) ? n : null;
+    })(),
+    minCgpaByTier:
+      c.minCgpaByTier && typeof c.minCgpaByTier === "object" && !Array.isArray(c.minCgpaByTier)
+        ? Object.fromEntries(
+            Object.entries(c.minCgpaByTier).map(([k, v]) => {
+              // Number(null) === 0 — treat missing cutoffs as null, not 0.
+              if (v == null || v === "") return [k, null];
+              const n = Number(v);
+              return [k, Number.isFinite(n) ? n : null];
+            })
+          )
+        : undefined,
+    minCgpaByVisitType:
+      c.minCgpaByVisitType &&
+      typeof c.minCgpaByVisitType === "object" &&
+      !Array.isArray(c.minCgpaByVisitType)
+        ? Object.fromEntries(
+            Object.entries(c.minCgpaByVisitType).map(([k, v]) => {
+              if (v == null || v === "") return [k, null];
+              const n = Number(v);
+              return [k, Number.isFinite(n) ? n : null];
+            })
+          )
+        : undefined,
     cluster: resolveCluster(),
     updatedAt: c.updatedAt,
     createdAt: c.createdAt,

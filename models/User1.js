@@ -38,6 +38,11 @@ const user1Schema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    /** Opt-in for email updates (Subscribe). In-app notifications go to everyone. */
+    notificationsSubscribed: {
+      type: Boolean,
+      default: false,
+    },
     lastLoginAt: {
       type: Date,
       default: Date.now,
@@ -52,5 +57,6 @@ const user1Schema = new mongoose.Schema(
 user1Schema.index({ email: 1 }, { unique: true });
 user1Schema.index({ role: 1 });
 user1Schema.index({ lastLoginAt: -1 });
+user1Schema.index({ notificationsSubscribed: 1 });
 
 export default mongoose.models.User1 || mongoose.model("User1", user1Schema);

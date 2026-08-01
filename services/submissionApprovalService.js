@@ -11,6 +11,8 @@ import {
 } from "./mySubmissionsCache.js";
 import { invalidateSpcMyRecordsCacheByEmail } from "./spcMyRecordsCache.js";
 import { invalidateLeaderboardCache } from "../routes/leaderboardRoutes.js";
+import { dispatchEvent } from "./events/eventDispatcher.js";
+import { EVENT_TYPES } from "./events/eventTypes.js";
 
 const POINTS_QUESTION = 5;
 const POINTS_INTERVIEW_EXPERIENCE = 10;
@@ -203,12 +205,27 @@ export async function approveSubmissionsBatch(submissionIds, reviewer) {
 
   const groupProcessors = [...groupsByVisit.values()].map((groupItems) => async () => {
     const groupResults = [];
+    const notifiedCompanyIds = new Set();
     for (const item of groupItems) {
       try {
-        await approveSubmissionAndUpdateCompany(item.sub, item.mergeSource, reviewer, {
-          deferCacheInvalidation: true,
-        });
+        const approved = await approveSubmissionAndUpdateCompany(
+          item.sub,
+          item.mergeSource,
+          reviewer,
+          {
+            deferCacheInvalidation: true,
+          }
+        );
         groupResults.push({ submissionId: item.id, ok: true });
+        const cid = approved?.companyId != null ? String(approved.companyId) : "";
+        if (cid && !notifiedCompanyIds.has(cid)) {
+          notifiedCompanyIds.add(cid);
+          dispatchEvent(EVENT_TYPES.COMPANY_UPDATED, {
+            companyId: approved.companyId,
+            updateKey: `batch_${item.id}`,
+            body: "New content was added for a company you follow. Open the page to see what's new.",
+          });
+        }
       } catch (err) {
         groupResults.push({
           submissionId: item.id,

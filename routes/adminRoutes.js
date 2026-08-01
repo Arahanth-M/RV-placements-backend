@@ -50,7 +50,7 @@ import {
   approveSubmissionsBatch,
   MAX_SUBMISSION_APPROVE_BATCH_SIZE,
 } from "../services/submissionApprovalService.js";
-import { normalizePlacementClusterQuery } from "../utils/placementCluster.js";
+import { normalizePlacementClusterQuery, clusterKeyFromPlacementVisitClusterField, PLACEMENT_HUB_CLUSTER_LABELS } from "../utils/placementCluster.js";
 
 async function invalidateSubmitterListCaches(submission) {
   const email = submitterEmailFromSubmission(submission);
@@ -66,7 +66,6 @@ import {
   findOnePendingVisitForCompanyYear,
   mergeToLegacyShape,
   visitRowBelongsToCompanyStatic,
-  normalizeRoleStipendFields,
   deleteSplitCompany,
   ensureAdminVisitForYear,
   getCompanyMergedForAdminById,
@@ -86,6 +85,16 @@ import {
   importStudentsFromXlsxBuffer,
   STUDENT_BATCH_COLUMN_GUIDE,
 } from "../services/studentBatchImportService.js";
+import {
+  extractJdFieldsWithLlm,
+  extractTextFromPdfBuffer,
+  normalizeExtractFieldNames,
+  suggestJdFieldNamesWithLlm,
+} from "../services/jdImportService.js";
+import {
+  planJdRoleFieldUpdate,
+  normalizeAdminRoleInput,
+} from "../utils/normalizeAdminRole.js";
 import PlacementGeneralStats from "../models/PlacementGeneralStats.js";
 import {
   buildGeneralStatsFromXlsxBuffer,
@@ -121,6 +130,19 @@ const studentBatchUpload = multer({
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     if (nameOk || mimeOk) cb(null, true);
     else cb(new Error("Only .xlsx spreadsheets are allowed."));
+  },
+});
+
+const jdPdfUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const nameOk = /\.pdf$/i.test(file.originalname || "");
+    const mimeOk =
+      file.mimetype === "application/pdf" ||
+      file.mimetype === "application/x-pdf";
+    if (nameOk || mimeOk) cb(null, true);
+    else cb(new Error("Only PDF files are allowed."));
   },
 });
 
@@ -426,26 +448,44 @@ adminRouter.get("/students/placement-stats/export", async (req, res) => {
     const data = await getStudentPlacementStats(req.query?.year);
     const workbook = XLSX.utils.book_new();
 
+    const mapStudentRow = (student, branchCode) => ({
+      Program: String(branchCode || student.branchCode || "").toUpperCase(),
+      Name: student.name || "",
+      USN: student.usn || "",
+      "Email ID": student.email || "",
+      "Company Placed": student.companyPlaced || "",
+      "Type of Offer": student.typeOfOffer || "",
+      Stipend: student.stipend || "",
+      "6 Months Internship Stipend": student.sixMonthsInternshipStipend || "",
+      CTC: student.ctc || "",
+      Role: student.role || "",
+      "PPO Conversion Type": student.ppoConversionType || "",
+      "Added By": student.addedByEmail || "",
+      "Last Updated": student.updatedAt || student.createdAt || "",
+    });
+
+    const allRows = [];
     for (const branch of data.branches) {
-      const rows = (Array.isArray(branch.students) ? branch.students : []).map(
-        (student) => ({
-          Name: student.name || "",
-          USN: student.usn || "",
-          "Email ID": student.email || "",
-          "Company Placed": student.companyPlaced || "",
-          "Type of Offer": student.typeOfOffer || "",
-          Stipend: student.stipend || "",
-          "6 Months Internship Stipend": student.sixMonthsInternshipStipend || "",
-          CTC: student.ctc || "",
-          Role: student.role || "",
-          "PPO Conversion Type": student.ppoConversionType || "",
-          "Added By": student.addedByEmail || "",
-          "Last Updated": student.updatedAt || student.createdAt || "",
-        })
+      const branchCode = branch.branchCode || "";
+      const rows = (Array.isArray(branch.students) ? branch.students : []).map((student) =>
+        mapStudentRow(student, branchCode)
+      );
+      allRows.push(...rows);
+    }
+
+    if (allRows.length > 0) {
+      const allWs = XLSX.utils.json_to_sheet(allRows);
+      XLSX.utils.book_append_sheet(workbook, allWs, "ALL");
+    }
+
+    for (const branch of data.branches) {
+      const branchCode = branch.branchCode || "";
+      const rows = (Array.isArray(branch.students) ? branch.students : []).map((student) =>
+        mapStudentRow(student, branchCode)
       );
       const ws = XLSX.utils.json_to_sheet(rows);
       const sheetName =
-        String(branch.branchCode || "unknown")
+        String(branchCode || "unknown")
           .toUpperCase()
           .replace(/[\\/?*[\]:]/g, "-")
           .slice(0, 31) || "UNKNOWN";
@@ -921,6 +961,12 @@ submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
       mergeSource,
       reviewerFromRequest(req)
     );
+
+    dispatchEvent(EVENT_TYPES.COMPANY_UPDATED, {
+      companyId: result.companyId,
+      updateKey: String(result.submission?._id || submission._id),
+      body: "New content was added for a company you follow. Open the page to see what's new.",
+    });
 
     res.json({
       message: "Submission approved and company updated successfully",
@@ -1813,47 +1859,9 @@ adminRouter.put(
       return res.status(400).json({ error: "roles must be an array" });
     }
 
-    const normalizedRoles = roles.map((role, index) => {
-      const rawName = role?.roleName ?? role?.name ?? "";
-      const roleName = sanitizeText(rawName);
-      if (!roleName) {
-        throw new Error(`Role at index ${index} is missing a valid roleName`);
-      }
-
-      const stipStr = String(role.internshipStipend ?? "").trim();
-      let internshipStipend;
-      if (stipStr && !/^n\/a$/i.test(stipStr)) {
-        const n = Number(stipStr.replace(/,/g, ""));
-        if (Number.isNaN(n) || n < 0) {
-          throw new Error(
-            `Role "${roleName}": internshipStipend must be a non‑negative number or N/A`
-          );
-        }
-        if (n > 0) internshipStipend = n;
-      }
-
-      const rawCtc = role.ctc && typeof role.ctc === "object" ? role.ctc : {};
-      const ctc = {};
-      Object.entries(rawCtc).forEach(([key, value]) => {
-        if (value === null || value === undefined || value === "") {
-          return;
-        }
-        const cleanKey = sanitizeText(key);
-        if (!cleanKey) return;
-        // Allow both numeric and string CTC components (backend schema uses Mixed)
-        const numeric = Number(value);
-        // If it's a valid non‑NaN number, store as number; otherwise keep as trimmed string
-        ctc[cleanKey] = Number.isNaN(numeric)
-          ? String(value).trim()
-          : numeric;
-      });
-
-      return normalizeRoleStipendFields({
-        roleName,
-        ctc,
-        ...(internshipStipend !== undefined ? { internshipStipend } : {}),
-      });
-    });
+    const normalizedRoles = roles.map((role, index) =>
+      normalizeAdminRoleInput(role, index)
+    );
 
     const staticRow = await CompanyStatic.findById(req.params.id).lean();
     if (!staticRow) {
@@ -2128,6 +2136,656 @@ adminRouter.delete("/submissions/:id/delete", async (req, res) => {
       error: "Server error", 
       details: error.message
     });
+  }
+});
+
+// Temporary: read JD PDF and suggest field/section names (no DB write)
+adminRouter.post("/jd-import/scan", (req, res, next) => {
+  jdPdfUpload.single("file")(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({
+        error: err.message || "Upload failed",
+      });
+    }
+    next();
+  });
+}, async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ error: "PDF file is required (field name: file)" });
+    }
+
+    const roleName = sanitizeText(req.body?.roleName ?? "");
+    const { text, numpages, pagesRendered, pagesWithText } =
+      await extractTextFromPdfBuffer(req.file.buffer);
+    const suggestedFields = await suggestJdFieldNamesWithLlm({ text, roleName });
+
+    res.json({
+      roleName,
+      suggestedFields,
+      pdfPages: numpages ?? null,
+      pagesRendered: pagesRendered ?? null,
+      pagesWithText: pagesWithText ?? null,
+      textChars: text.length,
+      rawTextPreview: text,
+    });
+  } catch (error) {
+    console.error("❌ JD scan failed:", error.message);
+    const status =
+      /empty|enough text|scanned|PDF/i.test(String(error.message || ""))
+        ? 400
+        : 500;
+    res.status(status).json({
+      error: status === 400 ? error.message : "Server error",
+      details: error.message,
+    });
+  }
+});
+
+// Temporary: extract role fields from a JD PDF (does not write DB)
+adminRouter.post("/jd-import/extract", (req, res, next) => {
+  jdPdfUpload.single("file")(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({
+        error: err.message || "Upload failed",
+      });
+    }
+    next();
+  });
+}, async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ error: "PDF file is required (field name: file)" });
+    }
+
+    const fields = normalizeExtractFieldNames(req.body?.fields);
+    if (fields.length === 0) {
+      return res.status(400).json({ error: "fields must be a non-empty JSON array of field names" });
+    }
+
+    const roleName = sanitizeText(req.body?.roleName ?? "");
+    const { text, numpages, pagesRendered, pagesWithText } =
+      await extractTextFromPdfBuffer(req.file.buffer);
+    const extracted = await extractJdFieldsWithLlm({
+      text,
+      fields,
+      roleName,
+    });
+
+    res.json({
+      roleName,
+      fields,
+      extracted,
+      pdfPages: numpages ?? null,
+      pagesRendered: pagesRendered ?? null,
+      pagesWithText: pagesWithText ?? null,
+      textChars: text.length,
+      rawTextPreview: text,
+    });
+  } catch (error) {
+    console.error("❌ JD extract failed:", error.message);
+    const status =
+      /empty|enough text|scanned|field name|PDF/i.test(String(error.message || ""))
+        ? 400
+        : 500;
+    res.status(status).json({
+      error: status === 400 ? error.message : "Server error",
+      details: error.message,
+    });
+  }
+});
+
+// Temporary: merge reviewed JD fields into company_visits.roles for a year
+adminRouter.post("/jd-import/apply", async (req, res) => {
+  try {
+    const { y, placementListContext, companyVisitIdHint, placementCluster } =
+      adminVisitContextFromReq(req);
+    const companyId = String(req.body?.companyId || "").trim();
+    if (!companyId) {
+      return res.status(400).json({ error: "companyId is required" });
+    }
+
+    const roleName = sanitizeText(req.body?.roleName ?? "");
+    const payload =
+      req.body?.payload && typeof req.body.payload === "object"
+        ? req.body.payload
+        : req.body?.extracted && typeof req.body.extracted === "object"
+          ? req.body.extracted
+          : null;
+    if (!payload || Object.keys(payload).length === 0) {
+      return res.status(400).json({ error: "payload (extracted fields) is required" });
+    }
+
+    const staticRow = await CompanyStatic.findById(companyId).lean();
+    if (!staticRow) {
+      return res.status(404).json({ error: "Company not found" });
+    }
+
+    // Ensure a visit row exists, then resolve the write target.
+    // Cluster filters can miss an existing year row — never 404 if ensure found/created one.
+    const ensuredVisit = await ensureAdminVisitForYear(companyId, y);
+    const clusterForResolve =
+      placementCluster || req.body?.placementCluster || null;
+    let visitCtx = await getCompanyMergedForAdminById(
+      companyId,
+      y,
+      placementListContext,
+      companyVisitIdHint || req.body?.companyVisitId,
+      clusterForResolve
+    );
+    if (!visitCtx?.visit?._id && clusterForResolve) {
+      visitCtx = await getCompanyMergedForAdminById(
+        companyId,
+        y,
+        placementListContext,
+        companyVisitIdHint || req.body?.companyVisitId,
+        null
+      );
+    }
+
+    const visitId = visitCtx?.visit?._id || ensuredVisit?._id;
+    const freshVisit = visitId
+      ? await CompanyVisit.findById(visitId).lean()
+      : null;
+    if (!freshVisit?._id) {
+      return res.status(404).json({ error: "Company visit not found for this year" });
+    }
+    const existingRoles = Array.isArray(freshVisit.roles) ? freshVisit.roles : [];
+
+    // Surgical update only — never replace the whole roles array (that wiped CTC in older code/images).
+    const plan = planJdRoleFieldUpdate(existingRoles, roleName, payload);
+    if (plan.kind === "noop") {
+      return res.status(400).json({
+        error: "payload must include at least one point field (e.g. skills, workDescription, Bonus Skills)",
+      });
+    }
+
+    /** @type {Record<string, unknown>} */
+    const mongoUpdate = { $set: { migratedAt: new Date() } };
+    if (plan.kind === "patch") {
+      for (const [key, value] of Object.entries(plan.fields)) {
+        mongoUpdate.$set[`roles.${plan.index}.${key}`] = value;
+      }
+    } else {
+      mongoUpdate.$push = { roles: plan.role };
+    }
+
+    await CompanyVisit.updateOne({ _id: freshVisit._id }, mongoUpdate);
+    await invalidateCompanyDetailCache(companyId);
+    const loaded = await getCompanyMergedForAdminById(
+      companyId,
+      y,
+      placementListContext,
+      companyVisitIdHint || req.body?.companyVisitId,
+      clusterForResolve
+    );
+    const rolesAfterUpdate = loaded?.merged?.roles || [];
+    const rolesResponse = (rolesAfterUpdate || []).map((role) => ({
+      ...role,
+      ctc:
+        role && role.ctc instanceof Map
+          ? Object.fromEntries(role.ctc)
+          : (role && role.ctc) || {},
+    }));
+
+    res.json({
+      message: "JD fields saved to company roles",
+      year: y,
+      roleName,
+      roles: rolesResponse,
+    });
+  } catch (error) {
+    console.error("❌ JD apply failed:", error.message);
+    res.status(500).json({ error: "Server error", details: error.message });
+  }
+});
+
+// Temporary: list company visits missing minCgpa (admin backfill UI)
+adminRouter.get("/min-cgpa-gaps", async (req, res) => {
+  try {
+    const yearRaw = req.query?.year;
+    /** @type {Record<string, unknown>} */
+    const filter = {
+      $or: [{ minCgpa: null }, { minCgpa: { $exists: false } }],
+    };
+    if (yearRaw != null && String(yearRaw).trim() !== "" && String(yearRaw).toLowerCase() !== "all") {
+      filter.year = normalizeCompanyDetailYear(yearRaw);
+    }
+
+    const visits = await CompanyVisit.find(filter)
+      .select("_id companyId year type cluster eligibility status minCgpa")
+      .lean();
+
+    const companyIds = [
+      ...new Set(
+        visits
+          .map((v) => v.companyId)
+          .filter(Boolean)
+          .map((id) => String(id))
+      ),
+    ];
+    const objectIds = companyIds
+      .map((id) => {
+        try {
+          return new mongoose.Types.ObjectId(id);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+
+    const staticRows = objectIds.length
+      ? await CompanyStatic.find({ _id: { $in: objectIds } }).select("name").lean()
+      : [];
+    /** @type {Map<string, string>} */
+    const nameById = new Map(
+      staticRows.map((row) => [String(row._id), String(row.name || "").trim()])
+    );
+
+    const items = visits
+      .map((v) => {
+        const companyId = String(v.companyId || "");
+        const clusterRaw = v.cluster != null ? String(v.cluster) : "";
+        const clusterKey = clusterKeyFromPlacementVisitClusterField(clusterRaw) || "cs";
+        return {
+          visitId: String(v._id),
+          companyId,
+          companyName: nameById.get(companyId) || "(unknown company)",
+          year: v.year ?? null,
+          type: v.type != null ? String(v.type) : "",
+          cluster: clusterRaw,
+          clusterKey,
+          clusterLabel:
+            PLACEMENT_HUB_CLUSTER_LABELS[clusterKey] ||
+            clusterRaw ||
+            "Default / legacy (CSE hub)",
+          eligibility: v.eligibility != null ? String(v.eligibility) : "",
+          status: v.status != null ? String(v.status) : "",
+        };
+      })
+      .sort((a, b) => {
+        const byName = a.companyName.localeCompare(b.companyName, undefined, {
+          sensitivity: "base",
+        });
+        if (byName !== 0) return byName;
+        const byYear = Number(b.year || 0) - Number(a.year || 0);
+        if (byYear !== 0) return byYear;
+        return String(a.clusterKey).localeCompare(String(b.clusterKey));
+      });
+
+    res.json({ count: items.length, items });
+  } catch (error) {
+    console.error("❌ min-cgpa-gaps list failed:", error.message);
+    res.status(500).json({ error: "Server error", details: error.message });
+  }
+});
+
+// Temporary: set minCgpa and/or eligibility on a specific company_visits row
+adminRouter.put("/min-cgpa-gaps/:visitId", async (req, res) => {
+  try {
+    const visitId = String(req.params.visitId || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(visitId)) {
+      return res.status(400).json({ error: "Invalid visitId" });
+    }
+
+    /** @type {Record<string, unknown>} */
+    const $set = { migratedAt: new Date() };
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const hasMinCgpa = body.minCgpa !== null && body.minCgpa !== undefined && String(body.minCgpa).trim() !== "";
+    const hasEligibility = Object.prototype.hasOwnProperty.call(body, "eligibility");
+
+    if (!hasMinCgpa && !hasEligibility) {
+      return res.status(400).json({ error: "Provide minCgpa and/or eligibility" });
+    }
+
+    if (hasMinCgpa) {
+      const n = Number(String(body.minCgpa).trim().replace(/,/g, ""));
+      if (!Number.isFinite(n) || n < 0 || n > 10) {
+        return res.status(400).json({ error: "minCgpa must be a number between 0 and 10" });
+      }
+      $set.minCgpa = Math.round(n * 100) / 100;
+    }
+
+    if (hasEligibility) {
+      $set.eligibility = String(body.eligibility ?? "");
+    }
+
+    const visit = await CompanyVisit.findByIdAndUpdate(
+      visitId,
+      { $set },
+      { new: true }
+    ).lean();
+    if (!visit) {
+      return res.status(404).json({ error: "Company visit not found" });
+    }
+
+    await invalidateCompanyDetailCache(visit.companyId);
+
+    res.json({
+      message: hasMinCgpa && hasEligibility
+        ? "minCgpa and eligibility saved"
+        : hasMinCgpa
+          ? "minCgpa saved"
+          : "eligibility saved",
+      visitId: String(visit._id),
+      companyId: String(visit.companyId),
+      minCgpa: visit.minCgpa ?? null,
+      eligibility: visit.eligibility != null ? String(visit.eligibility) : "",
+      year: visit.year,
+      cluster: visit.cluster || "",
+    });
+  } catch (error) {
+    console.error("❌ min-cgpa-gaps update failed:", error.message);
+    res.status(500).json({ error: "Server error", details: error.message });
+  }
+});
+
+const RVITM_COLLEGE_ID = "rvitm";
+const RVCE_COLLEGE_ID = "rvce";
+const COMPANY_VISITS_WITH_RVITM = "company_visits_with_rvitm";
+
+function readCollegeId(row) {
+  if (!row || typeof row !== "object") return "";
+  return String(row.collegeId ?? row.college_id ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+function isRvitmCollege(row) {
+  return readCollegeId(row) === RVITM_COLLEGE_ID;
+}
+
+function stripInternalIds(row) {
+  if (!row || typeof row !== "object") return {};
+  const { _id, college_id, ...rest } = row;
+  return rest;
+}
+
+/**
+ * Keep non-rvitm rows; tag untagged rows as rvce.
+ * Then append the new rvitm rows (always with collegeId: "rvitm").
+ */
+function mergeCollegeScopedArray(existingRows, rvitmRows, buildRvitmRow) {
+  const kept = (Array.isArray(existingRows) ? existingRows : []).flatMap((row) => {
+    if (!row || typeof row !== "object") return [];
+    const college = readCollegeId(row);
+    if (college === RVITM_COLLEGE_ID) return [];
+    const cleaned = stripInternalIds(row);
+    return [{ ...cleaned, collegeId: college || RVCE_COLLEGE_ID }];
+  });
+  const appended = (Array.isArray(rvitmRows) ? rvitmRows : []).map((row) =>
+    buildRvitmRow(row)
+  );
+  return [...kept, ...appended];
+}
+
+function normalizeRvitmRole(row) {
+  const src = row && typeof row === "object" ? row : {};
+  const roleName = String(src.roleName ?? src.role ?? "").trim();
+  const out = {
+    roleName,
+    collegeId: RVITM_COLLEGE_ID,
+  };
+  if (src.ctc != null && typeof src.ctc === "object" && !Array.isArray(src.ctc)) {
+    out.ctc = src.ctc;
+  } else if (src.ctc != null && src.ctc !== "") {
+    out.ctc = src.ctc;
+  } else {
+    out.ctc = {};
+  }
+  if (src.internshipStipend != null && src.internshipStipend !== "") {
+    const n = Number(src.internshipStipend);
+    if (Number.isFinite(n)) out.internshipStipend = n;
+  }
+  return out;
+}
+
+function normalizeRvitmGotIn(row) {
+  const src = row && typeof row === "object" ? row : {};
+  const branchCode = String(src.branchCode ?? src.branch ?? "")
+    .trim()
+    .toLowerCase();
+  const gotIn = Math.max(0, Number.parseInt(String(src.gotIn ?? 0), 10) || 0);
+  return {
+    branchCode,
+    gotIn,
+    collegeId: RVITM_COLLEGE_ID,
+  };
+}
+
+function rvitmDataLooksFilled(roles, gotInRows) {
+  if ((gotInRows || []).some((g) => Number(g?.gotIn) > 0)) return true;
+  return (roles || []).some((r) => {
+    const stipend = Number(r?.internshipStipend) > 0;
+    const ctc =
+      r?.ctc && typeof r.ctc === "object" && !Array.isArray(r.ctc)
+        ? Object.keys(r.ctc).length > 0
+        : Boolean(r?.ctc);
+    return stipend || ctc;
+  });
+}
+
+// Temporary: list visits from company_visits_with_rvitm that carry rvitm roles/got-in
+adminRouter.get("/rvitm-data", async (req, res) => {
+  try {
+    const yearRaw = req.query?.year;
+    /** @type {Record<string, unknown>} */
+    const filter = {
+      $or: [
+        { "roles.collegeId": RVITM_COLLEGE_ID },
+        { "roles.college_id": RVITM_COLLEGE_ID },
+        { "placementGotInBranchStats.collegeId": RVITM_COLLEGE_ID },
+        { "placementGotInBranchStats.college_id": RVITM_COLLEGE_ID },
+      ],
+    };
+    if (
+      yearRaw != null &&
+      String(yearRaw).trim() !== "" &&
+      String(yearRaw).toLowerCase() !== "all"
+    ) {
+      filter.year = normalizeCompanyDetailYear(yearRaw);
+    }
+
+    const db = mongoose.connection.db;
+    const sourceVisits = await db
+      .collection(COMPANY_VISITS_WITH_RVITM)
+      .find(filter)
+      .project({
+        _id: 1,
+        companyId: 1,
+        year: 1,
+        type: 1,
+        cluster: 1,
+        roles: 1,
+        placementGotInBranchStats: 1,
+        status: 1,
+      })
+      .toArray();
+
+    const companyIds = [
+      ...new Set(
+        sourceVisits
+          .map((v) => v.companyId)
+          .filter(Boolean)
+          .map((id) => String(id))
+      ),
+    ];
+    const objectIds = companyIds
+      .map((id) => {
+        try {
+          return new mongoose.Types.ObjectId(id);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+    const staticRows = objectIds.length
+      ? await CompanyStatic.find({ _id: { $in: objectIds } }).select("name").lean()
+      : [];
+    /** @type {Map<string, string>} */
+    const nameById = new Map(
+      staticRows.map((row) => [String(row._id), String(row.name || "").trim()])
+    );
+
+    const items = sourceVisits
+      .map((v) => {
+        const visitId = String(v._id);
+        const companyId = String(v.companyId || "");
+        const clusterRaw = v.cluster != null ? String(v.cluster) : "";
+        const clusterKey =
+          clusterKeyFromPlacementVisitClusterField(clusterRaw) || "cs";
+        const sourceRoles = Array.isArray(v.roles) ? v.roles : [];
+        const sourceGotIn = Array.isArray(v.placementGotInBranchStats)
+          ? v.placementGotInBranchStats
+          : [];
+        const rvitmRoles = sourceRoles
+          .filter(isRvitmCollege)
+          .map((row) => {
+            const cleaned = stripInternalIds(row);
+            return { ...cleaned, collegeId: RVITM_COLLEGE_ID };
+          });
+        const rvitmGotIn = sourceGotIn
+          .filter(isRvitmCollege)
+          .map((row) => {
+            const cleaned = stripInternalIds(row);
+            return {
+              branchCode: String(cleaned.branchCode || "").trim().toLowerCase(),
+              gotIn: Math.max(0, Number(cleaned.gotIn) || 0),
+              collegeId: RVITM_COLLEGE_ID,
+            };
+          });
+        const filled = rvitmDataLooksFilled(rvitmRoles, rvitmGotIn);
+
+        return {
+          visitId,
+          companyId,
+          companyName: nameById.get(companyId) || "(unknown company)",
+          year: v.year ?? null,
+          type: v.type != null ? String(v.type) : "",
+          cluster: clusterRaw,
+          clusterKey,
+          clusterLabel:
+            PLACEMENT_HUB_CLUSTER_LABELS[clusterKey] ||
+            clusterRaw ||
+            "Default / legacy (CSE hub)",
+          status: v.status != null ? String(v.status) : "",
+          filled,
+          /** @deprecated use filled — kept for older UI builds */
+          applied: filled,
+          sourceRvitmRoles: rvitmRoles,
+          sourceRvitmGotIn: rvitmGotIn,
+        };
+      })
+      .sort((a, b) => {
+        if (a.filled !== b.filled) return a.filled ? 1 : -1;
+        const byName = a.companyName.localeCompare(b.companyName, undefined, {
+          sensitivity: "base",
+        });
+        if (byName !== 0) return byName;
+        return Number(b.year || 0) - Number(a.year || 0);
+      });
+
+    res.json({
+      count: items.length,
+      pending: items.filter((i) => !i.filled).length,
+      filled: items.filter((i) => i.filled).length,
+      applied: items.filter((i) => i.filled).length,
+      items,
+    });
+  } catch (error) {
+    console.error("❌ rvitm-data list failed:", error.message);
+    res.status(500).json({ error: "Server error", details: error.message });
+  }
+});
+
+// Temporary: write rvitm roles + got-in onto company_visits_with_rvitm only
+adminRouter.put("/rvitm-data/:visitId", async (req, res) => {
+  try {
+    const visitId = String(req.params.visitId || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(visitId)) {
+      return res.status(400).json({ error: "Invalid visitId" });
+    }
+
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const rolesIn = Array.isArray(body.roles) ? body.roles : null;
+    const gotInIn = Array.isArray(body.placementGotInBranchStats)
+      ? body.placementGotInBranchStats
+      : Array.isArray(body.gotIn)
+        ? body.gotIn
+        : null;
+
+    if (rolesIn == null && gotInIn == null) {
+      return res.status(400).json({
+        error: "Provide roles and/or placementGotInBranchStats arrays",
+      });
+    }
+
+    const db = mongoose.connection.db;
+    const col = db.collection(COMPANY_VISITS_WITH_RVITM);
+    const oid = new mongoose.Types.ObjectId(visitId);
+    const existing = await col.findOne({ _id: oid });
+    if (!existing) {
+      return res.status(404).json({
+        error: "Visit not found in company_visits_with_rvitm",
+      });
+    }
+
+    /** @type {Record<string, unknown>} */
+    const $set = { updatedAt: new Date() };
+
+    if (rolesIn != null) {
+      const normalizedRoles = rolesIn
+        .map(normalizeRvitmRole)
+        .filter((r) => r.roleName);
+      if (rolesIn.length > 0 && normalizedRoles.length === 0) {
+        return res.status(400).json({ error: "Each rvitm role needs a roleName" });
+      }
+      $set.roles = mergeCollegeScopedArray(
+        existing.roles,
+        normalizedRoles,
+        (row) => row
+      );
+    }
+
+    if (gotInIn != null) {
+      const normalizedGotIn = gotInIn
+        .map(normalizeRvitmGotIn)
+        .filter((r) => r.branchCode);
+      if (gotInIn.length > 0 && normalizedGotIn.length === 0) {
+        return res
+          .status(400)
+          .json({ error: "Each rvitm got-in row needs a branchCode" });
+      }
+      $set.placementGotInBranchStats = mergeCollegeScopedArray(
+        existing.placementGotInBranchStats,
+        normalizedGotIn,
+        (row) => row
+      );
+    }
+
+    await col.updateOne({ _id: oid }, { $set });
+    const updated = await col.findOne({ _id: oid });
+
+    const roles = Array.isArray(updated?.roles) ? updated.roles : [];
+    const gotIn = Array.isArray(updated?.placementGotInBranchStats)
+      ? updated.placementGotInBranchStats
+      : [];
+    const rvitmRoles = roles.filter(isRvitmCollege);
+    const rvitmGotIn = gotIn.filter(isRvitmCollege);
+
+    res.json({
+      message: "RVITM data saved to company_visits_with_rvitm",
+      visitId: String(updated._id),
+      companyId: String(updated.companyId),
+      rvitmRoles,
+      rvitmGotIn,
+      filled: rvitmDataLooksFilled(rvitmRoles, rvitmGotIn),
+      rolesCount: roles.length,
+      gotInCount: gotIn.length,
+    });
+  } catch (error) {
+    console.error("❌ rvitm-data update failed:", error.message);
+    res.status(500).json({ error: "Server error", details: error.message });
   }
 });
 
