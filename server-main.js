@@ -24,6 +24,7 @@ import studentRouter from "./routes/studentRoutes.js";
 import placementRouter from "./routes/placementRoutes.js";
 import leaderboardRouter from "./routes/leaderboardRoutes.js";
 import resumeRouter from "./routes/resumeRoutes.js";
+import prepPathRouter from "./routes/prepPathRoutes.js";
 import logoRouter from "./routes/logo.js";
 import experienceRouter from "./routes/experienceRoutes.js";
 import { createHealthHandler } from "./server/healthHandler.js";
@@ -48,6 +49,7 @@ app.use(routes.STUDENTS, studentRouter);
 app.use(routes.PLACEMENT, placementRouter);
 app.use(routes.LEADERBOARD, leaderboardRouter);
 app.use(routes.RESUME, resumeRouter);
+app.use(routes.PREP_PATH, prepPathRouter);
 
 if (process.env.NODE_ENV !== "test") {
   connectDB(config.MONGO_URI).then(async () => {

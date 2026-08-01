@@ -76,6 +76,18 @@ export const resumeLimiter = rateLimit({
 });
 
 /**
+ * PrepPath Rate Limiter: soft IP guard (daily per-user quota is enforced in service).
+ */
+export const prepPathLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: "Too many PrepPath requests, please try again later",
+  handler: rateLimitExceededHandler,
+});
+
+/**
  * AI Interview Start Limiter: Very strict limit on starting new AI interview sessions.
  */
 export const aiStartLimiter = rateLimit({

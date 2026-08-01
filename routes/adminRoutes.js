@@ -1,3 +1,4 @@
+import { collegeIdFromUser } from "../utils/collegeScope.js";
 import express from "express";
 import mongoose from "mongoose";
 import multer from "multer";
@@ -1741,13 +1742,21 @@ adminRouter.put(
       companyVisitIdHint,
       placementCluster
     );
-    await updateCompanyVisit(req.params.id, payload, y, statsVisitCtx?.visit);
+    const adminCollegeId = collegeIdFromUser(req.user);
+    await updateCompanyVisit(
+      req.params.id,
+      payload,
+      y,
+      statsVisitCtx?.visit,
+      { collegeId: adminCollegeId }
+    );
     const out = (await getCompanyMergedForAdminById(
       req.params.id,
       y,
       placementListContext,
       companyVisitIdHint,
-      placementCluster
+      placementCluster,
+      adminCollegeId
     ))?.merged;
     res.json({ message: "Stats updated", company: out });
   } catch (error) {
@@ -1858,13 +1867,21 @@ adminRouter.put(
       companyVisitIdHint,
       placementCluster
     );
-    await updateCompanyVisit(req.params.id, { roles: normalizedRoles }, y, rolesVisitCtx?.visit);
+    const adminCollegeId = collegeIdFromUser(req.user);
+    await updateCompanyVisit(
+      req.params.id,
+      { roles: normalizedRoles },
+      y,
+      rolesVisitCtx?.visit,
+      { collegeId: adminCollegeId }
+    );
     const loaded = await getCompanyMergedForAdminById(
       req.params.id,
       y,
       placementListContext,
       companyVisitIdHint,
-      placementCluster
+      placementCluster,
+      adminCollegeId
     );
     const rolesAfterUpdate = loaded?.merged?.roles || [];
     const rolesResponse = (rolesAfterUpdate || []).map((role) => ({

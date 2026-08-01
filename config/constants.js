@@ -80,6 +80,7 @@ export const routes = {
   LEADERBOARD: '/api/leaderboard',
   INTERVIEW: '/api/interview',
   RESUME: '/api/resume',
+  PREP_PATH: '/api/prep-path',
 };
 
 // Messages

@@ -1,3 +1,4 @@
+import { collegeIdFromUser } from "../utils/collegeScope.js";
 import express from "express";
 import mongoose from "mongoose";
 import PlacementData from "../models/PlacementData.js";
@@ -14,6 +15,7 @@ import {
   mergeToLegacyShape,
   resolveApprovedVisitForSpcPlacementOffer,
   shouldIncrementPpoConvertedForSpcConversion,
+  syncAnchoredVisitSpcConversionFields,
 } from "../services/companyService.js";
 import { COMPANY_DETAIL_VISIT_YEARS } from "../utils/placementYears.js";
 import { PPO_BRANCH_CODES, isValidPpoBranchCode, normalizePpoBranchCode } from "../utils/ppoBranchCodes.js";
@@ -307,7 +309,8 @@ router.get(
         companyId,
         placementYear,
         placementContext,
-        branchCode
+        branchCode,
+        collegeIdFromUser(req.user)
       );
       return res.json(result);
     } catch (error) {
@@ -478,7 +481,10 @@ router.put(
                     previousBranchCode,
                     -1,
                     null,
-                    { resolvedVisit: oldResolved.visit }
+                    {
+                      resolvedVisit: oldResolved.visit,
+                      collegeId: collegeIdFromUser(req.user),
+                    }
                   );
               if (!decOld.ok) {
                 console.warn("SPC placement edit: old company got-in decrement failed:", decOld.reason);
@@ -512,7 +518,10 @@ router.put(
                     nextBranchCode,
                     1,
                     null,
-                    { resolvedVisit: nextResolved.visit }
+                    {
+                      resolvedVisit: nextResolved.visit,
+                      collegeId: collegeIdFromUser(req.user),
+                    }
                   );
               if (!incNext.ok) {
                 console.warn("SPC placement edit: new company got-in increment failed:", incNext.reason);
@@ -585,7 +594,11 @@ router.put(
             Number(nextPlacementYear),
             visitSyncFields,
             null,
-            { resolvedVisit: resolvedVisitResult.visit, branchCode: nextBranchCode }
+            {
+              resolvedVisit: resolvedVisitResult.visit,
+              branchCode: nextBranchCode,
+              collegeId: collegeIdFromUser(req.user),
+            }
           );
           if (!visitSync.ok) {
             console.warn("SPC placement edit: visit role/comp sync failed:", visitSync.reason);
@@ -849,6 +862,7 @@ router.post(
           resolvedVisit,
           spcConversion: visitSyncFields,
           branchCode: branchLower,
+          collegeId: collegeIdFromUser(req.user),
         }
       );
       if (!inc.ok) {
@@ -1027,7 +1041,10 @@ router.post(
             branchCodeRaw,
             1,
             placementCtxForVisit,
-            { resolvedVisit: resolvedVisitSubmit }
+            {
+              resolvedVisit: resolvedVisitSubmit,
+              collegeId: collegeIdFromUser(req.user),
+            }
           );
 
       if (!inc.ok) {
@@ -1054,7 +1071,11 @@ router.post(
         placementYearNum,
         visitSyncFields,
         placementCtxForVisit,
-        { resolvedVisit: resolvedVisitSubmit, branchCode: branchCodeRaw }
+        {
+          resolvedVisit: resolvedVisitSubmit,
+          branchCode: branchCodeRaw,
+          collegeId: collegeIdFromUser(req.user),
+        }
       );
       if (!visitSync.ok) {
         console.warn("SPC placement submit: visit compensation sync failed:", visitSync.reason);
