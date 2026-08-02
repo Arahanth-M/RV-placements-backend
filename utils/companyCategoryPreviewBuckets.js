@@ -210,10 +210,11 @@ function visitDisplayType(visit) {
 /**
  * @param {Record<string, unknown>[]} dreamTiers — non-empty
  * @param {number} openDreamMinRupees
+ * @param {unknown} [collegeId]
  * @returns {Record<string, unknown>}
  */
-function pickBestDreamTierVisitByCtc(dreamTiers, openDreamMinRupees) {
-  const metaOpts = { openDreamMinRupees };
+function pickBestDreamTierVisitByCtc(dreamTiers, openDreamMinRupees, collegeId = null) {
+  const metaOpts = { openDreamMinRupees, collegeId };
   let bestIdx = 0;
   let best = getCompanyPlacementMeta({ roles: dreamTiers[0].roles }, metaOpts);
   for (let i = 1; i < dreamTiers.length; i++) {
@@ -228,14 +229,17 @@ function pickBestDreamTierVisitByCtc(dreamTiers, openDreamMinRupees) {
 
 /**
  * Dream/Open dream card subtitle source — matches hub-eligible rows but never strict Summer internship (`Internship(PPO)`).
+ * @param {unknown} [collegeId]
  */
-function pickDreamHubSubtitleVisitAcrossYears(list, openDreamMinRupees) {
+function pickDreamHubSubtitleVisitAcrossYears(list, openDreamMinRupees, collegeId = null) {
   if (!Array.isArray(list) || list.length === 0) return null;
   for (const y of COMPANY_DETAIL_VISIT_YEARS) {
     const scoped = list.filter(
       (v) => Number(v.year) === y && visitQualifiesDreamTierRow(v)
     );
-    if (scoped.length > 0) return pickBestDreamTierVisitByCtc(scoped, openDreamMinRupees);
+    if (scoped.length > 0) {
+      return pickBestDreamTierVisitByCtc(scoped, openDreamMinRupees, collegeId);
+    }
     const hybrid = list.find(
       (v) =>
         Number(v.year) === y &&
@@ -337,12 +341,14 @@ export function getInternshipOnlyPlacementPrefFromVisits(visits, preferredListin
  * @param {Record<string, unknown>|null|undefined} primaryVisit
  * @param {unknown} [preferredListingYear] — optional `?year=` when rendering lists (2026 / 2027)
  * @param {unknown} [clusterKey] — hub cluster (`cs` / `ec` / `me` / `chem`) for Open dream LPA threshold
+ * @param {unknown} [collegeId] — when set, CTC tiering is college-scoped (RVITM→RVCE pay fallback)
  */
 export function getListPlacementCategoryMetaFromVisits(
   visits,
   primaryVisit,
   preferredListingYear,
-  clusterKey = "cs"
+  clusterKey = "cs",
+  collegeId = null
 ) {
   const list = Array.isArray(visits) ? visits : [];
   const prefYear = normalizePlacementDetailYear(preferredListingYear);
@@ -354,12 +360,12 @@ export function getListPlacementCategoryMetaFromVisits(
     clusterKey,
     yearForThreshold
   );
-  const metaOpts = { openDreamMinRupees };
+  const metaOpts = { openDreamMinRupees, collegeId };
   const dreamTiers = list.filter((v) => visitQualifiesDreamTierRow(v));
 
   const bestGlobalVisit =
     dreamTiers.length > 0
-      ? pickBestDreamTierVisitByCtc(dreamTiers, openDreamMinRupees)
+      ? pickBestDreamTierVisitByCtc(dreamTiers, openDreamMinRupees, collegeId)
       : null;
 
   /** Category / bucket CTC stay driven by the best dream-tier package across years (existing behaviour). */
@@ -380,7 +386,11 @@ export function getListPlacementCategoryMetaFromVisits(
     for (const y of yearsToTry) {
       const scoped = dreamTiers.filter((v) => Number(v.year) === y);
       if (scoped.length > 0) {
-        displayVisit = pickBestDreamTierVisitByCtc(scoped, openDreamMinRupees);
+        displayVisit = pickBestDreamTierVisitByCtc(
+          scoped,
+          openDreamMinRupees,
+          collegeId
+        );
         break;
       }
       const hybridVisit = list.find(
@@ -419,7 +429,11 @@ export function getListPlacementCategoryMetaFromVisits(
       primaryVisit &&
       !visitQualifiesSummerInternshipListingRow(primaryVisit)
         ? primaryVisit
-        : pickDreamHubSubtitleVisitAcrossYears(list, openDreamMinRupees);
+        : pickDreamHubSubtitleVisitAcrossYears(
+            list,
+            openDreamMinRupees,
+            collegeId
+          );
     if (
       subtitleVisit &&
       !visitQualifiesSummerInternshipListingRow(subtitleVisit)
@@ -441,7 +455,11 @@ export function getListPlacementCategoryMetaFromVisits(
       primaryVisit &&
       !visitQualifiesSummerInternshipListingRow(primaryVisit)
         ? primaryVisit
-        : pickDreamHubSubtitleVisitAcrossYears(list, openDreamMinRupees);
+        : pickDreamHubSubtitleVisitAcrossYears(
+            list,
+            openDreamMinRupees,
+            collegeId
+          );
     if (
       subtitleVisit &&
       !visitQualifiesSummerInternshipListingRow(subtitleVisit)

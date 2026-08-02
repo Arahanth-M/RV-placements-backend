@@ -38,6 +38,7 @@ import CompanyVisit from "../models/CompanyVisit.js";
 import Notification from "../models/Notification.js";
 import { getAdminStats } from "../controllers/adminStatsController.js";
 import { invalidateAdminDashboardStatsCache } from "../services/adminDashboardStatsCache.js";
+import { getAdminUsageAnalytics } from "../services/adminUsageAnalyticsService.js";
 import {
   invalidateMySubmissionsCacheByEmail,
   submitterEmailFromSubmission,
@@ -747,6 +748,17 @@ submissionModRouter.get("/submissions/:id", async (req, res) => {
 
 // Get dashboard stats (Redis-cached when REDIS_URL is set; invalidated on admin mutations)
 adminRouter.get("/stats", getAdminStats);
+
+/** AI mock interviews + PrepPath generation usage (day-wise IST + totals). */
+adminRouter.get("/usage-analytics", async (req, res) => {
+  try {
+    const data = await getAdminUsageAnalytics({ days: req.query?.days });
+    return res.json(data);
+  } catch (err) {
+    console.error("GET /api/admin/usage-analytics:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
 
 adminRouter.get("/student-requests", async (_req, res) => {
   try {

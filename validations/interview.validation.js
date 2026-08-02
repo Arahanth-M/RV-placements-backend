@@ -76,7 +76,7 @@ export const interviewSlotStatusSchema = Joi.object({
           .valid("DSA", "System Design", "SQL", "CS Fundamentals", "HR")
           .required(),
         difficulty: Joi.string().valid("easy", "medium", "hard").optional(),
-      })
+      }).unknown(true)
     )
     .required(),
 }).unknown(true);

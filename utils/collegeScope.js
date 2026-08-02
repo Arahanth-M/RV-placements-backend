@@ -15,6 +15,9 @@ export const DEFAULT_COLLEGE_ID = COLLEGE_ID_RVCE;
 const RVCE_EMAIL_SUFFIX = "@rvce.edu.in";
 const RVITM_EMAIL_SUFFIX = ".rvitm@rvei.edu.in";
 
+/** TEMP: Gmail accounts treated as RVITM for local testing. Remove before deploy. */
+const TEST_RVITM_EMAILS = new Set(["arahanthmahaveer76@gmail.com"]);
+
 /**
  * @param {unknown} raw
  * @returns {string}
@@ -36,6 +39,7 @@ export function collegeIdFromEmail(email) {
   const normalized = String(email || "")
     .trim()
     .toLowerCase();
+  if (TEST_RVITM_EMAILS.has(normalized)) return COLLEGE_ID_RVITM;
   if (normalized.endsWith(RVITM_EMAIL_SUFFIX)) return COLLEGE_ID_RVITM;
   if (normalized.endsWith(RVCE_EMAIL_SUFFIX)) return COLLEGE_ID_RVCE;
   return DEFAULT_COLLEGE_ID;
@@ -63,6 +67,7 @@ export function isAllowedCollegeEmail(email) {
     .trim()
     .toLowerCase();
   return (
+    TEST_RVITM_EMAILS.has(normalized) ||
     normalized.endsWith(RVCE_EMAIL_SUFFIX) ||
     normalized.endsWith(RVITM_EMAIL_SUFFIX)
   );
@@ -78,6 +83,37 @@ export function collegeIdOfScopedRow(row) {
   const raw = /** @type {{ collegeId?: unknown }} */ (row).collegeId;
   if (raw == null || String(raw).trim() === "") return DEFAULT_COLLEGE_ID;
   return normalizeCollegeId(raw);
+}
+
+/**
+ * True when a role has usable CTC object values or a positive internship stipend.
+ * Used to omit empty RVITM compensation rows from student-facing payloads (read-time only).
+ * @param {unknown} role
+ * @returns {boolean}
+ */
+export function roleHasUsableCompensationForDisplay(role) {
+  if (!role || typeof role !== "object") return false;
+  const stip = Number(/** @type {{ internshipStipend?: unknown }} */ (role).internshipStipend);
+  if (Number.isFinite(stip) && stip > 0) return true;
+
+  const raw = /** @type {{ ctc?: unknown }} */ (role).ctc;
+  const obj =
+    raw instanceof Map
+      ? Object.fromEntries(raw)
+      : raw && typeof raw === "object" && !Array.isArray(raw)
+        ? raw
+        : null;
+  if (!obj) return false;
+  for (const v of Object.values(obj)) {
+    if (v == null) continue;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return true;
+    if (typeof v === "string") {
+      const s = v.trim();
+      if (!s || /^n\/?a$/i.test(s)) continue;
+      if (/\d/.test(s)) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -180,7 +216,12 @@ export function applyCollegeScopeToCompanyPayload(company, collegeIdRaw) {
   const out = { ...company };
 
   if (Array.isArray(out.roles)) {
-    out.roles = filterRolesForCollege(out.roles, collegeId);
+    let roles = filterRolesForCollege(out.roles, collegeId);
+    // RVITM: omit roles with no CTC and no internship stipend from API payloads.
+    if (collegeId === COLLEGE_ID_RVITM) {
+      roles = roles.filter((r) => roleHasUsableCompensationForDisplay(r));
+    }
+    out.roles = roles;
   }
 
   if (Array.isArray(out.placementGotInBranchStats)) {

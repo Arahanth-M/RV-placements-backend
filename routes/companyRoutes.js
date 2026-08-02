@@ -101,11 +101,16 @@ companyRouter.get("/", optionalAuthJWT, async (req, res) => {
     const list = scopedCompanies.map((c) => {
       const focusTags = getCompanyFocusTags(c);
       const { onlineQuestions, interviewQuestions, interviewProcess, Must_Do_Topics, ...rest } = c;
-      const withCategory = attachPlacementCategoryToCompany({ ...rest, focusTags });
+      const withCategory = attachPlacementCategoryToCompany(
+        { ...rest, focusTags },
+        { collegeId }
+      );
       return projectCompanyListResponse({
         ...withCategory,
-        category: withCategory.category ?? c.category,
-        totalCtcRupees: withCategory.totalCtcRupees ?? c.totalCtcRupees,
+        // Prefer list meta (already college-scoped with RVITM→RVCE CTC fallback).
+        category: c.category ?? withCategory.category,
+        totalCtcRupees:
+          c.totalCtcRupees != null ? c.totalCtcRupees : withCategory.totalCtcRupees,
         placementAnyYearPpoOnCampus: c.placementAnyYearPpoOnCampus,
         placementHasDreamTierVisit: c.placementHasDreamTierVisit,
         placementDreamTierForListingYear: c.placementDreamTierForListingYear,
@@ -304,18 +309,24 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
           touchUserActivity(),
         ]);
         console.log("HIT — company found in Redis and served from cache:", id, "y=", placementVisitYear);
-        const scoped = applyCollegeScopeToCompanyPayload(parsed, collegeId);
-        const withMeta = {
-          ...scoped,
-          placementVisitYear,
-          placementYearsAvailable,
-        };
-        return res.json(
-          attachPlacementCategoryToCompany(withMeta, {
-            clusterKey: placementClusterResolved ?? scoped?.cluster,
+        const categorized = attachPlacementCategoryToCompany(
+          {
+            ...parsed,
+            placementVisitYear,
+            placementYearsAvailable,
+          },
+          {
+            clusterKey: placementClusterResolved ?? parsed?.cluster,
             placementYear: placementVisitYear,
-          })
+            collegeId,
+          }
         );
+        const scoped = applyCollegeScopeToCompanyPayload(categorized, collegeId);
+        return res.json({
+          ...scoped,
+          category: categorized.category,
+          totalCtcRupees: categorized.totalCtcRupees,
+        });
       } catch {
         // Bad cache payload — fall through to MongoDB
       }
@@ -416,15 +427,19 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
       }
     }
 
-    const scoped = applyCollegeScopeToCompanyPayload(companyForCache, collegeId);
-    return res.json(
-      attachPlacementCategoryToCompany(scoped, {
-        clusterKey:
-          placementClusterResolved ??
-          clusterKeyFromPlacementVisitClusterField(scoped?.cluster),
-        placementYear: placementVisitYear,
-      })
-    );
+    const categorized = attachPlacementCategoryToCompany(companyForCache, {
+      clusterKey:
+        placementClusterResolved ??
+        clusterKeyFromPlacementVisitClusterField(companyForCache?.cluster),
+      placementYear: placementVisitYear,
+      collegeId,
+    });
+    const scoped = applyCollegeScopeToCompanyPayload(categorized, collegeId);
+    return res.json({
+      ...scoped,
+      category: categorized.category,
+      totalCtcRupees: categorized.totalCtcRupees,
+    });
   } catch (err) {
     if (err.name === "CastError") {
       return res.status(404).json({ error: "Company not found" });

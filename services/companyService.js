@@ -2306,17 +2306,10 @@ export async function listApprovedCompaniesLegacyMerged(
           : hasInternshipOnlyVisitForYear(scopedVisits, normalizedListingYear);
       const placementMeta = getListPlacementCategoryMetaFromVisits(
         scopedVisits,
-        collegeId
-          ? {
-              ...visitWithPlainRoleCtc(visit),
-              roles: filterRolesForCollege(
-                visitWithPlainRoleCtc(visit)?.roles,
-                collegeId
-              ),
-            }
-          : visitWithPlainRoleCtc(visit),
+        visitWithPlainRoleCtc(visit),
         placementYear,
-        clusterKey
+        clusterKey,
+        collegeId
       );
       const {
         dreamDisplayType: placementDreamDisplayType,

@@ -123,5 +123,53 @@ describe("ctcCategory", () => {
       const meta = getCompanyPlacementMeta({ roles: [] });
       expect(meta.category).toBe(PLACEMENT_CATEGORY.DREAM);
     });
+
+    it("for RVITM with empty pay, uses max CTC among RVCE roles", () => {
+      const meta = getCompanyPlacementMeta(
+        {
+          roles: [
+            { roleName: "SDE", collegeId: "rvitm", ctc: {} },
+            { roleName: "SDE", collegeId: "rvce", ctc: { CTC: "8 LPA" } },
+            { roleName: "SDE Intern", collegeId: "rvce", ctc: { CTC: "14 LPA" } },
+          ],
+        },
+        { collegeId: "rvitm" }
+      );
+      expect(meta.totalCtcRupees).toBe(1_400_000);
+      expect(meta.category).toBe(PLACEMENT_CATEGORY.OPEN_DREAM);
+    });
+
+    it("for RVITM with own CTC, does not fall back to RVCE", () => {
+      const meta = getCompanyPlacementMeta(
+        {
+          roles: [
+            { roleName: "SDE", collegeId: "rvitm", ctc: { CTC: "7 LPA" } },
+            { roleName: "SDE", collegeId: "rvce", ctc: { CTC: "14 LPA" } },
+          ],
+        },
+        { collegeId: "rvitm" }
+      );
+      expect(meta.totalCtcRupees).toBe(700_000);
+      expect(meta.category).toBe(PLACEMENT_CATEGORY.DREAM);
+    });
+
+    it("for RVITM with internship stipend only, does not fall back to RVCE", () => {
+      const meta = getCompanyPlacementMeta(
+        {
+          roles: [
+            {
+              roleName: "Intern",
+              collegeId: "rvitm",
+              ctc: {},
+              internshipStipend: 50000,
+            },
+            { roleName: "SDE", collegeId: "rvce", ctc: { CTC: "14 LPA" } },
+          ],
+        },
+        { collegeId: "rvitm" }
+      );
+      expect(meta.totalCtcRupees).toBe(0);
+      expect(meta.category).toBe(PLACEMENT_CATEGORY.DREAM);
+    });
   });
 });

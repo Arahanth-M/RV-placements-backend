@@ -1,4 +1,10 @@
 import { getOpenDreamMinRupeesForClusterSync } from "../services/placementHubSettingsService.js";
+import {
+  COLLEGE_ID_RVCE,
+  COLLEGE_ID_RVITM,
+  filterRolesForCollege,
+  normalizeCollegeId,
+} from "./collegeScope.js";
 
 /**
  * Placement tier helpers: unknown-shaped `ctc` objects on each role (Mixed map values).
@@ -99,10 +105,6 @@ export function sumCtcObjectToRupees(ctc) {
 
 /**
  * @param {number} totalRupees
- * @returns {typeof PLACEMENT_CATEGORY[keyof typeof PLACEMENT_CATEGORY]}
- */
-/**
- * @param {number} totalRupees
  * @param {number} [openDreamMinRupees] — cluster-specific threshold (defaults to 10 LPA)
  */
 export function categorizeTotalRupees(totalRupees, openDreamMinRupees = OPEN_DREAM_MIN_RUPEES) {
@@ -117,21 +119,59 @@ export function categorizeTotalRupees(totalRupees, openDreamMinRupees = OPEN_DRE
 }
 
 /**
+ * True when a role has usable CTC (or Base) or a positive internship stipend.
+ * @param {{ ctc?: unknown, internshipStipend?: unknown }|null|undefined} role
+ * @returns {boolean}
+ */
+export function roleHasUsableCompensation(role) {
+  if (sumCtcObjectToRupees(role?.ctc) > 0) return true;
+  const stip = Number(role?.internshipStipend);
+  return Number.isFinite(stip) && stip > 0;
+}
+
+/**
+ * Roles used for dream / open-dream CTC tiering.
+ * For RVITM: when no RVITM role has CTC or internship stipend, use RVCE roles
+ * so category follows max RVCE CTC (read-time only; does not mutate stored roles).
+ * @param {unknown} roles
+ * @param {unknown} [collegeIdRaw]
+ * @returns {unknown[]}
+ */
+export function rolesForPlacementCategory(roles, collegeIdRaw) {
+  if (!Array.isArray(roles)) return [];
+  if (collegeIdRaw == null || String(collegeIdRaw).trim() === "") {
+    return roles;
+  }
+  const collegeId = normalizeCollegeId(collegeIdRaw);
+  const scoped = filterRolesForCollege(roles, collegeId);
+  if (collegeId !== COLLEGE_ID_RVITM) return scoped;
+  if (scoped.some((r) => roleHasUsableCompensation(r))) return scoped;
+  return filterRolesForCollege(roles, COLLEGE_ID_RVCE);
+}
+
+/**
  * Per-role total, then max across roles (best package sets company tier).
  * @param {{ roles?: Array<{ ctc?: unknown }> }|null|undefined} company
- * @param {{ openDreamMinRupees?: number }} [options]
+ * @param {{ openDreamMinRupees?: number, collegeId?: unknown }} [options]
  * @returns {{ totalCtcRupees: number, category: string }}
  */
 export function getCompanyPlacementMeta(company, options = {}) {
   const openDreamMinRupees = options.openDreamMinRupees;
-  const roles = company?.roles;
-  if (!Array.isArray(roles) || roles.length === 0) {
+  const roles =
+    options.collegeId != null && String(options.collegeId).trim() !== ""
+      ? rolesForPlacementCategory(company?.roles, options.collegeId)
+      : Array.isArray(company?.roles)
+        ? company.roles
+        : [];
+  if (roles.length === 0) {
     return { totalCtcRupees: 0, category: PLACEMENT_CATEGORY.DREAM };
   }
 
   let maxRupees = 0;
   for (const role of roles) {
-    const perRole = sumCtcObjectToRupees(role?.ctc);
+    const perRole = sumCtcObjectToRupees(
+      /** @type {{ ctc?: unknown }} */ (role)?.ctc
+    );
     if (perRole > maxRupees) maxRupees = perRole;
   }
 
@@ -144,7 +184,7 @@ export function getCompanyPlacementMeta(company, options = {}) {
 /**
  * Attach category + total for API responses (additive fields).
  * @param {Record<string, unknown>} companyLeanOrDoc
- * @param {{ clusterKey?: unknown, placementYear?: unknown }} [options]
+ * @param {{ clusterKey?: unknown, placementYear?: unknown, collegeId?: unknown, openDreamMinRupees?: number }} [options]
  */
 export function attachPlacementCategoryToCompany(companyLeanOrDoc, options = {}) {
   const clusterRaw =
@@ -159,6 +199,7 @@ export function attachPlacementCategoryToCompany(companyLeanOrDoc, options = {})
       : getOpenDreamMinRupeesForClusterSync(clusterRaw, yearRaw);
   const { totalCtcRupees, category } = getCompanyPlacementMeta(companyLeanOrDoc, {
     openDreamMinRupees,
+    collegeId: options.collegeId,
   });
   return {
     ...companyLeanOrDoc,

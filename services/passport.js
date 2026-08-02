@@ -5,6 +5,7 @@ import Student from "../models/Student.js";
 import User1 from "../models/User1.js";
 import { urls } from "../config/constants.js";
 import { sendWelcomeEmailWebhook } from "./webhookService.js";
+import { isAllowedCollegeEmail } from "../utils/collegeScope.js";
 
 /** Google may expose the avatar on photos[], _json.picture, or legacy profile.picture */
 function pictureFromGoogleProfile(profile) {
@@ -42,11 +43,7 @@ passport.use(
           return done(null, false, { reason: "not_allowed" });
         }
 
-        const isAllowedCollegeDomain =
-          normalizedEmail.endsWith("@rvce.edu.in") ||
-          normalizedEmail.endsWith(".rvitm@rvei.edu.in");
-
-        if (!isAllowedCollegeDomain) {
+        if (!isAllowedCollegeEmail(normalizedEmail)) {
           return done(null, false, { reason: "domain" });
         }
 
