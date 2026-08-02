@@ -16,7 +16,7 @@ import {
   refundPrepPathQuota,
 } from "./quota.js";
 
-export const PREP_PATH_HISTORY_LIMIT = 5;
+export const PREP_PATH_HISTORY_LIMIT = 10;
 
 /**
  * List recent plans for a user (newest first). Never deletes older docs.
