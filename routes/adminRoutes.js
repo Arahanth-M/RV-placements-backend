@@ -2341,7 +2341,9 @@ adminRouter.post("/jd-import/apply", async (req, res) => {
     }));
 
     res.json({
-      message: "JD fields saved to company roles",
+      message: "JD fields saved to company_visits_with_rvitm",
+      collection: "company_visits_with_rvitm",
+      visitId: String(freshVisit._id),
       year: y,
       roleName,
       roles: rolesResponse,
