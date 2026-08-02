@@ -8,7 +8,15 @@ export const PLACEMENT_HUB_CLUSTER_LABELS = Object.freeze({
   chem: "Chemical Sciences (CH / Civil / BT)",
 });
 
- /**
+/** Canonical `company_visits.cluster` strings used when creating/matching visit rows. */
+export const PLACEMENT_HUB_CLUSTER_DB_LABELS = Object.freeze({
+  cs: "Computer Science and Engineering",
+  ec: "Electronics and Communication",
+  me: "Mechanical Engineering",
+  chem: "Chemical Engineering",
+});
+
+/**
  * Placement hub cluster: query params and visit `company_visits.cluster` routing.
  *
  * **DB reality (`company_visits.cluster`):** values are often full programme names, not short codes.
@@ -20,41 +28,12 @@ export const PLACEMENT_HUB_CLUSTER_LABELS = Object.freeze({
  */
 
 /**
- * @param {unknown} raw — e.g. `req.query.cluster` or `req.query.placementCluster`
- * @returns {string|null}
- */
-export function normalizePlacementClusterQuery(raw) {
-  const v = String(raw ?? "")
-    .trim()
-    .toLowerCase();
-  if (!v) return null;
-  if (v === "cs" || v === "cse") return "cs";
-  if (v === "ec" || v === "ece") return "ec";
-  if (v === "me") return "me";
-  if (v === "chem" || v === "ch" || v === "bt") return "chem";
-  return v;
-}
-
-/**
  * Map stored visit.cluster → hub key. Handles short codes and full names, e.g.
  * `"Computer Science and Engineering"` → `"cs"`.
  *
  * @param {unknown} raw — visit.cluster on company_visits
  * @returns {string}
  */
-/** Map SPC / PPO student program code → placement hub key (cs | ec | me | chem). */
-export function placementHubClusterFromPpoBranchCode(branchCodeRaw) {
-  const bc = String(branchCodeRaw ?? "")
-    .trim()
-    .toLowerCase();
-  if (!bc) return null;
-  if (["cd", "cy", "cs", "is", "ai", "ise", "cse", "aiml"].includes(bc)) return "cs";
-  if (["ec", "et", "ei", "ee", "ece", "ete", "eie", "eee"].includes(bc)) return "ec";
-  if (["as", "im", "me", "ase", "iem"].includes(bc)) return "me";
-  if (["bt", "ch", "cv", "civil"].includes(bc)) return "chem";
-  return null;
-}
-
 export function clusterKeyFromPlacementVisitClusterField(raw) {
   const v = String(raw ?? "").trim().toLowerCase();
   if (!v) return "cs";
@@ -86,4 +65,44 @@ export function clusterKeyFromPlacementVisitClusterField(raw) {
     return "chem";
   }
   return v;
+}
+
+/**
+ * @param {unknown} raw — e.g. `req.query.cluster` or `req.query.placementCluster`
+ * @returns {string|null} hub key `cs|ec|me|chem`, or null when unset
+ */
+export function normalizePlacementClusterQuery(raw) {
+  const v = String(raw ?? "").trim();
+  if (!v) return null;
+  // Accept short codes and full programme names from admin forms
+  // (e.g. "Computer Science and Engineering" → "cs").
+  const key = clusterKeyFromPlacementVisitClusterField(v);
+  if (key === "cs" || key === "ec" || key === "me" || key === "chem") return key;
+  return null;
+}
+
+/**
+ * @param {unknown} hubKey
+ * @returns {string} canonical DB cluster label
+ */
+export function canonicalVisitClusterLabel(hubKey) {
+  const key = normalizePlacementClusterQuery(hubKey) || "cs";
+  return PLACEMENT_HUB_CLUSTER_DB_LABELS[key] || PLACEMENT_HUB_CLUSTER_DB_LABELS.cs;
+}
+
+/**
+ * Map SPC / PPO student program code → placement hub key (cs | ec | me | chem).
+ * @param {unknown} branchCodeRaw
+ * @returns {string|null}
+ */
+export function placementHubClusterFromPpoBranchCode(branchCodeRaw) {
+  const bc = String(branchCodeRaw ?? "")
+    .trim()
+    .toLowerCase();
+  if (!bc) return null;
+  if (["cd", "cy", "cs", "is", "ai", "ise", "cse", "aiml"].includes(bc)) return "cs";
+  if (["ec", "et", "ei", "ee", "ece", "ete", "eie", "eee"].includes(bc)) return "ec";
+  if (["as", "im", "me", "ase", "iem"].includes(bc)) return "me";
+  if (["bt", "ch", "cv", "civil"].includes(bc)) return "chem";
+  return null;
 }

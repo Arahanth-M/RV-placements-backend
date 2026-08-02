@@ -1,9 +1,6 @@
-import { createRequire } from "module";
+import { PDFParse } from "pdf-parse";
 import { callLLM } from "./llmClient.js";
 import { sanitizeRoleText } from "../utils/normalizeAdminRole.js";
-
-const require = createRequire(import.meta.url);
-const pdfParse = require("pdf-parse");
 
 const MIN_PDF_TEXT_CHARS = 40;
 /** ~20–30 pages of typical JD text; Groq context can handle this for scan/extract. */
@@ -18,38 +15,25 @@ export async function extractTextFromPdfBuffer(buffer) {
     throw new Error("PDF file is empty or missing.");
   }
 
-  // max: 0 → render every page (pdf-parse default, set explicitly).
-  const pageTexts = [];
-  const result = await pdfParse(buffer, {
-    max: 0,
-    pagerender: async (pageData) => {
-      const textContent = await pageData.getTextContent({
-        normalizeWhitespace: true,
-        disableCombineTextItems: false,
-      });
-      let lastY;
-      let text = "";
-      for (const item of textContent.items || []) {
-        const str = String(item?.str ?? "");
-        if (!str) continue;
-        const y = item?.transform?.[5];
-        if (lastY == null || y === lastY) {
-          text += str;
-        } else {
-          text += `\n${str}`;
-        }
-        lastY = y;
-      }
-      const cleaned = text.replace(/[ \t]+\n/g, "\n").trim();
-      pageTexts.push(cleaned);
-      return cleaned;
-    },
-  });
+  const parser = new PDFParse({ data: buffer });
+  /** @type {{ text?: string, pages?: Array<{ num?: number, text?: string }>, total?: number }} */
+  let parsed;
+  try {
+    parsed = await parser.getText();
+  } finally {
+    await parser.destroy().catch(() => {});
+  }
 
-  const numpages = Number(result?.numpages) || pageTexts.length || 0;
+  const pages = Array.isArray(parsed?.pages) ? parsed.pages : [];
+  const numpages = Number(parsed?.total) || pages.length || 0;
+  const pageTexts = pages.map((page) =>
+    String(page?.text || "")
+      .replace(/\u0000/g, "")
+      .replace(/[ \t]+\n/g, "\n")
+      .trim()
+  );
   const pagesWithText = pageTexts.filter((p) => p.length > 0).length;
 
-  // Prefer our per-page join (clear page breaks) over pdf-parse's concatenated string.
   const textFromPages = pageTexts
     .map((pageText, index) => {
       const body = String(pageText || "").trim();
@@ -58,7 +42,7 @@ export async function extractTextFromPdfBuffer(buffer) {
     })
     .join("\n\n");
 
-  const fallback = String(result?.text || "")
+  const fallback = String(parsed?.text || "")
     .replace(/\u0000/g, "")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")

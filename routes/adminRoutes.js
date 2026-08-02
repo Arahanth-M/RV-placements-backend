@@ -51,7 +51,7 @@ import {
   approveSubmissionsBatch,
   MAX_SUBMISSION_APPROVE_BATCH_SIZE,
 } from "../services/submissionApprovalService.js";
-import { normalizePlacementClusterQuery, clusterKeyFromPlacementVisitClusterField, PLACEMENT_HUB_CLUSTER_LABELS } from "../utils/placementCluster.js";
+import { normalizePlacementClusterQuery, clusterKeyFromPlacementVisitClusterField, canonicalVisitClusterLabel, PLACEMENT_HUB_CLUSTER_LABELS } from "../utils/placementCluster.js";
 
 async function invalidateSubmitterListCaches(submission) {
   const email = submitterEmailFromSubmission(submission);
@@ -2273,35 +2273,60 @@ adminRouter.post("/jd-import/apply", async (req, res) => {
       return res.status(404).json({ error: "Company not found" });
     }
 
-    // Ensure a visit row exists, then resolve the write target.
-    // Cluster filters can miss an existing year row — never 404 if ensure found/created one.
-    const ensuredVisit = await ensureAdminVisitForYear(companyId, y);
-    const clusterForResolve =
-      placementCluster || req.body?.placementCluster || null;
+    // Hub key: query/body full programme names ("Computer Science and Engineering") → "cs".
+    // Default CS when unset so multi-cluster companies don't write to a random latest visit.
+    const clusterHub =
+      placementCluster ||
+      normalizePlacementClusterQuery(req.body?.placementCluster) ||
+      "cs";
+    const clusterDbLabel = canonicalVisitClusterLabel(clusterHub);
+
     let visitCtx = await getCompanyMergedForAdminById(
       companyId,
       y,
       placementListContext,
       companyVisitIdHint || req.body?.companyVisitId,
-      clusterForResolve
+      clusterHub
     );
-    if (!visitCtx?.visit?._id && clusterForResolve) {
-      visitCtx = await getCompanyMergedForAdminById(
-        companyId,
-        y,
-        placementListContext,
-        companyVisitIdHint || req.body?.companyVisitId,
-        null
-      );
+
+    // If this hub/year has no visit yet, create one with the canonical cluster label.
+    if (!visitCtx?.visit?._id) {
+      const created = await CompanyVisit.create({
+        companyId: staticRow._id,
+        year: y,
+        type: "FTE",
+        cluster: clusterDbLabel,
+        roles: [],
+        status: "approved",
+        migratedAt: new Date(),
+      });
+      visitCtx = {
+        visit: created.toObject ? created.toObject() : created,
+        merged: null,
+        staticRow,
+      };
     }
 
-    const visitId = visitCtx?.visit?._id || ensuredVisit?._id;
+    const visitId = visitCtx?.visit?._id;
     const freshVisit = visitId
       ? await CompanyVisit.findById(visitId).lean()
       : null;
     if (!freshVisit?._id) {
-      return res.status(404).json({ error: "Company visit not found for this year" });
+      return res.status(404).json({
+        error: `Company visit not found for year ${y} / cluster ${clusterHub}`,
+      });
     }
+
+    // Guard: never write to a different hub than requested.
+    const visitHub = clusterKeyFromPlacementVisitClusterField(freshVisit.cluster);
+    if (visitHub !== clusterHub) {
+      return res.status(409).json({
+        error: `Resolved visit cluster is "${visitHub}" but JD import targeted "${clusterHub}". Pick the correct Visit cluster and retry.`,
+        visitId: String(freshVisit._id),
+        visitCluster: freshVisit.cluster || "",
+      });
+    }
+
     const existingRoles = Array.isArray(freshVisit.roles) ? freshVisit.roles : [];
 
     // Surgical update only — never replace the whole roles array (that wiped CTC in older code/images).
@@ -2329,7 +2354,7 @@ adminRouter.post("/jd-import/apply", async (req, res) => {
       y,
       placementListContext,
       companyVisitIdHint || req.body?.companyVisitId,
-      clusterForResolve
+      clusterHub
     );
     const rolesAfterUpdate = loaded?.merged?.roles || [];
     const rolesResponse = (rolesAfterUpdate || []).map((role) => ({
@@ -2344,6 +2369,8 @@ adminRouter.post("/jd-import/apply", async (req, res) => {
       message: "JD fields saved to company_visits_with_rvitm",
       collection: "company_visits_with_rvitm",
       visitId: String(freshVisit._id),
+      cluster: clusterHub,
+      clusterLabel: clusterDbLabel,
       year: y,
       roleName,
       roles: rolesResponse,
