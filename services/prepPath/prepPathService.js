@@ -98,7 +98,7 @@ export async function generateAndSavePrepPathPlan({
     mime: resumeMime,
     originalName: resumeOriginalName,
   });
-  const resumeDigest = buildResumeDigest(resumeText);
+  const resumeDigest = buildResumeDigest(resumeText, 1500);
   const companyCtx = await loadCompanyPrepContext(companyId, {
     track: trackNorm,
     collegeId,
@@ -108,7 +108,7 @@ export async function generateAndSavePrepPathPlan({
 
   try {
     let web = { snippets: [], sources: [], webAugmented: false };
-    if (companyCtx.limitedData) {
+    if (companyCtx.needsWebEnrichment) {
       web = await fetchPrepWebSnippets({
         companyName: companyCtx.companyName,
         role: roleClean,
@@ -122,7 +122,9 @@ export async function generateAndSavePrepPathPlan({
       days: dayCount,
       hoursPerDay: hpd,
       resumeDigest,
-      companyPromptBlock: formatCompanyContextForPrompt(companyCtx),
+      companyPromptBlock: formatCompanyContextForPrompt(companyCtx, {
+        targetRole: roleClean,
+      }),
       webSnippets: web.snippets,
       limitedData: companyCtx.limitedData,
       contextFlags: companyCtx.flags || {},

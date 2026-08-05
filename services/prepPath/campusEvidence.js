@@ -48,6 +48,7 @@ const SOURCE_LABEL = {
   oa: "OA",
   interview_question: "Interview",
   interview_experience: "Experience",
+  platform_role: "Platform roles",
 };
 
 function tokens(text) {
@@ -82,6 +83,13 @@ function clusterShort(cluster) {
 }
 
 export function formatEvidenceLabel(ev) {
+  if (String(ev?.sourceType || "") === "platform_role") {
+    const parts = ["Mentioned in the platform roles"];
+    if (ev.year) parts.push(String(ev.year));
+    const branchOrCluster = clusterShort(ev.cluster) || String(ev.branch || "").trim();
+    if (branchOrCluster) parts.push(branchOrCluster);
+    return parts.join(" · ");
+  }
   const type = SOURCE_LABEL[ev.sourceType] || "Campus";
   const parts = [`Seen in RVCE visit data: ${type}`];
   if (ev.year) parts.push(String(ev.year));
