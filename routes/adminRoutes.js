@@ -1,4 +1,8 @@
-import { collegeIdFromUser } from "../utils/collegeScope.js";
+import {
+  DEFAULT_COLLEGE_ID,
+  collegeIdFromUser,
+  normalizeCollegeId,
+} from "../utils/collegeScope.js";
 import express from "express";
 import mongoose from "mongoose";
 import multer from "multer";
@@ -73,6 +77,7 @@ import {
   listAdminPaginatedCompaniesFromSplit,
   mutateMustDoTopicForCompanyCluster,
   normalizeCompanyDetailYear,
+  normalizeVisitKeyParts,
   persistMergedCompany,
   suggestCompaniesForSpc,
   updateCompanyStatic,
@@ -2257,7 +2262,17 @@ adminRouter.post("/jd-import/apply", async (req, res) => {
       return res.status(400).json({ error: "companyId is required" });
     }
 
+    const visitTypeRaw = req.body?.visitType ?? req.body?.type ?? req.query?.visitType;
+    const { type: visitType } = normalizeVisitKeyParts(visitTypeRaw, "");
+    if (!visitType) {
+      return res.status(400).json({
+        error: "visitType is required (e.g. FTE, Internship(PPO), Internship+FTE)",
+      });
+    }
+
     const roleName = sanitizeText(req.body?.roleName ?? "");
+    // JD imports describe the RVCE drive unless explicitly told otherwise.
+    const collegeId = normalizeCollegeId(req.body?.collegeId ?? DEFAULT_COLLEGE_ID);
     const payload =
       req.body?.payload && typeof req.body.payload === "object"
         ? req.body.payload
@@ -2281,44 +2296,64 @@ adminRouter.post("/jd-import/apply", async (req, res) => {
       "cs";
     const clusterDbLabel = canonicalVisitClusterLabel(clusterHub);
 
-    let visitCtx = await getCompanyMergedForAdminById(
-      companyId,
-      y,
-      placementListContext,
-      companyVisitIdHint || req.body?.companyVisitId,
-      clusterHub
-    );
+    /** @type {Record<string, unknown>|null} */
+    let freshVisit = null;
 
-    // If this hub/year has no visit yet, create one with the canonical cluster label.
-    if (!visitCtx?.visit?._id) {
+    // Exact visit id hint (must match year + cluster + type).
+    const hintId = companyVisitIdHint || req.body?.companyVisitId;
+    if (hintId && mongoose.Types.ObjectId.isValid(String(hintId))) {
+      const hinted = await CompanyVisit.findById(hintId).lean();
+      if (
+        hinted &&
+        visitRowBelongsToCompanyStatic(hinted, staticRow) &&
+        normalizeCompanyDetailYear(hinted.year) === y &&
+        clusterKeyFromPlacementVisitClusterField(hinted.cluster) === clusterHub &&
+        normalizeVisitKeyParts(hinted.type, "").type === visitType
+      ) {
+        freshVisit = hinted;
+      }
+    }
+
+    // Resolve by composite key: companyId + year + cluster + type.
+    if (!freshVisit) {
+      const yearCandidates = await CompanyVisit.find({
+        companyId: staticRow._id,
+        year: y,
+      })
+        .sort({ migratedAt: -1, _id: -1 })
+        .lean();
+      const scoped = yearCandidates.filter(
+        (v) => clusterKeyFromPlacementVisitClusterField(v?.cluster) === clusterHub
+      );
+      freshVisit =
+        scoped.find(
+          (v) => normalizeVisitKeyParts(v?.type, "").type === visitType
+        ) || null;
+    }
+
+    // If this hub/year/type has no visit yet, create one with the selected type.
+    if (!freshVisit?._id) {
       const created = await CompanyVisit.create({
         companyId: staticRow._id,
         year: y,
-        type: "FTE",
+        type: visitType,
         cluster: clusterDbLabel,
         roles: [],
         status: "approved",
         migratedAt: new Date(),
       });
-      visitCtx = {
-        visit: created.toObject ? created.toObject() : created,
-        merged: null,
-        staticRow,
-      };
+      freshVisit = created.toObject ? created.toObject() : created;
     }
 
-    const visitId = visitCtx?.visit?._id;
-    const freshVisit = visitId
-      ? await CompanyVisit.findById(visitId).lean()
-      : null;
     if (!freshVisit?._id) {
       return res.status(404).json({
-        error: `Company visit not found for year ${y} / cluster ${clusterHub}`,
+        error: `Company visit not found for year ${y} / cluster ${clusterHub} / type ${visitType}`,
       });
     }
 
-    // Guard: never write to a different hub than requested.
+    // Guard: never write to a different hub/type than requested.
     const visitHub = clusterKeyFromPlacementVisitClusterField(freshVisit.cluster);
+    const resolvedType = normalizeVisitKeyParts(freshVisit.type, "").type;
     if (visitHub !== clusterHub) {
       return res.status(409).json({
         error: `Resolved visit cluster is "${visitHub}" but JD import targeted "${clusterHub}". Pick the correct Visit cluster and retry.`,
@@ -2326,11 +2361,18 @@ adminRouter.post("/jd-import/apply", async (req, res) => {
         visitCluster: freshVisit.cluster || "",
       });
     }
+    if (resolvedType !== visitType) {
+      return res.status(409).json({
+        error: `Resolved visit type is "${resolvedType || "(empty)"}" but JD import targeted "${visitType}". Pick the correct Visit type and retry.`,
+        visitId: String(freshVisit._id),
+        visitType: freshVisit.type || "",
+      });
+    }
 
     const existingRoles = Array.isArray(freshVisit.roles) ? freshVisit.roles : [];
 
     // Surgical update only — never replace the whole roles array (that wiped CTC in older code/images).
-    const plan = planJdRoleFieldUpdate(existingRoles, roleName, payload);
+    const plan = planJdRoleFieldUpdate(existingRoles, roleName, payload, collegeId);
     if (plan.kind === "noop") {
       return res.status(400).json({
         error: "payload must include at least one point field (e.g. skills, workDescription, Bonus Skills)",
@@ -2353,7 +2395,7 @@ adminRouter.post("/jd-import/apply", async (req, res) => {
       companyId,
       y,
       placementListContext,
-      companyVisitIdHint || req.body?.companyVisitId,
+      String(freshVisit._id),
       clusterHub
     );
     const rolesAfterUpdate = loaded?.merged?.roles || [];
@@ -2366,11 +2408,11 @@ adminRouter.post("/jd-import/apply", async (req, res) => {
     }));
 
     res.json({
-      message: "JD fields saved to company_visits_with_rvitm",
-      collection: "company_visits_with_rvitm",
+      message: "JD fields saved",
       visitId: String(freshVisit._id),
       cluster: clusterHub,
       clusterLabel: clusterDbLabel,
+      type: visitType,
       year: y,
       roleName,
       roles: rolesResponse,

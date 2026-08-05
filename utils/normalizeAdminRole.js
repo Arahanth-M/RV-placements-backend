@@ -1,4 +1,9 @@
 import { normalizeRoleStipendFields } from "../services/companyService.js";
+import {
+  DEFAULT_COLLEGE_ID,
+  collegeIdOfScopedRow,
+  normalizeCollegeId,
+} from "./collegeScope.js";
 
 /**
  * Sanitize light HTML/script noise from free text (same spirit as adminRoutes sanitizeText).
@@ -427,23 +432,33 @@ export function splitJdPayloadFields(payload) {
 }
 
 /**
- * Resolve which role index JD skills/work should attach to.
+ * Resolve which role index JD skills/work should attach to, within one college's slice.
+ * Rows without `collegeId` count as RVCE, so JD text never lands on an RVITM role.
  * @param {Record<string, unknown>[]} roles
  * @param {string} roleName
+ * @param {unknown} [collegeIdRaw]
+ * @returns {number} index into the full `roles` array, or -1
  */
-export function findJdTargetRoleIndex(roles, roleName) {
+export function findJdTargetRoleIndex(roles, roleName, collegeIdRaw = DEFAULT_COLLEGE_ID) {
+  const collegeId = normalizeCollegeId(collegeIdRaw);
   const name = sanitizeRoleText(roleName);
+  const scoped = roles
+    .map((role, index) => ({ role, index }))
+    .filter(({ role }) => collegeIdOfScopedRow(role) === collegeId);
+
   if (name) {
-    return roles.findIndex(
-      (r) =>
-        String(r.roleName ?? "")
+    const hit = scoped.find(
+      ({ role }) =>
+        String(role.roleName ?? "")
           .trim()
           .toLowerCase() === name.toLowerCase()
     );
+    return hit ? hit.index : -1;
   }
   // Prefer attaching skills/work onto the sole existing role when role name unknown.
-  if (roles.length === 1) return 0;
-  return roles.findIndex((r) => !String(r.roleName ?? "").trim());
+  if (scoped.length === 1) return scoped[0].index;
+  const blank = scoped.find(({ role }) => !String(role.roleName ?? "").trim());
+  return blank ? blank.index : -1;
 }
 
 /**
@@ -452,9 +467,16 @@ export function findJdTargetRoleIndex(roles, roleName) {
  * @param {unknown[]} existingRoles
  * @param {string} roleName
  * @param {Record<string, unknown>} payload
+ * @param {unknown} [collegeIdRaw] — college slice to target (default RVCE)
  * @returns {{ kind: 'noop' } | { kind: 'patch', index: number, fields: Record<string, string> } | { kind: 'push', role: Record<string, string> }}
  */
-export function planJdRoleFieldUpdate(existingRoles, roleName, payload) {
+export function planJdRoleFieldUpdate(
+  existingRoles,
+  roleName,
+  payload,
+  collegeIdRaw = DEFAULT_COLLEGE_ID
+) {
+  const collegeId = normalizeCollegeId(collegeIdRaw);
   const roles = (Array.isArray(existingRoles) ? existingRoles : []).filter(
     (r) => r && typeof r === "object"
   );
@@ -467,7 +489,8 @@ export function planJdRoleFieldUpdate(existingRoles, roleName, payload) {
 
   const idx = findJdTargetRoleIndex(
     /** @type {Record<string, unknown>[]} */ (roles),
-    name
+    name,
+    collegeId
   );
 
   if (idx >= 0) {
@@ -494,7 +517,7 @@ export function planJdRoleFieldUpdate(existingRoles, roleName, payload) {
   }
 
   /** @type {Record<string, string>} */
-  const role = { roleName: name, ...split.fields };
+  const role = { roleName: name, ...split.fields, collegeId };
   if (Object.keys(split.fields).length === 0) {
     return { kind: "noop" };
   }
@@ -508,13 +531,19 @@ export function planJdRoleFieldUpdate(existingRoles, roleName, payload) {
  * @param {unknown[]} existingRoles
  * @param {string} roleName
  * @param {Record<string, unknown>} payload
+ * @param {unknown} [collegeIdRaw]
  */
-export function mergeJdPayloadIntoRoles(existingRoles, roleName, payload) {
+export function mergeJdPayloadIntoRoles(
+  existingRoles,
+  roleName,
+  payload,
+  collegeIdRaw = DEFAULT_COLLEGE_ID
+) {
   const roles = (Array.isArray(existingRoles) ? existingRoles : [])
     .filter((r) => r && typeof r === "object")
     .map((r) => cloneRolePreservingCtc(/** @type {Record<string, unknown>} */ (r)));
 
-  const plan = planJdRoleFieldUpdate(roles, roleName, payload);
+  const plan = planJdRoleFieldUpdate(roles, roleName, payload, collegeIdRaw);
   if (plan.kind === "noop") return roles;
 
   if (plan.kind === "patch") {
