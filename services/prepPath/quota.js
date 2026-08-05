@@ -2,10 +2,9 @@ import PrepPathUsage from "../../models/PrepPathUsage.js";
 import { istDateParts } from "../../utils/istSlotTime.js";
 
 /**
- * Daily generate cap. `null` / `0` / negative = unlimited (current: unlimited).
- * Restore a positive number (e.g. 2) to re-enable the limit later.
+ * Daily generate cap (IST calendar day). `null` / `0` / negative = unlimited.
  */
-export const PREP_PATH_DAILY_LIMIT = null;
+export const PREP_PATH_DAILY_LIMIT = 3;
 
 const pad2 = (n) => String(n).padStart(2, "0");
 

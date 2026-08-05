@@ -4,7 +4,13 @@ const campusEvidenceSchema = new mongoose.Schema(
   {
     sourceType: {
       type: String,
-      enum: ["must_do", "oa", "interview_question", "interview_experience"],
+      enum: [
+        "must_do",
+        "oa",
+        "interview_question",
+        "interview_experience",
+        "platform_role",
+      ],
       default: "must_do",
     },
     snippet: { type: String, trim: true },
@@ -67,7 +73,13 @@ const companySignalSchema = new mongoose.Schema(
     point: { type: String, trim: true },
     sourceType: {
       type: String,
-      enum: ["must_do", "oa", "interview_question", "interview_experience"],
+      enum: [
+        "must_do",
+        "oa",
+        "interview_question",
+        "interview_experience",
+        "platform_role",
+      ],
       default: "must_do",
     },
     year: { type: Number, default: null },
@@ -132,6 +144,7 @@ const prepPathPlanSchema = new mongoose.Schema(
       usedOA: { type: Boolean, default: false },
       usedInterview: { type: Boolean, default: false },
       usedExperiences: { type: Boolean, default: false },
+      usedPlatformRoles: { type: Boolean, default: false },
       webAugmented: { type: Boolean, default: false },
       limitedData: { type: Boolean, default: false },
     },

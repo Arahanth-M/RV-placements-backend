@@ -42,4 +42,16 @@ describe("groqApiKey", () => {
     const { resolveGroqApiKey } = await import("../../config/groqApiKey.js");
     expect(resolveGroqApiKey()).toBe("gsk_legacy");
   });
+
+  it("resolveGroqApiKey uses GROQ_KEY_PREP_PATH when slot is prep_path", async () => {
+    process.env.GROQ_KEY_PREP_PATH = "gsk_prep_path_test";
+    process.env.GROQ_KEY_ADMIN = "gsk_admin_test";
+    delete process.env.GROQ_API_KEY;
+
+    const { resolveGroqApiKey, GROQ_KEY_SLOTS } = await import(
+      "../../config/groqApiKey.js"
+    );
+    expect(resolveGroqApiKey(GROQ_KEY_SLOTS.PREP_PATH)).toBe("gsk_prep_path_test");
+    expect(resolveGroqApiKey("prep-path")).toBe("gsk_prep_path_test");
+  });
 });

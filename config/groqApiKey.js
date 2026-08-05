@@ -1,12 +1,13 @@
 /**
- * Resolves which Groq API key this process should use.
- * Set all three keys in .env; each service picks one via GROQ_KEY_SLOT or entrypoint detection.
+ * Resolves which Groq API key this process / call should use.
+ * Set keys in .env; services pick one via GROQ_KEY_SLOT, entrypoint detection, or callLLM apiKeySlot.
  */
 
 export const GROQ_KEY_SLOTS = Object.freeze({
   ADMIN: "admin",
   INTERVIEW_API: "interview_api",
   INTERVIEW_WORKER: "interview_worker",
+  PREP_PATH: "prep_path",
 });
 
 /** Env var names (values are the secret keys). */
@@ -14,6 +15,7 @@ export const GROQ_KEY_ENV_BY_SLOT = Object.freeze({
   [GROQ_KEY_SLOTS.ADMIN]: "GROQ_KEY_ADMIN",
   [GROQ_KEY_SLOTS.INTERVIEW_API]: "GROQ_KEY_INTERVIEW_API",
   [GROQ_KEY_SLOTS.INTERVIEW_WORKER]: "GROQ_KEY_INTERVIEW_WORKER",
+  [GROQ_KEY_SLOTS.PREP_PATH]: "GROQ_KEY_PREP_PATH",
 });
 
 const VALID_SLOTS = new Set(Object.values(GROQ_KEY_SLOTS));
@@ -24,13 +26,17 @@ const normalizeSlot = (value) => {
   if (raw === "interview_worker" || raw === "interview-worker") {
     return GROQ_KEY_SLOTS.INTERVIEW_WORKER;
   }
+  if (raw === "prep-path" || raw === "preppath") {
+    return GROQ_KEY_SLOTS.PREP_PATH;
+  }
   if (VALID_SLOTS.has(raw)) return raw;
   return null;
 };
 
 /**
- * Which key bucket this Node process should use.
+ * Which key bucket this Node process should use by default.
  * Prefer GROQ_KEY_SLOT; otherwise infer from argv (server-main, server-interview, interviewWorker).
+ * PrepPath overrides per-call via callLLM({ apiKeySlot: "prep_path" }).
  */
 export function detectGroqKeySlot() {
   const fromEnv = normalizeSlot(process.env.GROQ_KEY_SLOT);
@@ -71,7 +77,7 @@ export function resolveGroqApiKey(slot) {
   }
 
   throw new Error(
-    "Missing Groq API key. Set GROQ_KEY_ADMIN, GROQ_KEY_INTERVIEW_API, and GROQ_KEY_INTERVIEW_WORKER (with GROQ_KEY_SLOT), or legacy GROQ_API_KEY."
+    "Missing Groq API key. Set GROQ_KEY_ADMIN, GROQ_KEY_INTERVIEW_API, GROQ_KEY_INTERVIEW_WORKER, and GROQ_KEY_PREP_PATH (or legacy GROQ_API_KEY)."
   );
 }
 

@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import CompanyStatic from "../../models/CompanyStatic.js";
 import CompanyVisit from "../../models/CompanyVisit.js";
 import { filterRolesForCollege, normalizeCollegeId } from "../../utils/collegeScope.js";
+import { listRolePointSections } from "../../utils/normalizeAdminRole.js";
 
 export const PREP_PATH_TRACKS = Object.freeze({
   FULL_TIME: "full_time",
@@ -38,6 +39,80 @@ const clip = (s, max = 220) => {
   if (!t) return "";
   return t.length > max ? `${t.slice(0, max)}…` : t;
 };
+
+/** Role keys that are not useful as prep signals (meta / eligibility / pay already skipped upstream). */
+const ROLE_PREP_SKIP_KEYS = new Set([
+  "collegeid",
+  "college",
+  "branch",
+  "cluster",
+  "year",
+  "eligibility",
+  "mincgpa",
+  "cgpa",
+  "location",
+  "openfor",
+  "package",
+  "bond",
+  "bonds",
+  "deadline",
+  "lastdate",
+  "drive",
+  "drivedate",
+]);
+
+function roleFieldLabel(key) {
+  const nk = String(key || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "");
+  if (nk === "skills" || nk === "skill") return "skills";
+  if (nk === "workdescription" || nk === "work") return "work description";
+  if (
+    nk === "jobdescription" ||
+    nk === "jobdesc" ||
+    nk === "jd" ||
+    nk === "job"
+  ) {
+    return "job description";
+  }
+  if (
+    nk === "about" ||
+    nk === "aboutrole" ||
+    nk === "abouttherole" ||
+    nk === "roleabout"
+  ) {
+    return "about the role";
+  }
+  return (
+    String(key || "")
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/[_-]+/g, " ")
+      .trim()
+      .toLowerCase() || "detail"
+  );
+}
+
+/**
+ * Extract skills / JD / work description / about-the-role style fields from a role object.
+ * Field names vary by company; listRolePointSections keeps stored keys as-is.
+ */
+function extractRolePrepFields(role) {
+  return listRolePointSections(role)
+    .filter((section) => {
+      const nk = String(section.key || "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, "");
+      return nk && !ROLE_PREP_SKIP_KEYS.has(nk);
+    })
+    .map((section) => ({
+      key: section.key,
+      label: roleFieldLabel(section.key),
+      points: section.points.slice(0, 3).map((p) => clip(p, 140)),
+    }))
+    .filter((section) => section.points.length > 0);
+}
 
 const asTextList = (arr, maxItems, maxItemLen = 220) =>
   (Array.isArray(arr) ? arr : [])
@@ -147,6 +222,8 @@ export async function loadCompanyPrepContext(companyId, options = {}) {
       : visits.some((v) => !isSummerLeanVisit(v));
 
   const evidenceBank = [];
+  const roles = [];
+  const roleDetails = [];
 
   for (const topic of asTextList(staticRow.must_do_topics, 30)) {
     pushEvidence(evidenceBank, {
@@ -222,9 +299,45 @@ export async function loadCompanyPrepContext(companyId, options = {}) {
         });
       }
     }
+
+    const visitRoles = collegeId
+      ? filterRolesForCollege(v.roles || [], collegeId)
+      : v.roles || [];
+    for (const r of visitRoles) {
+      if (typeof r === "string" && r.trim()) {
+        roles.push(r.trim());
+        continue;
+      }
+      if (!r || typeof r !== "object") continue;
+      const label =
+        String(r.roleName || r.role || r.title || r.name || "").trim() || "Role";
+      if (label && label !== "Role") roles.push(label);
+
+      const fields = extractRolePrepFields(r);
+      if (!fields.length) continue;
+
+      roleDetails.push({
+        roleName: label,
+        year,
+        cluster,
+        fields,
+      });
+
+      for (const field of fields.slice(0, 3)) {
+        for (const point of field.points.slice(0, 2)) {
+          pushEvidence(evidenceBank, {
+            sourceType: "platform_role",
+            text: `Role "${label}" · ${field.label}: ${point}`,
+            year,
+            cluster,
+            branch,
+          });
+        }
+      }
+    }
   }
 
-  const evidenceCapped = evidenceBank.slice(0, 80);
+  const evidenceCapped = evidenceBank.slice(0, 60);
 
   const mustDoUnique = [
     ...new Set(evidenceCapped.filter((e) => e.sourceType === "must_do").map((e) => e.text)),
@@ -244,28 +357,27 @@ export async function loadCompanyPrepContext(companyId, options = {}) {
         .map((e) => e.text)
     ),
   ].slice(0, 25);
-
-  const roles = [];
-  for (const v of visits) {
-    const visitRoles = collegeId
-      ? filterRolesForCollege(v.roles || [], collegeId)
-      : v.roles || [];
-    for (const r of visitRoles) {
-      if (typeof r === "string" && r.trim()) roles.push(r.trim());
-      else if (r && typeof r === "object") {
-        const label = String(r.roleName || r.role || r.title || r.name || "").trim();
-        if (label) roles.push(label);
-      }
-    }
-  }
-
+  const platformRoleSignals = [
+    ...new Set(
+      evidenceCapped.filter((e) => e.sourceType === "platform_role").map((e) => e.text)
+    ),
+  ].slice(0, 40);
   const signal = countSignal([
     mustDoUnique,
     onlineQuestions,
     interviewQuestions,
     interviewProcess,
   ]);
-  const limitedData = signal < 6;
+  /**
+   * Web (Tavily) fallback:
+   * - Use when there are no interview experiences for this company, AND
+   * - Skip when must-do topics alone are rich (> 10), even with no experiences.
+   */
+  const needsWebEnrichment =
+    interviewProcess.length === 0 && mustDoUnique.length <= 10;
+  // Role JD/skills count as usable campus signal for the LLM even when Tavily still runs.
+  const limitedData =
+    needsWebEnrichment && platformRoleSignals.length === 0;
 
   const sources = [
     {
@@ -278,20 +390,23 @@ export async function loadCompanyPrepContext(companyId, options = {}) {
   return {
     companyId: String(staticRow._id),
     companyName: String(staticRow.name || "").trim() || "Company",
-    about: String(staticRow.about || "").trim().slice(0, 1200),
+    about: String(staticRow.about || "").trim().slice(0, 400),
     track,
     trackLabel: prepPathTrackLabel(track),
     trackMatched,
-    roles: [...new Set(roles)].slice(0, 20),
+    roles: [...new Set(roles)].slice(0, 12),
+    roleDetails: roleDetails.slice(0, 8),
     mustDoTopics: mustDoUnique,
     onlineQuestions,
     interviewQuestions,
     interviewProcess,
+    platformRoleSignals,
     internshipExperience: interviewProcess.slice(0, 15),
     prevCodingQuestions: onlineQuestions.slice(0, 15),
     visitYears: visits.map((v) => v.year).filter(Boolean),
     evidenceBank: evidenceCapped,
     limitedData,
+    needsWebEnrichment,
     signalCount: signal,
     sources,
     flags: {
@@ -299,36 +414,87 @@ export async function loadCompanyPrepContext(companyId, options = {}) {
       usedOA: onlineQuestions.length > 0,
       usedInterview: interviewQuestions.length > 0,
       usedExperiences: interviewProcess.length > 0,
+      usedPlatformRoles: platformRoleSignals.length > 0,
       trackMatched,
     },
   };
 }
 
-export function formatCompanyContextForPrompt(ctx) {
+function scoreRoleNameMatch(roleName, targetRole) {
+  const a = String(roleName || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9+#.\s]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length >= 2);
+  const b = new Set(
+    String(targetRole || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9+#.\s]/g, " ")
+      .split(/\s+/)
+      .filter((t) => t.length >= 2)
+  );
+  if (!a.length || !b.size) return 0;
+  let hit = 0;
+  for (const t of a) if (b.has(t)) hit += 1;
+  return hit;
+}
+
+/**
+ * Compact company block for the LLM prompt (token-lean).
+ * @param {object} ctx
+ * @param {{ targetRole?: string }} [options]
+ */
+export function formatCompanyContextForPrompt(ctx, options = {}) {
+  const targetRole = String(options.targetRole || "").trim();
+
+  // Prefer roles matching the user-entered target; fall back to first roles.
+  const allDetails = Array.isArray(ctx.roleDetails) ? [...ctx.roleDetails] : [];
+  if (targetRole) {
+    allDetails.sort(
+      (x, y) =>
+        scoreRoleNameMatch(y.roleName, targetRole) -
+        scoreRoleNameMatch(x.roleName, targetRole)
+    );
+  }
+  const details = allDetails.slice(0, 2);
+
+  const roleDetailLines = [];
+  for (const role of details) {
+    roleDetailLines.push(`Role: ${role.roleName || "Role"}`);
+    for (const field of (role.fields || []).slice(0, 3)) {
+      const joined = (field.points || []).slice(0, 2).join("; ");
+      if (!joined) continue;
+      roleDetailLines.push(`  - ${field.label}: ${joined}`);
+    }
+  }
+
+  // Skip platform_role rows in evidence — already covered in role details above.
   const evidenceLines = (Array.isArray(ctx.evidenceBank) ? ctx.evidenceBank : [])
-    .slice(0, 40)
+    .filter((e) => e?.sourceType && e.sourceType !== "platform_role")
+    .slice(0, 18)
     .map((e) => {
       const meta = [
         e.sourceType,
-        e.year ? `year=${e.year}` : null,
-        e.cluster ? `cluster=${e.cluster}` : null,
+        e.year ? `y${e.year}` : null,
       ]
         .filter(Boolean)
-        .join(", ");
+        .join(",");
       return `- [${meta}] ${e.text}`;
     });
 
+  const about = clip(ctx.about || "", 360);
   const lines = [
     `Company: ${ctx.companyName}`,
-    `Prep track: ${ctx.trackLabel || prepPathTrackLabel(ctx.track)}`,
-    ctx.trackMatched === false
-      ? "Note: No track-specific visit rows found; using best available campus data."
+    `Track: ${ctx.trackLabel || prepPathTrackLabel(ctx.track)}`,
+    about ? `About: ${about}` : "",
+    ctx.roles?.length
+      ? `Roles: ${ctx.roles.slice(0, 8).join("; ")}`
       : "",
-    ctx.about ? `About: ${ctx.about}` : "",
-    ctx.roles.length ? `Known roles on platform: ${ctx.roles.join("; ")}` : "",
-    ctx.visitYears?.length ? `Visit years present: ${ctx.visitYears.join(", ")}` : "",
     "",
-    "=== Campus evidence (cite only these; include year/cluster when present) ===",
+    "=== Platform roles (HIGH PRIORITY; cite as \"mentioned in the platform roles\") ===",
+    roleDetailLines.length ? roleDetailLines.join("\n") : "(none)",
+    "",
+    "=== Campus evidence (cite only these) ===",
     evidenceLines.length ? evidenceLines.join("\n") : "(none)",
   ];
   return lines.filter((l) => l !== null && l !== undefined && l !== "").join("\n");

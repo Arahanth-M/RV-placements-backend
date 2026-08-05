@@ -1,5 +1,6 @@
 /**
- * Optional web enrichment for thin campus data.
+ * Optional web enrichment when campus interview experiences are missing
+ * (unless must-do topics alone are already rich: > 10).
  * Uses Tavily when TAVILY_API_KEY is set; otherwise returns empty (LLM uses careful general knowledge).
  * Never writes to Mongo.
  */
@@ -49,7 +50,7 @@ export async function fetchPrepWebSnippets({ companyName, role, track }) {
         query,
         search_depth: "basic",
         include_answer: false,
-        max_results: 5,
+        max_results: 2,
       }),
     });
     if (!res.ok) {
@@ -64,13 +65,13 @@ export async function fetchPrepWebSnippets({ companyName, role, track }) {
       const url = String(row?.url || "").trim();
       if (!url || !hostAllowed(url)) continue;
       const title = String(row?.title || url).trim().slice(0, 200);
-      const content = String(row?.content || "").trim().slice(0, 500);
+      const content = String(row?.content || "").trim().slice(0, 200);
       if (content) snippets.push(`${title}: ${content}`);
       sources.push({ title, url, kind: "web" });
     }
     return {
-      snippets: snippets.slice(0, 5),
-      sources: sources.slice(0, 5),
+      snippets: snippets.slice(0, 2),
+      sources: sources.slice(0, 2),
       webAugmented: snippets.length > 0,
     };
   } catch (err) {

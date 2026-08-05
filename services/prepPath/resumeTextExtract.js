@@ -63,7 +63,7 @@ export async function extractResumeText({ buffer, mime, originalName }) {
 }
 
 /** Compact digest for storage / prompts (skills, projects, experience cues). */
-export function buildResumeDigest(fullText, maxLen = 2800) {
+export function buildResumeDigest(fullText, maxLen = 1500) {
   const text = normalizeWhitespace(fullText);
   if (text.length <= maxLen) return text;
 
