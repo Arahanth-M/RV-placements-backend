@@ -6,6 +6,7 @@ import User1 from "../models/User1.js";
 import { urls } from "../config/constants.js";
 import { sendWelcomeEmailWebhook } from "./webhookService.js";
 import { isAllowedCollegeEmail } from "../utils/collegeScope.js";
+import { recordDauActivitySafe } from "./dau/recordDauActivity.js";
 
 /** Google may expose the avatar on photos[], _json.picture, or legacy profile.picture */
 function pictureFromGoogleProfile(profile) {
@@ -61,6 +62,7 @@ passport.use(
             if (picture) adminUser.profilePicture = picture;
             adminUser.lastLoginAt = new Date();
             await adminUser.save();
+            recordDauActivitySafe(adminUser);
             return done(null, adminUser);
           }
 
@@ -72,6 +74,7 @@ passport.use(
             lastLoginAt: new Date(),
           }).save();
 
+          recordDauActivitySafe(createdAdminUser);
           return done(null, createdAdminUser);
         }
 
@@ -108,6 +111,7 @@ passport.use(
             console.timeEnd("auth:user_update_save");
           }
 
+          recordDauActivitySafe(existingUser);
           return done(null, existingUser);
         }
 
@@ -131,6 +135,7 @@ passport.use(
             console.timeEnd("auth:user_create_no_profile");
           }
 
+          recordDauActivitySafe(userWithoutProfile);
           return done(null, userWithoutProfile);
         }
 
@@ -160,6 +165,7 @@ passport.use(
           console.error("Webhook error:", err);
         });
 
+        recordDauActivitySafe(user);
         return done(null, user);
       } catch (err) {
         console.error("Passport strategy error:", err);

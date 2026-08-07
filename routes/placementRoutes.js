@@ -23,6 +23,7 @@ import User1 from "../models/User1.js";
 import authJWT from "../middleware/authJWT.js";
 import requireSPC from "../middleware/requireSPC.js";
 import validateRequest from "../middleware/validateRequest.js";
+import { recordDauActivitySafe } from "../services/dau/recordDauActivity.js";
 import {
   placementDataSchema,
   spcConversionDetailsSchema,
@@ -264,6 +265,7 @@ router.post(
     // Touch the authenticated student account record after submission.
     if (req.user && req.user._id) {
       await User1.findByIdAndUpdate(req.user._id, { lastLoginAt: new Date() }).catch(() => {});
+      recordDauActivitySafe(req.user);
     }
 
     res.json({ 

@@ -15,6 +15,7 @@ import {
   invalidateMySubmissionsCacheByEmail,
   normalizeSubmitterEmail,
 } from "../services/mySubmissionsCache.js";
+import { recordDauActivitySafe } from "../services/dau/recordDauActivity.js";
 
 
 const submissionRouter = express.Router();
@@ -136,6 +137,7 @@ submissionRouter.post(
         { $set: { lastLoginAt: new Date(), lastActiveAt: new Date() } }
       ),
     ]);
+    recordDauActivitySafe(req.user);
 
     await invalidateMySubmissionsCacheByEmail(req.user?.email);
 

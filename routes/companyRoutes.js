@@ -23,6 +23,7 @@ import {
   getCompanyDetailRequestStatus,
   submitCompanyDetailRequest,
 } from "../services/companyDetailRequestService.js";
+import { recordDauActivitySafe } from "../services/dau/recordDauActivity.js";
 import CompanyStatic from "../models/CompanyStatic.js";
 import {
   addHelpfulVote,
@@ -272,11 +273,13 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
     }
 
     const AuthUserModel = getAuthUserModel(req);
-    const touchUserActivity = () =>
-      AuthUserModel.updateOne(
+    const touchUserActivity = () => {
+      recordDauActivitySafe(req.user);
+      return AuthUserModel.updateOne(
         { _id: req.user?._id },
         { $set: { lastLoginAt: new Date(), lastActiveAt: new Date() } }
       ).catch(() => {});
+    };
 
     let companyOid = null;
     try {

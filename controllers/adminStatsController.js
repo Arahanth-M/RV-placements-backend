@@ -6,6 +6,11 @@ import {
   COMPANY_VISIT_YEAR,
   countAdminListableCompanyVisits,
 } from "../services/companyService.js";
+import {
+  getDauCountForDay,
+  getDauTrendSeries,
+  utcDayKey,
+} from "../services/admin/adminDauService.js";
 function startOfDay(date = new Date()) {
   const next = new Date(date);
   next.setHours(0, 0, 0, 0);
@@ -203,7 +208,7 @@ export async function computeAdminStatsSnapshot() {
     mostHelpfulCompanies,
     topSubmittedCompanies,
     userGrowthRaw,
-    dauTrendRaw,
+    dauTrend,
     submissionTrendRaw,
     acceptanceTrendRaw,
   ] = await Promise.all([
@@ -214,12 +219,12 @@ export async function computeAdminStatsSnapshot() {
     Submission.countDocuments({ status: "approved" }),
     Submission.countDocuments(),
     countAdminListableCompanyVisits("pending"),
-    User1.countDocuments({ lastLoginAt: { $gte: todayStart } }),
+    getDauCountForDay(utcDayKey()),
     findMostViewedApprovedCompanies(5),
     findMostHelpfulApprovedCompanies(5),
     aggregateTopSubmittedCompanies(5),
     aggregateUsersByDay("createdAt", sevenDayStart),
-    aggregateUsersByDay("lastLoginAt", sevenDayStart),
+    getDauTrendSeries(7),
     aggregateSubmissionsByDay("submittedAt", sevenDayStart),
     aggregateSubmissionsByDay("approvedAt", sevenDayStart, { status: "approved" }),
   ]);
@@ -234,7 +239,7 @@ export async function computeAdminStatsSnapshot() {
     mostHelpfulCompanies,
     topSubmittedCompanies,
     userGrowth: normalizeSeries(7, userGrowthRaw),
-    dauTrend: normalizeSeries(7, dauTrendRaw),
+    dauTrend,
     submissionAcceptanceTrend: mergeSeries(7, {
       submissions: submissionTrendRaw,
       acceptances: acceptanceTrendRaw,

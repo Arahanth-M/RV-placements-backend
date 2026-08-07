@@ -44,6 +44,11 @@ import { getAdminStats } from "../controllers/adminStatsController.js";
 import { invalidateAdminDashboardStatsCache } from "../services/adminDashboardStatsCache.js";
 import { getAdminUsageAnalytics } from "../services/adminUsageAnalyticsService.js";
 import {
+  getDauSummaryForAdmin,
+  getDauDayForAdmin,
+  getDauFullExportRows,
+} from "../services/admin/adminDauService.js";
+import {
   invalidateMySubmissionsCacheByEmail,
   submitterEmailFromSubmission,
 } from "../services/mySubmissionsCache.js";
@@ -753,6 +758,44 @@ submissionModRouter.get("/submissions/:id", async (req, res) => {
 
 // Get dashboard stats (Redis-cached when REDIS_URL is set; invalidated on admin mutations)
 adminRouter.get("/stats", getAdminStats);
+
+/** Daily active users — lightweight day counts (fetched only when admin opens DAU modal). */
+adminRouter.get("/dau", async (req, res) => {
+  try {
+    const days = Math.min(30, Math.max(1, Number(req.query?.days) || 7));
+    const data = await getDauSummaryForAdmin(days);
+    return res.json({ success: true, ...data });
+  } catch (err) {
+    console.error("GET /api/admin/dau:", err?.message || err);
+    return res.status(500).json({ error: "Failed to load daily active users" });
+  }
+});
+
+/** Full stored DAU history for Excel export (daily_active_users only). */
+adminRouter.get("/dau/export", async (_req, res) => {
+  try {
+    const data = await getDauFullExportRows();
+    return res.json({ success: true, ...data });
+  } catch (err) {
+    console.error("GET /api/admin/dau/export:", err?.message || err);
+    return res.status(500).json({ error: "Failed to export daily active users" });
+  }
+});
+
+/** Users for one day (fetched only when admin clicks a day chip). */
+adminRouter.get("/dau/:dayKey", async (req, res) => {
+  try {
+    const data = await getDauDayForAdmin(req.params.dayKey);
+    return res.json({ success: true, ...data });
+  } catch (err) {
+    const code = err?.code || "";
+    if (code === "INVALID_DAY") {
+      return res.status(400).json({ error: err.message, code });
+    }
+    console.error("GET /api/admin/dau/:dayKey:", err?.message || err);
+    return res.status(500).json({ error: "Failed to load daily active users for day" });
+  }
+});
 
 /** AI mock interviews + PrepPath generation usage (day-wise IST + totals). */
 adminRouter.get("/usage-analytics", async (req, res) => {
