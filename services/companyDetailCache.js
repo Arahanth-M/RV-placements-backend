@@ -4,6 +4,7 @@ import {
   COMPANY_VISIT_DEFAULT_YEAR,
 } from "../utils/placementYears.js";
 import { normalizePlacementClusterQuery } from "../utils/placementCluster.js";
+import { invalidateCompanyListCache } from "./companyListCache.js";
 
 /** Detail Redis keys include every year in {@link COMPANY_DETAIL_VISIT_YEARS}. */
 const DETAIL_CACHE_YEAR_SUFFIXES = COMPANY_DETAIL_VISIT_YEARS.map(String);
@@ -100,6 +101,12 @@ export async function invalidateCompanyDetailCache(companyId) {
   ];
   try {
     await redis.del(keys);
+  } catch {
+    // Optional cache — ignore failures
+  }
+  // List cards depend on visit/static fields — drop list Redis keys too (Mongo unchanged).
+  try {
+    await invalidateCompanyListCache();
   } catch {
     // Optional cache — ignore failures
   }

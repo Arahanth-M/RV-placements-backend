@@ -20,6 +20,10 @@ import { COMPANY_VISIT_DEFAULT_YEAR } from "../utils/placementYears.js";
 import redis from "../utils/redis.js";
 import { companyDetailRedisKey } from "../services/companyDetailCache.js";
 import {
+  getCachedCompanyList,
+  setCachedCompanyList,
+} from "../services/companyListCache.js";
+import {
   getCompanyDetailRequestStatus,
   submitCompanyDetailRequest,
 } from "../services/companyDetailRequestService.js";
@@ -89,8 +93,22 @@ companyRouter.get("/", optionalAuthJWT, async (req, res) => {
     const collegeId = req.user
       ? collegeIdFromUser(req.user)
       : DEFAULT_COLLEGE_ID;
-    // New DB: `companies` + approved `company_visits` (year-aware when `?year=` is sent)
-    const companies = await listApprovedCompaniesLegacyMerged(selectedYear, collegeId);
+
+    const cachedList = await getCachedCompanyList(
+      selectedYear,
+      requestedCluster,
+      collegeId
+    );
+    if (cachedList) {
+      return res.json(cachedList);
+    }
+
+    // Cluster-scoped merge (Mongo read-only). Filter retained as safety net.
+    const companies = await listApprovedCompaniesLegacyMerged(
+      selectedYear,
+      collegeId,
+      requestedCluster
+    );
     const scopedCompanies =
       requestedCluster == null
         ? companies
@@ -134,7 +152,11 @@ companyRouter.get("/", optionalAuthJWT, async (req, res) => {
         ? normalizeCompanyDetailYear(selectedYear) ?? COMPANY_VISIT_DEFAULT_YEAR
         : COMPANY_VISIT_DEFAULT_YEAR;
 
-    return res.json(sortCompaniesForCategoryPreview(list, { defaultYear: visitSortYear }));
+    const sorted = sortCompaniesForCategoryPreview(list, {
+      defaultYear: visitSortYear,
+    });
+    await setCachedCompanyList(selectedYear, requestedCluster, collegeId, sorted);
+    return res.json(sorted);
   } catch (e) {
     console.error("❌ Error fetching companies:", e.message);
     return res.status(500).json({ error: "Server error" });

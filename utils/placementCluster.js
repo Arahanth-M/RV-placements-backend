@@ -91,6 +91,61 @@ export function canonicalVisitClusterLabel(hubKey) {
 }
 
 /**
+ * Mongo `$match` fragment for hub cluster filtering on `company_visits.cluster`.
+ * Mirrors {@link clusterKeyFromPlacementVisitClusterField} heuristics (incl. empty → cs).
+ * Read-only query filter — does not alter stored data.
+ *
+ * @param {unknown} hubKeyRaw — cs|ec|me|chem
+ * @returns {Record<string, unknown>|null}
+ */
+export function mongoMatchForPlacementHubCluster(hubKeyRaw) {
+  const key = normalizePlacementClusterQuery(hubKeyRaw);
+  if (!key) return null;
+
+  if (key === "cs") {
+    return {
+      $or: [
+        { cluster: { $exists: false } },
+        { cluster: null },
+        { cluster: "" },
+        {
+          cluster: {
+            $regex: "(^|\\s)(cs|cse)(\\s|$)|computer\\s*science|information\\s*science",
+            $options: "i",
+          },
+        },
+      ],
+    };
+  }
+  if (key === "ec") {
+    return {
+      cluster: {
+        $regex: "(^|\\s)(ec|ece)(\\s|$)|electronics|electrical",
+        $options: "i",
+      },
+    };
+  }
+  if (key === "me") {
+    return {
+      cluster: {
+        $regex: "(^|\\s)me(\\s|$)|mechanical",
+        $options: "i",
+      },
+    };
+  }
+  if (key === "chem") {
+    return {
+      cluster: {
+        $regex:
+          "(^|\\s)(chem|ch|bt)(\\s|$)|chemical|civil|biotech|bio\\s*tech",
+        $options: "i",
+      },
+    };
+  }
+  return null;
+}
+
+/**
  * Map SPC / PPO student program code → placement hub key (cs | ec | me | chem).
  * @param {unknown} branchCodeRaw
  * @returns {string|null}

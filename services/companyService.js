@@ -34,6 +34,7 @@ import {
 } from "../utils/placementYears.js";
 import {
   clusterKeyFromPlacementVisitClusterField,
+  mongoMatchForPlacementHubCluster,
   normalizePlacementClusterQuery,
   placementHubClusterFromPpoBranchCode,
 } from "../utils/placementCluster.js";
@@ -41,6 +42,10 @@ import { PPO_BRANCH_CODES, PPO_BRANCH_CODES_ARRAY, isValidPpoBranchCode, normali
 import { minCgpaFromEligibilityText } from "../utils/extractMinCgpa.js";
 import escapeRegexLiteral from "../utils/regexEscape.js";
 import { invalidateCompanyDetailCache } from "./companyDetailCache.js";
+import {
+  hydrateVisitRoles2026FromCache,
+  invalidateVisitRoles2026Cache,
+} from "./companyListCache.js";
 import {
   collapseRoleCtcKeyAliases,
   mergeSpcOfferIntoVisitRoles,
@@ -842,16 +847,23 @@ function visitWithPlainRoleCtc(visit) {
 /**
  * All approved visits for placement-card years, grouped by companyId (read-only).
  * @param {import("mongoose").Types.ObjectId[]} companyIds
+ * @param {{ clusterKey?: string|null }} [opts] — when set, only visits matching that hub cluster
  */
-async function fetchApprovedVisitsForDetailYearsByCompany(companyIds) {
+async function fetchApprovedVisitsForDetailYearsByCompany(companyIds, opts = {}) {
   /** @type {Map<string, Record<string, unknown>[]>} */
   const map = new Map();
   if (!companyIds.length) return map;
-  const visits = await CompanyVisit.find({
+  const clusterKey = normalizePlacementClusterQuery(opts.clusterKey);
+  const clusterMatch = clusterKey ? mongoMatchForPlacementHubCluster(clusterKey) : null;
+  const filter = {
     companyId: { $in: companyIds },
     status: "approved",
     ...matchApprovedVisitYearInDetailYearsExpr(),
-  }).lean();
+    ...(clusterMatch || {}),
+  };
+  const visits = await CompanyVisit.find(filter).lean();
+  // Redis hydrate for 2026 roles (no Mongo writes)
+  await hydrateVisitRoles2026FromCache(visits);
   for (const v of visits) {
     const plain = visitWithPlainRoleCtc(v);
     const k = String(plain.companyId);
@@ -2156,22 +2168,31 @@ export async function getCompanyDetailLegacyMergedById(
  * the other year is used (so 2027-only companies still appear when `?year=2026`).
  * Rows for the listing year are merged with other cycles in the same hub cluster so PPO/dream
  * flags and `?cluster=` buckets stay consistent (e.g. 2026 + 2027 CSE visits both under `cs`).
+ * @param {unknown} [placementYear]
+ * @param {unknown} [collegeIdRaw]
+ * @param {unknown} [clusterRaw] — optional hub cluster (`cs`/`ec`/`me`/`chem`) to scope Mongo early
  * @returns {Promise<Record<string, unknown>[]>}
  */
 export async function listApprovedCompaniesLegacyMerged(
   placementYear = null,
-  collegeIdRaw = null
+  collegeIdRaw = null,
+  clusterRaw = null
 ) {
   await loadPlacementHubSettingsCache();
   const collegeId =
     collegeIdRaw != null && String(collegeIdRaw).trim() !== ""
       ? normalizeCollegeId(collegeIdRaw)
       : null;
+  const requestedCluster = normalizePlacementClusterQuery(clusterRaw);
+  const clusterMatch = requestedCluster
+    ? mongoMatchForPlacementHubCluster(requestedCluster)
+    : null;
   const pipeline = [
     {
       $match: {
         status: "approved",
         ...matchApprovedVisitYearInDetailYearsExpr(),
+        ...(clusterMatch || {}),
       },
     },
     { $group: { _id: "$companyId" } },
@@ -2190,7 +2211,9 @@ export async function listApprovedCompaniesLegacyMerged(
   const rows = await CompanyVisit.aggregate(pipeline);
   const companyIds = rows.map((r) => r._id);
   const [visitsByCompany, mustDoTopicVisitsByCompany] = await Promise.all([
-    fetchApprovedVisitsForDetailYearsByCompany(companyIds),
+    fetchApprovedVisitsForDetailYearsByCompany(companyIds, {
+      clusterKey: requestedCluster,
+    }),
     fetchMustDoTopicVisitsByCompany(companyIds, { approvedOnly: true }),
   ]);
 
@@ -2252,6 +2275,12 @@ export async function listApprovedCompaniesLegacyMerged(
     const visitsByCluster = new Map();
     for (const visit of visitsForListing) {
       const clusterKey = listingHubClusterKey(visit);
+      if (
+        requestedCluster != null &&
+        clusterKey !== requestedCluster
+      ) {
+        continue;
+      }
       if (!visitsByCluster.has(clusterKey)) visitsByCluster.set(clusterKey, []);
       visitsByCluster.get(clusterKey).push(visit);
     }
@@ -2358,15 +2387,25 @@ export async function listApprovedCompaniesLegacyMerged(
 /**
  * Minimal fields for category/logo previews — same inclusion rules as
  * {@link listApprovedCompaniesLegacyMerged} (any approved year in range).
+ * @param {unknown} [placementYear]
+ * @param {unknown} [clusterRaw]
  * @returns {Promise<Record<string, unknown>[]>}
  */
-async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
+async function listApprovedMinimalRowsForCategoryPreview(
+  placementYear = null,
+  clusterRaw = null
+) {
   await loadPlacementHubSettingsCache();
+  const requestedCluster = normalizePlacementClusterQuery(clusterRaw);
+  const clusterMatch = requestedCluster
+    ? mongoMatchForPlacementHubCluster(requestedCluster)
+    : null;
   const pipeline = [
     {
       $match: {
         status: "approved",
         ...matchApprovedVisitYearInDetailYearsExpr(),
+        ...(clusterMatch || {}),
       },
     },
     { $group: { _id: "$companyId" } },
@@ -2384,7 +2423,10 @@ async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
 
   const rows = await CompanyVisit.aggregate(pipeline);
   const companyIds = rows.map((r) => r._id);
-  const visitsByCompany = await fetchApprovedVisitsForDetailYearsByCompany(companyIds);
+  const visitsByCompany = await fetchApprovedVisitsForDetailYearsByCompany(
+    companyIds,
+    { clusterKey: requestedCluster }
+  );
 
   const out = [];
   for (const row of rows) {
@@ -2497,7 +2539,11 @@ async function listApprovedMinimalRowsForCategoryPreview(placementYear = null) {
  * @returns {Promise<{ counts: object, logos: object }>}
  */
 export async function getCompanyCategoryPreviewLogos(placementYear = null, clusterRaw = null) {
-  const rows = await listApprovedMinimalRowsForCategoryPreview(placementYear);
+  const requestedCluster = normalizePlacementClusterQuery(clusterRaw);
+  const rows = await listApprovedMinimalRowsForCategoryPreview(
+    placementYear,
+    requestedCluster
+  );
   const withCategory = rows.map((c) => {
     const base = attachPlacementCategoryToCompany(c);
     return {
@@ -2519,7 +2565,6 @@ export async function getCompanyCategoryPreviewLogos(placementYear = null, clust
   let ordered = sortCompaniesForCategoryPreview(withCategory, {
     defaultYear: previewSortYear,
   });
-  const requestedCluster = normalizePlacementClusterQuery(clusterRaw);
   if (requestedCluster != null) {
     ordered = ordered.filter((c) => c.placementListClusterKey === requestedCluster);
   }
@@ -3901,6 +3946,12 @@ export async function updateCompanyVisit(
   const result = await CompanyVisit.updateOne({ _id: anchor._id }, { $set });
   if (result.modifiedCount > 0) {
     await invalidateCompanyDetailCache(cid);
+    if ($set.roles !== undefined) {
+      await invalidateVisitRoles2026Cache({
+        visitId: anchor._id,
+        companyId: cid,
+      });
+    }
   }
   return result;
 }

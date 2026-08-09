@@ -55,6 +55,7 @@ import {
 import { invalidateSpcMyRecordsCacheByEmail } from "../services/spcMyRecordsCache.js";
 import { getStudentPlacementStats } from "../services/studentPlacementStatsCache.js";
 import { invalidateCompanyDetailCache } from "../services/companyDetailCache.js";
+import { invalidateVisitRoles2026Cache } from "../services/companyListCache.js";
 import {
   approveSubmissionAndUpdateCompany,
   approveSubmissionsBatch,
@@ -2434,6 +2435,10 @@ adminRouter.post("/jd-import/apply", async (req, res) => {
 
     await CompanyVisit.updateOne({ _id: freshVisit._id }, mongoUpdate);
     await invalidateCompanyDetailCache(companyId);
+    await invalidateVisitRoles2026Cache({
+      visitId: freshVisit._id,
+      companyId,
+    });
     const loaded = await getCompanyMergedForAdminById(
       companyId,
       y,
@@ -2891,6 +2896,16 @@ adminRouter.put("/rvitm-data/:visitId", async (req, res) => {
 
     await col.updateOne({ _id: oid }, { $set });
     const updated = await col.findOne({ _id: oid });
+
+    if (updated?.companyId) {
+      await invalidateCompanyDetailCache(updated.companyId);
+      if (rolesIn != null) {
+        await invalidateVisitRoles2026Cache({
+          visitId: updated._id,
+          companyId: updated.companyId,
+        });
+      }
+    }
 
     const roles = Array.isArray(updated?.roles) ? updated.roles : [];
     const gotIn = Array.isArray(updated?.placementGotInBranchStats)
