@@ -95,28 +95,23 @@ export function sanitizeRecruitmentProcess(input) {
   }
 
   const rawOa = /** @type {Record<string, unknown>} */ (input).onlineAssessment;
-  if (!rawOa || typeof rawOa !== "object" || Array.isArray(rawOa)) {
-    return { ok: false, error: "onlineAssessment is required." };
-  }
-
-  const oaOccurred = rawOa.occurred === true || rawOa.occurred === "true";
+  const oaOccurred =
+    rawOa && typeof rawOa === "object" && !Array.isArray(rawOa)
+      ? rawOa.occurred === true || rawOa.occurred === "true"
+      : false;
   /** @type {Record<string, unknown>} */
   const onlineAssessment = { occurred: oaOccurred };
 
   if (oaOccurred) {
-    const mode = sanitizeTextField(rawOa.mode, 16).toLowerCase();
-    if (!OA_ASSESSMENT_MODES.includes(mode)) {
-      return {
-        ok: false,
-        error: "Select online or offline mode for the online assessment.",
-      };
+    const oa = /** @type {Record<string, unknown>} */ (rawOa);
+    const mode = sanitizeTextField(oa.mode, 16).toLowerCase();
+    if (OA_ASSESSMENT_MODES.includes(mode)) {
+      onlineAssessment.mode = mode;
     }
-    const topics = sanitizeTextField(rawOa.topics, MAX_TOPICS_LEN);
-    if (!topics) {
-      return { ok: false, error: "OA topics are required when online assessment occurred." };
-    }
-    const attended = parseOptionalNonNegInt(rawOa.attended);
-    const cleared = parseOptionalNonNegInt(rawOa.cleared);
+    const topics = sanitizeTextField(oa.topics, MAX_TOPICS_LEN);
+    if (topics) onlineAssessment.topics = topics;
+    const attended = parseOptionalNonNegInt(oa.attended);
+    const cleared = parseOptionalNonNegInt(oa.cleared);
     if (attended === undefined) {
       return {
         ok: false,
@@ -132,23 +127,23 @@ export function sanitizeRecruitmentProcess(input) {
     if (attended != null && cleared != null && cleared > attended) {
       return { ok: false, error: "OA cleared count cannot exceed attended count." };
     }
-    onlineAssessment.topics = topics;
-    onlineAssessment.mode = mode;
     if (attended != null) onlineAssessment.attended = attended;
     if (cleared != null) onlineAssessment.cleared = cleared;
   }
 
-  const rawRounds = /** @type {Record<string, unknown>} */ (input).rounds;
-  if (!Array.isArray(rawRounds)) {
-    return { ok: false, error: "rounds must be an array." };
-  }
+  const rawRounds = Array.isArray(
+    /** @type {Record<string, unknown>} */ (input).rounds
+  )
+    ? /** @type {unknown[]} */ (
+        /** @type {Record<string, unknown>} */ (input).rounds
+      )
+    : [];
   if (rawRounds.length > MAX_ROUNDS) {
     return { ok: false, error: `At most ${MAX_ROUNDS} rounds are allowed.` };
   }
 
   /** @type {Record<string, unknown>[]} */
   const rounds = [];
-  let anyRoundOccurred = false;
 
   for (let i = 0; i < rawRounds.length; i++) {
     const raw = rawRounds[i];
@@ -164,39 +159,24 @@ export function sanitizeRecruitmentProcess(input) {
     const round = { roundNumber, occurred };
 
     if (occurred) {
-      anyRoundOccurred = true;
       const types = normalizeRoundTypesFromRaw(
         /** @type {Record<string, unknown>} */ (raw)
       );
-      if (types.length === 0) {
-        return {
-          ok: false,
-          error: `Round ${roundNumber}: select at least one valid round type.`,
-        };
+      if (types.length > 0) {
+        round.types = types;
+        // Keep scalar `type` for older readers / timeline fallbacks.
+        round.type = types[0];
       }
-      round.types = types;
-      // Keep scalar `type` for older readers / timeline fallbacks.
-      round.type = types[0];
 
       if (types.includes("other")) {
         const otherTypeLabel = sanitizeTextField(raw.otherTypeLabel, MAX_OTHER_LABEL_LEN);
-        if (!otherTypeLabel) {
-          return {
-            ok: false,
-            error: `Round ${roundNumber}: describe the round type when "Other" is selected.`,
-          };
-        }
-        round.otherTypeLabel = otherTypeLabel;
+        if (otherTypeLabel) round.otherTypeLabel = otherTypeLabel;
       }
 
       const mode = sanitizeTextField(raw.mode, 16).toLowerCase();
-      if (!OA_ASSESSMENT_MODES.includes(mode)) {
-        return {
-          ok: false,
-          error: `Round ${roundNumber}: select online or offline mode.`,
-        };
+      if (OA_ASSESSMENT_MODES.includes(mode)) {
+        round.mode = mode;
       }
-      round.mode = mode;
 
       const attended = parseOptionalNonNegInt(raw.attended);
       const cleared = parseOptionalNonNegInt(raw.cleared);
@@ -223,13 +203,6 @@ export function sanitizeRecruitmentProcess(input) {
     }
 
     rounds.push(round);
-  }
-
-  if (!oaOccurred && !anyRoundOccurred) {
-    return {
-      ok: false,
-      error: "At least online assessment or one interview round must be marked as occurred.",
-    };
   }
 
   return {

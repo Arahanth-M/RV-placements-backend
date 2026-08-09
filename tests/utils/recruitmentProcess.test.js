@@ -5,7 +5,7 @@ import {
   buildRecruitmentProcessSubmitter,
   withRecruitmentProcessSubmitter,
   getRecruitmentProcessSubmitter,
-} from "../utils/recruitmentProcess.js";
+} from "../../utils/recruitmentProcess.js";
 
 describe("sanitizeRecruitmentProcess", () => {
   it("accepts OA-only process with mode", () => {
@@ -25,7 +25,7 @@ describe("sanitizeRecruitmentProcess", () => {
     }
   });
 
-  it("rejects OA without mode", () => {
+  it("accepts OA without mode (mode is optional)", () => {
     const result = sanitizeRecruitmentProcess({
       onlineAssessment: {
         occurred: true,
@@ -35,7 +35,11 @@ describe("sanitizeRecruitmentProcess", () => {
       },
       rounds: [],
     });
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.onlineAssessment.mode).toBeUndefined();
+      expect(result.value.onlineAssessment.topics).toBe("DSA");
+    }
   });
 
   it("accepts OA-only process", () => {
@@ -73,7 +77,7 @@ describe("sanitizeRecruitmentProcess", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("requires round mode when round occurred", () => {
+  it("accepts round without mode when round occurred (mode is optional)", () => {
     const result = sanitizeRecruitmentProcess({
       onlineAssessment: { occurred: false },
       rounds: [
@@ -86,10 +90,14 @@ describe("sanitizeRecruitmentProcess", () => {
         },
       ],
     });
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.rounds[0].mode).toBeUndefined();
+      expect(result.value.rounds[0].types).toEqual(["technical"]);
+    }
   });
 
-  it("requires other label when type is other", () => {
+  it("accepts other type without label (label is optional)", () => {
     const result = sanitizeRecruitmentProcess({
       onlineAssessment: { occurred: false },
       rounds: [
@@ -97,12 +105,24 @@ describe("sanitizeRecruitmentProcess", () => {
           roundNumber: 1,
           occurred: true,
           type: "other",
+          mode: "online",
           attended: 10,
           cleared: 5,
         },
       ],
     });
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.rounds[0].otherTypeLabel).toBeUndefined();
+    }
+  });
+
+  it("accepts empty process with nothing marked occurred", () => {
+    const result = sanitizeRecruitmentProcess({
+      onlineAssessment: { occurred: false },
+      rounds: [{ roundNumber: 1, occurred: false }],
+    });
+    expect(result.ok).toBe(true);
   });
 
   it("accepts blank attended/cleared as unknown", () => {

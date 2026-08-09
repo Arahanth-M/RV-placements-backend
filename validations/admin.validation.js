@@ -74,31 +74,30 @@ export const adminMustDoTopicUpdateSchema = Joi.object({
 
 const recruitmentRoundSchema = Joi.object({
   roundNumber: Joi.alternatives().try(Joi.number().integer().min(1), Joi.string().trim()).optional(),
-  occurred: Joi.boolean().required(),
+  occurred: Joi.boolean().optional(),
   type: Joi.string()
     .valid("technical", "aptitude", "resume_based", "projects", "other")
     .optional(),
   types: Joi.array()
     .items(Joi.string().valid("technical", "aptitude", "resume_based", "projects", "other"))
-    .min(1)
     .max(5)
     .optional(),
-  mode: Joi.string().valid("online", "offline").optional(),
+  mode: Joi.string().valid("online", "offline").allow("").optional(),
   otherTypeLabel: Joi.string().trim().max(200).allow("").optional(),
-  attended: Joi.alternatives().try(Joi.number().integer().min(0), Joi.string().trim()).optional(),
-  cleared: Joi.alternatives().try(Joi.number().integer().min(0), Joi.string().trim()).optional(),
+  attended: Joi.alternatives().try(Joi.number().integer().min(0), Joi.string().trim().allow("")).optional(),
+  cleared: Joi.alternatives().try(Joi.number().integer().min(0), Joi.string().trim().allow("")).optional(),
 }).unknown(true);
 
 export const adminRecruitmentProcessSchema = Joi.object({
   recruitment_process: Joi.object({
     onlineAssessment: Joi.object({
-      occurred: Joi.boolean().required(),
-      mode: Joi.string().valid("online", "offline").optional(),
+      occurred: Joi.boolean().optional(),
+      mode: Joi.string().valid("online", "offline").allow("").optional(),
       topics: Joi.string().trim().max(2000).allow("").optional(),
-      attended: Joi.alternatives().try(Joi.number().integer().min(0), Joi.string().trim()).optional(),
-      cleared: Joi.alternatives().try(Joi.number().integer().min(0), Joi.string().trim()).optional(),
-    }).required(),
-    rounds: Joi.array().items(recruitmentRoundSchema).max(20).required(),
+      attended: Joi.alternatives().try(Joi.number().integer().min(0), Joi.string().trim().allow("")).optional(),
+      cleared: Joi.alternatives().try(Joi.number().integer().min(0), Joi.string().trim().allow("")).optional(),
+    }).optional(),
+    rounds: Joi.array().items(recruitmentRoundSchema).max(20).optional(),
   }).required(),
 }).unknown(true);
 
