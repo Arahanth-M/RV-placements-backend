@@ -614,18 +614,4 @@ companyRouter.post("/", validateRequest(submissionInputSchema), async (req, res)
   try {
     const { companyId, type, content } = req.body;
 
-    if (!companyId || !type || !content) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-
-    const newSubmission = new Submission({ companyId, type, content });
-    await newSubmission.save();
-
-    res.status(201).json({ message: "Submission received and pending approval." });
-  } catch (error) {
-    res.status(500).json({ error: "Error saving submission" });
-  }
-});
-
-
-export default companyRouter;
+   
