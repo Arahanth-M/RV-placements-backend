@@ -2916,4 +2916,19 @@ adminRouter.put("/rvitm-data/:visitId", async (req, res) => {
 
     res.json({
       message: "RVITM data saved to company_visits_with_rvitm",
-      
+      visitId: String(updated._id),
+      companyId: String(updated.companyId),
+      rvitmRoles,
+      rvitmGotIn,
+      filled: rvitmDataLooksFilled(rvitmRoles, rvitmGotIn),
+      rolesCount: roles.length,
+      gotInCount: gotIn.length,
+    });
+  } catch (error) {
+    console.error("❌ rvitm-data update failed:", error.message);
+    res.status(500).json({ error: "Server error", details: error.message });
+  }
+});
+
+export default adminRouter;
+
