@@ -11,6 +11,12 @@ import {
   getDauTrendSeries,
   utcDayKey,
 } from "../services/admin/adminDauService.js";
+import {
+  collegeIdFromUser,
+  normalizeCollegeId,
+  withCollegeEmailScope,
+} from "../utils/collegeScope.js";
+
 function startOfDay(date = new Date()) {
   const next = new Date(date);
   next.setHours(0, 0, 0, 0);
@@ -49,12 +55,19 @@ function normalizeSeries(days, docs) {
   return Array.from(baseMap.values());
 }
 
-async function aggregateUsersByDay(fieldName, startDate) {
+/**
+ * @param {string} fieldName
+ * @param {Date} startDate
+ * @param {string} collegeId
+ */
+async function aggregateUsersByDay(fieldName, startDate, collegeId) {
   return User1.aggregate([
     {
-      $match: {
-        [fieldName]: { $gte: startDate },
-      },
+      $match: withCollegeEmailScope(
+        { [fieldName]: { $gte: startDate } },
+        collegeId,
+        "email"
+      ),
     },
     {
       $group: {
@@ -71,13 +84,28 @@ async function aggregateUsersByDay(fieldName, startDate) {
   ]);
 }
 
-async function aggregateSubmissionsByDay(fieldName, startDate, match = {}) {
+/**
+ * @param {string} fieldName
+ * @param {Date} startDate
+ * @param {Record<string, unknown>} match
+ * @param {string} collegeId
+ */
+async function aggregateSubmissionsByDay(
+  fieldName,
+  startDate,
+  match = {},
+  collegeId
+) {
   return Submission.aggregate([
     {
-      $match: {
-        ...match,
-        [fieldName]: { $gte: startDate },
-      },
+      $match: withCollegeEmailScope(
+        {
+          ...match,
+          [fieldName]: { $gte: startDate },
+        },
+        collegeId,
+        "submittedBy.email"
+      ),
     },
     {
       $group: {
@@ -113,8 +141,15 @@ function mergeSeries(days, seriesMap) {
   }));
 }
 
-async function aggregateTopSubmittedCompanies(limit = 5) {
+/**
+ * @param {number} [limit=5]
+ * @param {string} collegeId
+ */
+async function aggregateTopSubmittedCompanies(limit = 5, collegeId) {
   return Submission.aggregate([
+    {
+      $match: withCollegeEmailScope({}, collegeId, "submittedBy.email"),
+    },
     {
       $group: {
         _id: "$companyId",
@@ -191,9 +226,17 @@ async function findMostHelpfulApprovedCompanies(limit = 5) {
   ]);
 }
 
-export async function computeAdminStatsSnapshot() {
+/**
+ * Admin dashboard snapshot. People metrics are college-scoped; company catalog is shared.
+ * @param {unknown} [collegeIdRaw] — admin's college (`rvce` | `rvitm`)
+ */
+export async function computeAdminStatsSnapshot(collegeIdRaw = null) {
+  const collegeId = normalizeCollegeId(collegeIdRaw);
   const todayStart = startOfDay(new Date());
   const sevenDayStart = addDays(todayStart, -6);
+  const userMatch = withCollegeEmailScope({}, collegeId, "email");
+  const submissionMatch = (extra = {}) =>
+    withCollegeEmailScope(extra, collegeId, "submittedBy.email");
 
   const [
     totalUsers,
@@ -212,21 +255,28 @@ export async function computeAdminStatsSnapshot() {
     submissionTrendRaw,
     acceptanceTrendRaw,
   ] = await Promise.all([
-    User1.countDocuments(),
+    User1.countDocuments(userMatch),
     CompanyStatic.countDocuments(),
-    Submission.countDocuments({ status: "pending" }),
-    Submission.countDocuments({ submittedAt: { $gte: todayStart } }),
-    Submission.countDocuments({ status: "approved" }),
-    Submission.countDocuments(),
+    Submission.countDocuments(submissionMatch({ status: "pending" })),
+    Submission.countDocuments(
+      submissionMatch({ submittedAt: { $gte: todayStart } })
+    ),
+    Submission.countDocuments(submissionMatch({ status: "approved" })),
+    Submission.countDocuments(submissionMatch()),
     countAdminListableCompanyVisits("pending"),
-    getDauCountForDay(utcDayKey()),
+    getDauCountForDay(utcDayKey(), collegeId),
     findMostViewedApprovedCompanies(5),
     findMostHelpfulApprovedCompanies(5),
-    aggregateTopSubmittedCompanies(5),
-    aggregateUsersByDay("createdAt", sevenDayStart),
-    getDauTrendSeries(7),
-    aggregateSubmissionsByDay("submittedAt", sevenDayStart),
-    aggregateSubmissionsByDay("approvedAt", sevenDayStart, { status: "approved" }),
+    aggregateTopSubmittedCompanies(5, collegeId),
+    aggregateUsersByDay("createdAt", sevenDayStart, collegeId),
+    getDauTrendSeries(7, collegeId),
+    aggregateSubmissionsByDay("submittedAt", sevenDayStart, {}, collegeId),
+    aggregateSubmissionsByDay(
+      "approvedAt",
+      sevenDayStart,
+      { status: "approved" },
+      collegeId
+    ),
   ]);
 
   return {
@@ -247,12 +297,14 @@ export async function computeAdminStatsSnapshot() {
     totalSubmissions,
     approvedSubmissions,
     pendingCompanies,
+    collegeId,
   };
 }
 
 export async function getAdminStats(req, res) {
   try {
-    const stats = await computeAdminStatsSnapshot();
+    const collegeId = collegeIdFromUser(req.user);
+    const stats = await computeAdminStatsSnapshot(collegeId);
     return res.json(stats);
   } catch (error) {
     console.error("❌ Error fetching admin stats:", error.message);

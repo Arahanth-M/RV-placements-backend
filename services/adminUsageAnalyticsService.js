@@ -1,5 +1,10 @@
 import InterviewSession from "../models/InterviewSession.js";
 import PrepPathPlan from "../models/PrepPathPlan.js";
+import User1 from "../models/User1.js";
+import {
+  normalizeCollegeId,
+  withCollegeEmailScope,
+} from "../utils/collegeScope.js";
 
 const IST_TZ = "Asia/Kolkata";
 const DEFAULT_DAYS = 30;
@@ -62,9 +67,27 @@ function fillDaySeries(days, rangeStartUtc, docs) {
   return series;
 }
 
-async function aggregateByIstDay(Model, rangeStartUtc) {
+/**
+ * InterviewSession / PrepPathPlan store `userId` as users1._id string.
+ * Resolve college members once per analytics request (read-only).
+ * @param {string} collegeId
+ * @returns {Promise<string[]>}
+ */
+async function listUserIdStringsForCollege(collegeId) {
+  const rows = await User1.find(withCollegeEmailScope({}, collegeId, "email"))
+    .select("_id")
+    .lean();
+  return rows.map((r) => String(r._id));
+}
+
+async function aggregateByIstDay(Model, rangeStartUtc, userIds) {
   return Model.aggregate([
-    { $match: { createdAt: { $gte: rangeStartUtc } } },
+    {
+      $match: {
+        createdAt: { $gte: rangeStartUtc },
+        userId: { $in: userIds },
+      },
+    },
     {
       $group: {
         _id: {
@@ -81,9 +104,14 @@ async function aggregateByIstDay(Model, rangeStartUtc) {
   ]);
 }
 
-async function aggregatePrepPathsByCompany(rangeStartUtc, limit = TOP_COMPANIES) {
+async function aggregatePrepPathsByCompany(rangeStartUtc, userIds, limit = TOP_COMPANIES) {
   return PrepPathPlan.aggregate([
-    { $match: { createdAt: { $gte: rangeStartUtc } } },
+    {
+      $match: {
+        createdAt: { $gte: rangeStartUtc },
+        userId: { $in: userIds },
+      },
+    },
     {
       $group: {
         _id: "$companyId",
@@ -117,12 +145,37 @@ async function aggregatePrepPathsByCompany(rangeStartUtc, limit = TOP_COMPANIES)
 
 /**
  * Admin usage analytics: AI mock interviews + PrepPath generations (IST days).
- * @param {{ days?: unknown }} [options]
+ * People metrics are college-scoped via users1 email → userId.
+ * @param {{ days?: unknown, collegeId?: unknown }} [options]
  */
 export async function getAdminUsageAnalytics(options = {}) {
   const days = clampDays(options.days);
+  const collegeId = normalizeCollegeId(options.collegeId);
   const todayStart = startOfIstDayUtc(new Date());
   const rangeStartUtc = addDays(todayStart, -(days - 1));
+  const userIds = await listUserIdStringsForCollege(collegeId);
+
+  if (userIds.length === 0) {
+    const emptyByDay = fillDaySeries(days, rangeStartUtc, []);
+    return {
+      timezone: IST_TZ,
+      rangeDays: days,
+      rangeStart: istDateKeyFromUtc(rangeStartUtc),
+      rangeEnd: istDateKeyFromUtc(todayStart),
+      collegeId,
+      interviews: {
+        total: 0,
+        totalInRange: 0,
+        byDay: emptyByDay,
+      },
+      prepPaths: {
+        total: 0,
+        totalInRange: 0,
+        byDay: emptyByDay,
+        byCompany: [],
+      },
+    };
+  }
 
   const [
     interviewTotal,
@@ -133,13 +186,19 @@ export async function getAdminUsageAnalytics(options = {}) {
     prepPathTotalInRange,
     interviewTotalInRange,
   ] = await Promise.all([
-    InterviewSession.countDocuments({}),
-    aggregateByIstDay(InterviewSession, rangeStartUtc),
-    PrepPathPlan.countDocuments({}),
-    aggregateByIstDay(PrepPathPlan, rangeStartUtc),
-    aggregatePrepPathsByCompany(rangeStartUtc),
-    PrepPathPlan.countDocuments({ createdAt: { $gte: rangeStartUtc } }),
-    InterviewSession.countDocuments({ createdAt: { $gte: rangeStartUtc } }),
+    InterviewSession.countDocuments({ userId: { $in: userIds } }),
+    aggregateByIstDay(InterviewSession, rangeStartUtc, userIds),
+    PrepPathPlan.countDocuments({ userId: { $in: userIds } }),
+    aggregateByIstDay(PrepPathPlan, rangeStartUtc, userIds),
+    aggregatePrepPathsByCompany(rangeStartUtc, userIds),
+    PrepPathPlan.countDocuments({
+      userId: { $in: userIds },
+      createdAt: { $gte: rangeStartUtc },
+    }),
+    InterviewSession.countDocuments({
+      userId: { $in: userIds },
+      createdAt: { $gte: rangeStartUtc },
+    }),
   ]);
 
   return {
@@ -147,6 +206,7 @@ export async function getAdminUsageAnalytics(options = {}) {
     rangeDays: days,
     rangeStart: istDateKeyFromUtc(rangeStartUtc),
     rangeEnd: istDateKeyFromUtc(todayStart),
+    collegeId,
     interviews: {
       total: interviewTotal,
       totalInRange: interviewTotalInRange,

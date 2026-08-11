@@ -58,6 +58,16 @@ export function collegeIdFromUser(user) {
 }
 
 /**
+ * True when email maps to the given college (same rules as {@link collegeIdFromEmail}).
+ * @param {unknown} email
+ * @param {unknown} collegeIdRaw
+ * @returns {boolean}
+ */
+export function emailBelongsToCollege(email, collegeIdRaw) {
+  return collegeIdFromEmail(email) === normalizeCollegeId(collegeIdRaw);
+}
+
+/**
  * True when email matches an allowed institutional college pattern.
  * @param {unknown} email
  * @returns {boolean}
@@ -71,6 +81,63 @@ export function isAllowedCollegeEmail(email) {
     normalized.endsWith(RVCE_EMAIL_SUFFIX) ||
     normalized.endsWith(RVITM_EMAIL_SUFFIX)
   );
+}
+
+/**
+ * Mongo `$match` fragment that scopes documents by institutional email college.
+ * Mirrors {@link collegeIdFromEmail}: RVITM = `*.rvitm@rvei.edu.in` (+ test list);
+ * RVCE = everyone else (incl. `@rvce.edu.in` and unknown/legacy → treated as RVCE).
+ * Read-only filter — does not alter stored data.
+ *
+ * @param {unknown} collegeIdRaw — `rvce` | `rvitm`
+ * @param {string} [emailFieldPath="email"] — e.g. `"email"` or `"submittedBy.email"`
+ * @returns {Record<string, unknown>}
+ */
+export function mongoMatchEmailFieldForCollege(
+  collegeIdRaw,
+  emailFieldPath = "email"
+) {
+  const collegeId = normalizeCollegeId(collegeIdRaw);
+  const field = String(emailFieldPath || "email").trim() || "email";
+  const rvitmRegex = {
+    [field]: { $regex: "\\.rvitm@rvei\\.edu\\.in$", $options: "i" },
+  };
+  const testEmails = [...TEST_RVITM_EMAILS];
+  /** @type {Record<string, unknown>[]} */
+  const rvitmClauses = [rvitmRegex];
+  if (testEmails.length > 0) {
+    rvitmClauses.push({ [field]: { $in: testEmails } });
+  }
+
+  if (collegeId === COLLEGE_ID_RVITM) {
+    return rvitmClauses.length === 1 ? rvitmClauses[0] : { $or: rvitmClauses };
+  }
+
+  // RVCE admin: exclude RVITM (and test RVITM emails)
+  return rvitmClauses.length === 1
+    ? { $nor: rvitmClauses }
+    : { $and: rvitmClauses.map((c) => ({ $nor: [c] })) };
+}
+
+/**
+ * Merge a base match with college email scope (avoids clobbering `$or` / `$nor`).
+ * @param {Record<string, unknown>|null|undefined} baseMatch
+ * @param {unknown} collegeIdRaw
+ * @param {string} [emailFieldPath="email"]
+ * @returns {Record<string, unknown>}
+ */
+export function withCollegeEmailScope(
+  baseMatch,
+  collegeIdRaw,
+  emailFieldPath = "email"
+) {
+  const scope = mongoMatchEmailFieldForCollege(collegeIdRaw, emailFieldPath);
+  const base =
+    baseMatch && typeof baseMatch === "object" && Object.keys(baseMatch).length > 0
+      ? baseMatch
+      : null;
+  if (!base) return scope;
+  return { $and: [base, scope] };
 }
 
 /**

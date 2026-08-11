@@ -1,7 +1,9 @@
 import {
   DEFAULT_COLLEGE_ID,
   collegeIdFromUser,
+  emailBelongsToCollege,
   normalizeCollegeId,
+  withCollegeEmailScope,
 } from "../utils/collegeScope.js";
 import express from "express";
 import mongoose from "mongoose";
@@ -40,6 +42,7 @@ import Submission from "../models/Submission.js";
 import CompanyStatic from "../models/CompanyStatic.js";
 import CompanyVisit from "../models/CompanyVisit.js";
 import Notification from "../models/Notification.js";
+import InterviewLimitRequest from "../models/InterviewLimitRequest.js";
 import { getAdminStats } from "../controllers/adminStatsController.js";
 import { invalidateAdminDashboardStatsCache } from "../services/adminDashboardStatsCache.js";
 import { getAdminUsageAnalytics } from "../services/adminUsageAnalyticsService.js";
@@ -415,11 +418,14 @@ function sanitizeText(text) {
   return str.trim();
 }
 
-// Get total number of users
+// Get total number of users (college-scoped for the logged-in admin)
 adminRouter.get("/stats/users", async (req, res) => {
   try {
-    const totalUsers = await User1.countDocuments();
-    res.json({ totalUsers });
+    const collegeId = collegeIdFromUser(req.user);
+    const totalUsers = await User1.countDocuments(
+      withCollegeEmailScope({}, collegeId, "email")
+    );
+    res.json({ totalUsers, collegeId });
   } catch (error) {
     console.error("❌ Error fetching user count:", error.message);
     res.status(500).json({ error: "Server error" });
@@ -444,7 +450,8 @@ adminRouter.get(
 // Branch-wise placed students grouped by placement year (admin-only)
 adminRouter.get("/students/placement-stats", async (req, res) => {
   try {
-    const data = await getStudentPlacementStats(req.query?.year);
+    const collegeId = collegeIdFromUser(req.user);
+    const data = await getStudentPlacementStats(req.query?.year, collegeId);
     return res.json(data);
   } catch (error) {
     if (error?.message === "INVALID_YEAR") {
@@ -457,7 +464,8 @@ adminRouter.get("/students/placement-stats", async (req, res) => {
 
 adminRouter.get("/students/placement-stats/export", async (req, res) => {
   try {
-    const data = await getStudentPlacementStats(req.query?.year);
+    const collegeId = collegeIdFromUser(req.user);
+    const data = await getStudentPlacementStats(req.query?.year, collegeId);
     const workbook = XLSX.utils.book_new();
 
     const mapStudentRow = (student, branchCode) => ({
@@ -705,11 +713,23 @@ async function enrichSubmissionVisitMeta(docs) {
   });
 }
 
+/** @returns {boolean} true when response already sent (forbidden) */
+function rejectIfSubmissionOutsideAdminCollege(submission, req, res) {
+  const collegeId = collegeIdFromUser(req.user);
+  if (emailBelongsToCollege(submission?.submittedBy?.email, collegeId)) {
+    return false;
+  }
+  res.status(403).json({ error: "Submission is outside your college scope." });
+  return true;
+}
+
 // Paginated submissions list (trimmed content for table rows; use GET /submissions/:id for full body)
 submissionModRouter.get("/submissions", async (req, res) => {
   try {
+    const collegeId = collegeIdFromUser(req.user);
     const { status } = req.query;
-    const query = status ? { status } : {};
+    const baseQuery = status ? { status } : {};
+    const query = withCollegeEmailScope(baseQuery, collegeId, "submittedBy.email");
     const { page, limit, skip } = parseAdminPagination(req.query);
 
     const [total, docs] = await Promise.all([
@@ -735,6 +755,7 @@ submissionModRouter.get("/submissions", async (req, res) => {
       page,
       limit,
       totalPages,
+      collegeId,
     });
   } catch (error) {
     console.error("❌ Error fetching submissions:", error.message);
@@ -745,9 +766,13 @@ submissionModRouter.get("/submissions", async (req, res) => {
 // Full submission (e.g. admin modal)
 submissionModRouter.get("/submissions/:id", async (req, res) => {
   try {
+    const collegeId = collegeIdFromUser(req.user);
     const submission = await Submission.findById(req.params.id).populate({ path: "companyId", select: "name", model: "CompanyStatic" });
     if (!submission) {
       return res.status(404).json({ error: "Submission not found" });
+    }
+    if (!emailBelongsToCollege(submission?.submittedBy?.email, collegeId)) {
+      return res.status(403).json({ error: "Submission is outside your college scope." });
     }
     const [enrichedSubmission] = await enrichSubmissionVisitMeta([submission]);
     res.json(enrichedSubmission);
@@ -763,8 +788,9 @@ adminRouter.get("/stats", getAdminStats);
 /** Daily active users — lightweight day counts (fetched only when admin opens DAU modal). */
 adminRouter.get("/dau", async (req, res) => {
   try {
+    const collegeId = collegeIdFromUser(req.user);
     const days = Math.min(30, Math.max(1, Number(req.query?.days) || 7));
-    const data = await getDauSummaryForAdmin(days);
+    const data = await getDauSummaryForAdmin(days, collegeId);
     return res.json({ success: true, ...data });
   } catch (err) {
     console.error("GET /api/admin/dau:", err?.message || err);
@@ -772,10 +798,11 @@ adminRouter.get("/dau", async (req, res) => {
   }
 });
 
-/** Full stored DAU history for Excel export (daily_active_users only). */
-adminRouter.get("/dau/export", async (_req, res) => {
+/** Full stored DAU history for Excel export (college-scoped). */
+adminRouter.get("/dau/export", async (req, res) => {
   try {
-    const data = await getDauFullExportRows();
+    const collegeId = collegeIdFromUser(req.user);
+    const data = await getDauFullExportRows(collegeId);
     return res.json({ success: true, ...data });
   } catch (err) {
     console.error("GET /api/admin/dau/export:", err?.message || err);
@@ -786,7 +813,8 @@ adminRouter.get("/dau/export", async (_req, res) => {
 /** Users for one day (fetched only when admin clicks a day chip). */
 adminRouter.get("/dau/:dayKey", async (req, res) => {
   try {
-    const data = await getDauDayForAdmin(req.params.dayKey);
+    const collegeId = collegeIdFromUser(req.user);
+    const data = await getDauDayForAdmin(req.params.dayKey, collegeId);
     return res.json({ success: true, ...data });
   } catch (err) {
     const code = err?.code || "";
@@ -801,7 +829,11 @@ adminRouter.get("/dau/:dayKey", async (req, res) => {
 /** AI mock interviews + PrepPath generation usage (day-wise IST + totals). */
 adminRouter.get("/usage-analytics", async (req, res) => {
   try {
-    const data = await getAdminUsageAnalytics({ days: req.query?.days });
+    const collegeId = collegeIdFromUser(req.user);
+    const data = await getAdminUsageAnalytics({
+      days: req.query?.days,
+      collegeId,
+    });
     return res.json(data);
   } catch (err) {
     console.error("GET /api/admin/usage-analytics:", err);
@@ -809,9 +841,10 @@ adminRouter.get("/usage-analytics", async (req, res) => {
   }
 });
 
-adminRouter.get("/student-requests", async (_req, res) => {
+adminRouter.get("/student-requests", async (req, res) => {
   try {
-    const data = await listAdminStudentRequests();
+    const collegeId = collegeIdFromUser(req.user);
+    const data = await listAdminStudentRequests(collegeId);
     return res.json(data);
   } catch (err) {
     console.error("GET /api/admin/student-requests:", err);
@@ -821,6 +854,16 @@ adminRouter.get("/student-requests", async (_req, res) => {
 
 adminRouter.post("/interview-limit-requests/:requestId/approve", async (req, res) => {
   try {
+    const collegeId = collegeIdFromUser(req.user);
+    const pending = await InterviewLimitRequest.findById(req.params.requestId)
+      .select("email status")
+      .lean();
+    if (!pending || pending.status !== "pending") {
+      return res.status(404).json({ error: "Request not found." });
+    }
+    if (!emailBelongsToCollege(pending.email, collegeId)) {
+      return res.status(403).json({ error: "Request is outside your college scope." });
+    }
     const result = await approveInterviewLimitRequest(req.params.requestId, req.user);
     if (!result.ok) {
       return res.status(result.reason === "not_found" ? 404 : 400).json({
@@ -836,6 +879,16 @@ adminRouter.post("/interview-limit-requests/:requestId/approve", async (req, res
 
 adminRouter.post("/interview-limit-requests/:requestId/dismiss", async (req, res) => {
   try {
+    const collegeId = collegeIdFromUser(req.user);
+    const pending = await InterviewLimitRequest.findById(req.params.requestId)
+      .select("email status")
+      .lean();
+    if (!pending || pending.status !== "pending") {
+      return res.status(404).json({ error: "Request not found." });
+    }
+    if (!emailBelongsToCollege(pending.email, collegeId)) {
+      return res.status(403).json({ error: "Request is outside your college scope." });
+    }
     const result = await dismissInterviewLimitRequest(req.params.requestId, req.user);
     if (!result.ok) {
       return res.status(result.reason === "not_found" ? 404 : 400).json({
@@ -882,6 +935,7 @@ submissionModRouter.post("/submissions/:id/enhance", async (req, res) => {
     if (!submission) {
       return res.status(404).json({ error: "Submission not found" });
     }
+    if (rejectIfSubmissionOutsideAdminCollege(submission, req, res)) return;
     if (submission.status !== "pending") {
       return res.status(400).json({ error: "Only pending submissions can be enhanced." });
     }
@@ -908,10 +962,13 @@ submissionModRouter.post("/submissions/:id/enhance", async (req, res) => {
 // AI-generated answer for OA / interview questions — does not write to the database.
 submissionModRouter.post("/submissions/:id/add-answer", async (req, res) => {
   try {
-    const submission = await Submission.findById(req.params.id).select("type content status");
+    const submission = await Submission.findById(req.params.id).select(
+      "type content status submittedBy"
+    );
     if (!submission) {
       return res.status(404).json({ error: "Submission not found" });
     }
+    if (rejectIfSubmissionOutsideAdminCollege(submission, req, res)) return;
     if (submission.status !== "pending") {
       return res.status(400).json({ error: "Only pending submissions can receive a generated answer." });
     }
@@ -959,6 +1016,7 @@ function reviewerFromRequest(req) {
 // Batch-approve pending submissions (grouped by company visit; parallel across visits)
 submissionModRouter.post("/submissions/approve-batch", async (req, res) => {
   try {
+    const collegeId = collegeIdFromUser(req.user);
     const rawIds = req.body?.ids;
     if (!Array.isArray(rawIds) || rawIds.length === 0) {
       return res.status(400).json({ error: "Request body must include a non-empty ids array." });
@@ -969,11 +1027,33 @@ submissionModRouter.post("/submissions/approve-batch", async (req, res) => {
       });
     }
 
-    const summary = await approveSubmissionsBatch(rawIds, reviewerFromRequest(req));
+    const objectIds = rawIds
+      .map((id) => {
+        try {
+          return new mongoose.Types.ObjectId(String(id));
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+    const scoped = await Submission.find(
+      withCollegeEmailScope({ _id: { $in: objectIds } }, collegeId, "submittedBy.email")
+    )
+      .select("_id")
+      .lean();
+    const scopedIds = scoped.map((s) => String(s._id));
+    if (scopedIds.length === 0) {
+      return res.status(403).json({
+        error: "None of the selected submissions are in your college scope.",
+      });
+    }
+
+    const summary = await approveSubmissionsBatch(scopedIds, reviewerFromRequest(req));
 
     res.json({
       message: `Batch approval finished: ${summary.successCount} succeeded, ${summary.failCount} failed.`,
       ...summary,
+      skippedOutsideCollege: rawIds.length - scopedIds.length,
     });
   } catch (error) {
     console.error("❌ Error in batch submission approval:", error.message);
@@ -992,6 +1072,7 @@ submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
     if (!submission) {
       return res.status(404).json({ error: "Submission not found" });
     }
+    if (rejectIfSubmissionOutsideAdminCollege(submission, req, res)) return;
 
     if (submission.status !== "pending") {
       return res.status(400).json({ error: "Only pending submissions can be approved." });
@@ -2146,6 +2227,7 @@ submissionModRouter.delete("/submissions/:id/reject", async (req, res) => {
     if (!submission) {
       return res.status(404).json({ error: "Submission not found" });
     }
+    if (rejectIfSubmissionOutsideAdminCollege(submission, req, res)) return;
 
     // Delete the submission
     await Submission.findByIdAndDelete(req.params.id);
@@ -2175,6 +2257,7 @@ adminRouter.delete("/submissions/:id/delete", async (req, res) => {
     if (!submission) {
       return res.status(404).json({ error: "Submission not found" });
     }
+    if (rejectIfSubmissionOutsideAdminCollege(submission, req, res)) return;
 
     if (submission.status !== 'approved') {
       return res.status(400).json({ error: "Only approved submissions can be deleted using this endpoint" });

@@ -1,6 +1,6 @@
 /**
  * Read-through cache for GET /api/admin/students/placement-stats (and export).
- * Keyed by requested year query (or "default" when omitted).
+ * Keyed by college + requested year query (or "default" when year omitted).
  * Invalidate on any PlacementData write; TTL 1h if invalidation is missed.
  */
 import mongoose from "mongoose";
@@ -9,20 +9,24 @@ import Student from "../models/Student.js";
 import User1 from "../models/User1.js";
 import { redisUrl } from "../src/utils/redisClient.js";
 import { getJSON, setJSON, deleteKeysByPrefix } from "../src/utils/redisHelpers.js";
+import {
+  DEFAULT_COLLEGE_ID,
+  normalizeCollegeId,
+  withCollegeEmailScope,
+} from "../utils/collegeScope.js";
 
-const KEY_PREFIX = "rv:admin:placement-stats:v3:";
+const KEY_PREFIX = "rv:admin:placement-stats:v4:";
 /** 1 hour safety TTL when invalidation is not triggered */
 const TTL_SECONDS = 3600;
 
-function cacheKeyForYearRaw(yearRaw) {
-  if (yearRaw == null || yearRaw === "") {
-    return `${KEY_PREFIX}default`;
+function cacheKeyForYearRaw(yearRaw, collegeIdRaw) {
+  const collegeId = normalizeCollegeId(collegeIdRaw ?? DEFAULT_COLLEGE_ID);
+  let yearPart = "default";
+  if (yearRaw != null && yearRaw !== "") {
+    const y = Number.parseInt(String(yearRaw), 10);
+    if (Number.isFinite(y)) yearPart = `y:${y}`;
   }
-  const y = Number.parseInt(String(yearRaw), 10);
-  if (!Number.isFinite(y)) {
-    return `${KEY_PREFIX}default`;
-  }
-  return `${KEY_PREFIX}y:${y}`;
+  return `${KEY_PREFIX}${collegeId}:${yearPart}`;
 }
 
 function isValidStatsPayload(value) {
@@ -71,9 +75,11 @@ function maxIsoTimestamp(a, b) {
 
 /**
  * @param {unknown} yearRaw
- * @returns {Promise<{ years: number[], selectedYear: number | null, branches: object[] }>}
+ * @param {unknown} [collegeIdRaw] — admin college (`rvce` | `rvitm`); scopes by student email
+ * @returns {Promise<{ years: number[], selectedYear: number | null, branches: object[], collegeId: string }>}
  */
-export async function buildStudentPlacementStatsFromDb(yearRaw) {
+export async function buildStudentPlacementStatsFromDb(yearRaw, collegeIdRaw = null) {
+  const collegeId = normalizeCollegeId(collegeIdRaw ?? DEFAULT_COLLEGE_ID);
   const requestedYear =
     yearRaw == null || yearRaw === ""
       ? null
@@ -103,6 +109,7 @@ export async function buildStudentPlacementStatsFromDb(yearRaw) {
       selectedYear: null,
       branches: [],
       lastUpdatedAt: null,
+      collegeId,
     };
   }
 
@@ -122,6 +129,8 @@ export async function buildStudentPlacementStatsFromDb(yearRaw) {
         preserveNullAndEmptyArrays: true,
       },
     },
+    // College scope by placed student's email (read-only filter)
+    { $match: withCollegeEmailScope({}, collegeId, "student.email") },
     {
       $project: {
         _id: 0,
@@ -303,25 +312,28 @@ export async function buildStudentPlacementStatsFromDb(yearRaw) {
     selectedYear,
     branches,
     lastUpdatedAt,
+    collegeId,
   };
 }
 
 /**
  * Cached stats for admin UI + export (same payload as before caching).
  * @param {unknown} yearRaw req.query.year
+ * @param {unknown} [collegeIdRaw] admin college scope
  */
-export async function getStudentPlacementStats(yearRaw) {
+export async function getStudentPlacementStats(yearRaw, collegeIdRaw = null) {
+  const collegeId = normalizeCollegeId(collegeIdRaw ?? DEFAULT_COLLEGE_ID);
   if (!redisUrl) {
-    return buildStudentPlacementStatsFromDb(yearRaw);
+    return buildStudentPlacementStatsFromDb(yearRaw, collegeId);
   }
 
-  const key = cacheKeyForYearRaw(yearRaw);
+  const key = cacheKeyForYearRaw(yearRaw, collegeId);
   const cached = await getJSON(key);
   if (isValidStatsPayload(cached)) {
     return cached;
   }
 
-  const fresh = await buildStudentPlacementStatsFromDb(yearRaw);
+  const fresh = await buildStudentPlacementStatsFromDb(yearRaw, collegeId);
   await setJSON(key, fresh, TTL_SECONDS);
   return fresh;
 }

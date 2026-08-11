@@ -6,6 +6,10 @@ import {
   getInterviewWeeklyLimitMaxForUser,
   isInterviewWeeklyLimitElevatedUser,
 } from "../config/interviewLimits.js";
+import {
+  normalizeCollegeId,
+  withCollegeEmailScope,
+} from "../utils/collegeScope.js";
 import { getInterviewStartEligibility } from "./interviewSessionService.js";
 
 function normalizeEmail(email) {
@@ -133,8 +137,11 @@ export async function submitInterviewLimitRequest(userId, user) {
   return { ok: true, status: "pending" };
 }
 
-export async function listPendingInterviewLimitRequestsForAdmin() {
-  const rows = await InterviewLimitRequest.find({ status: "pending" })
+export async function listPendingInterviewLimitRequestsForAdmin(collegeIdRaw = null) {
+  const collegeId = normalizeCollegeId(collegeIdRaw);
+  const rows = await InterviewLimitRequest.find(
+    withCollegeEmailScope({ status: "pending" }, collegeId, "email")
+  )
     .sort({ createdAt: -1 })
     .lean();
 
