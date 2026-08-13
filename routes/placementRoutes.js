@@ -19,9 +19,15 @@ import {
 } from "../services/companyService.js";
 import { COMPANY_DETAIL_VISIT_YEARS } from "../utils/placementYears.js";
 import { PPO_BRANCH_CODES, isValidPpoBranchCode, normalizePpoBranchCode } from "../utils/ppoBranchCodes.js";
+import {
+  SPC_CLUSTER_NOT_ASSIGNED_MESSAGE,
+  SPC_CLUSTER_WRITE_FORBIDDEN_MESSAGE,
+} from "../utils/spcCluster.js";
+import { branchMatchesSpcCluster } from "../services/spcVisitScope.js";
 import User1 from "../models/User1.js";
 import authJWT from "../middleware/authJWT.js";
 import requireSPC from "../middleware/requireSPC.js";
+import attachSpcCluster from "../middleware/attachSpcCluster.js";
 import validateRequest from "../middleware/validateRequest.js";
 import { recordDauActivitySafe } from "../services/dau/recordDauActivity.js";
 import {
@@ -57,6 +63,20 @@ async function invalidatePlacementStatsAfterWrite() {
 }
 
 const router = express.Router();
+
+router.use("/spc", authJWT, requireSPC, attachSpcCluster);
+
+function rejectIfSpcClusterMissing(req, res) {
+  if (req.spcCluster) return false;
+  res.status(403).json({ message: SPC_CLUSTER_NOT_ASSIGNED_MESSAGE });
+  return true;
+}
+
+function rejectIfBranchOutsideSpcCluster(branchCodeRaw, req, res) {
+  if (branchMatchesSpcCluster(branchCodeRaw, req.spcCluster)) return false;
+  res.status(403).json({ message: SPC_CLUSTER_WRITE_FORBIDDEN_MESSAGE });
+  return true;
+}
 
 /** Escape string for case-insensitive exact match on {@link PlacementData.companyPlaced}. */
 function escapeRegexForExactMatch(value) {
@@ -290,7 +310,10 @@ router.get(
   async (req, res) => {
     try {
       const { q, limit } = req.query;
-      const items = await suggestCompaniesForSpc(q, limit);
+      if (!req.spcCluster) {
+        return res.json({ items: [] });
+      }
+      const items = await suggestCompaniesForSpc(q, limit, { cluster: req.spcCluster });
       return res.json({ items });
     } catch (error) {
       console.error("❌ Error in SPC company suggest:", error.message);
@@ -307,12 +330,19 @@ router.get(
   async (req, res) => {
     try {
       const { companyId, placementYear, placementContext, branchCode } = req.query;
+      if (!req.spcCluster) {
+        return res.json({ roles: [] });
+      }
+      if (branchCode && !branchMatchesSpcCluster(branchCode, req.spcCluster)) {
+        return res.json({ roles: [] });
+      }
       const result = await getSpcCompanyRoleNamesForForm(
         companyId,
         placementYear,
         placementContext,
         branchCode,
-        collegeIdFromUser(req.user)
+        collegeIdFromUser(req.user),
+        req.spcCluster
       );
       return res.json(result);
     } catch (error) {
@@ -350,6 +380,9 @@ router.put(
           message: "You can edit only placement records submitted by your account.",
         });
       }
+      if (rejectIfSpcClusterMissing(req, res)) return;
+      const existingBranch = String(placement.branchCode || "").trim().toLowerCase();
+      if (existingBranch && rejectIfBranchOutsideSpcCluster(existingBranch, req, res)) return;
 
       const payload = {};
       if (req.body.companyPlaced !== undefined) {
@@ -380,6 +413,12 @@ router.put(
       if (payload.companyPlaced !== undefined) {
         const resolvedCompanyId = await resolveCompanyIdForPlacementName(payload.companyPlaced);
         payload.companyId = resolvedCompanyId;
+      }
+
+      const nextBranchForCheck =
+        payload.branchCode !== undefined ? payload.branchCode : existingBranch;
+      if (nextBranchForCheck && rejectIfBranchOutsideSpcCluster(nextBranchForCheck, req, res)) {
+        return;
       }
 
       if (Object.keys(payload).length === 0) {
@@ -465,7 +504,8 @@ router.put(
               Number(previousPlacementYear),
               previousTypeOfOffer,
               null,
-              previousBranchCode
+              previousBranchCode,
+              req.spcCluster
             );
             if (oldResolved.ok) {
               const decOld = isPpoOfferType(previousTypeOfOffer)
@@ -502,7 +542,8 @@ router.put(
               Number(nextPlacementYear),
               nextTypeOfOffer,
               null,
-              nextBranchCode
+              nextBranchCode,
+              req.spcCluster
             );
             if (nextResolved.ok) {
               const incNext = isPpoOfferType(nextTypeOfOffer)
@@ -555,7 +596,8 @@ router.put(
           Number(nextPlacementYear),
           nextTypeOfOffer,
           null,
-          nextBranchCode
+          nextBranchCode,
+          req.spcCluster
         );
         if (!resolvedVisitResult.ok) {
           const ppoAnchor = await resolveApprovedVisitForSpcPlacementOffer(
@@ -563,7 +605,8 @@ router.put(
             Number(nextPlacementYear),
             "Internship(PPO)",
             null,
-            nextBranchCode
+            nextBranchCode,
+            req.spcCluster
           );
           if (ppoAnchor.ok) {
             resolvedVisitResult = ppoAnchor;
@@ -641,13 +684,17 @@ router.get("/spc/my-submissions", authJWT, requireSPC, async (req, res) => {
     const email = String(req.user?.email || "").trim().toLowerCase();
     const userId = String(req.user?._id || req.user?.id || "").trim();
 
-    const cached = await getCachedSpcMyRecords(email);
+    if (!req.spcCluster) {
+      return res.json({ contributions: [], placements: [] });
+    }
+
+    const cached = await getCachedSpcMyRecords(email, req.spcCluster);
     if (cached) {
       return res.json(cached);
     }
 
-    const payload = await loadSpcMyRecordsFromDb(email, userId);
-    await setCachedSpcMyRecords(email, payload);
+    const payload = await loadSpcMyRecordsFromDb(email, userId, req.spcCluster);
+    await setCachedSpcMyRecords(email, payload, req.spcCluster);
     return res.json(payload);
   } catch (error) {
     console.error("❌ Error fetching SPC my-submissions:", error.message);
@@ -704,6 +751,9 @@ router.post(
         return res.status(400).json({ message: "USN is required" });
       }
 
+      if (rejectIfSpcClusterMissing(req, res)) return;
+      if (rejectIfBranchOutsideSpcCluster(branchLower, req, res)) return;
+
       const companyRow = await CompanyStatic.findById(companyId).select("name").lean();
       if (!companyRow?.name) {
         return res.status(404).json({ message: "Company not found" });
@@ -722,7 +772,8 @@ router.post(
         placementYear,
         typeOfOffer,
         placementCtxForVisit,
-        branchLower
+        branchLower,
+        req.spcCluster
       );
       // FTE / Internship+FTE rows may be absent while an on-campus PPO visit row holds the same cycle.
       if (!resolvedVisitResult.ok) {
@@ -731,7 +782,8 @@ router.post(
           placementYear,
           "Internship(PPO)",
           placementCtxForVisit,
-          branchLower
+          branchLower,
+          req.spcCluster
         );
         if (ppoAnchor.ok) {
           resolvedVisitResult = ppoAnchor;
@@ -927,6 +979,9 @@ router.post(
     const branchOk = Boolean(branchCodeRaw && isValidPpoBranchCode(branchCodeRaw));
     const wantsVisitBump = Boolean(cid && yearOk && branchOk);
 
+    if (rejectIfSpcClusterMissing(req, res)) return;
+    if (branchOk && rejectIfBranchOutsideSpcCluster(branchCodeRaw, req, res)) return;
+
     if (!cid || !yearOk || !branchOk) {
       return res.status(400).json({
         message:
@@ -997,7 +1052,8 @@ router.post(
         placementYearNum,
         typeOfOffer,
         placementCtxForVisit,
-        branchCodeRaw
+        branchCodeRaw,
+        req.spcCluster
       );
       if (!resolvedSubmit.ok) {
         return res.status(400).json({

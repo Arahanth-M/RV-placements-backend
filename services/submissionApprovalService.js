@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import Submission from "../models/Submission.js";
 import User1 from "../models/User1.js";
-import { withKeyedAsyncMutex } from "../utils/keyedAsyncMutex.js";
+import { buildCompanyVisitWriteLockKey, withKeyedAsyncMutex } from "../utils/keyedAsyncMutex.js";
 import { resolveSubmissionApproveVisit } from "./companyService.js";
 import { applySubmissionToCompanyVisit } from "./applySubmissionToCompanyVisit.js";
 import { invalidateAdminDashboardStatsCache } from "./adminDashboardStatsCache.js";
@@ -26,7 +26,7 @@ async function invalidateSubmitterListCaches(submission) {
 }
 
 function buildApproveLockKey(visitId) {
-  return `submission-approve:visit:${String(visitId)}`;
+  return buildCompanyVisitWriteLockKey(visitId);
 }
 
 export const MAX_SUBMISSION_APPROVE_BATCH_SIZE = 5000;
@@ -263,7 +263,4 @@ export async function approveSubmissionsBatch(submissionIds, reviewer) {
   return {
     successCount,
     failCount,
-    total: results.length,
-    results,
-  };
-}
+    total: results.leng

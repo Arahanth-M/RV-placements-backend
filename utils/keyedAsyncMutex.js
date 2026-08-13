@@ -2,7 +2,17 @@
 const tailByKey = new Map();
 
 /**
- * Serialize async work per key (e.g. one company visit approval at a time).
+ * Shared lock key for all read-modify-write updates to one `company_visits` row
+ * (admin submission approve + SPC placement/conversion stats).
+ * @param {unknown} visitId
+ * @returns {string}
+ */
+export function buildCompanyVisitWriteLockKey(visitId) {
+  return `company-visit-write:${String(visitId || "").trim() || "unknown"}`;
+}
+
+/**
+ * Serialize async work per key (e.g. one company visit write at a time).
  * @template T
  * @param {string} key
  * @param {() => Promise<T>} fn
@@ -13,23 +23,4 @@ export async function withKeyedAsyncMutex(key, fn) {
   const previous = tailByKey.get(safeKey) || Promise.resolve();
 
   let release = () => {};
-  const current = new Promise((resolve) => {
-    release = resolve;
-  });
-
-  const chained = previous
-    .catch(() => {})
-    .then(() => current);
-  tailByKey.set(safeKey, chained);
-
-  await previous.catch(() => {});
-
-  try {
-    return await fn();
-  } finally {
-    release();
-    if (tailByKey.get(safeKey) === chained) {
-      tailByKey.delete(safeKey);
-    }
-  }
-}
+  const current = new Promise((reso

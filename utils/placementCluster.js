@@ -1,5 +1,10 @@
+import { COLLEGE_ID_RVITM, normalizeCollegeId } from "./collegeScope.js";
+
 /** Hub keys used for `?cluster=` filters and per-cluster placement settings. */
 export const PLACEMENT_HUB_CLUSTER_KEYS = Object.freeze(["cs", "ec", "me", "chem"]);
+
+/** RVITM only offers CS / EC programme hubs. */
+export const PLACEMENT_HUB_CLUSTER_KEYS_RVITM = Object.freeze(["cs", "ec"]);
 
 export const PLACEMENT_HUB_CLUSTER_LABELS = Object.freeze({
   cs: "Computer Science & Engineering",
@@ -160,4 +165,25 @@ export function placementHubClusterFromPpoBranchCode(branchCodeRaw) {
   if (["as", "im", "me", "ase", "iem"].includes(bc)) return "me";
   if (["bt", "ch", "cv", "civil"].includes(bc)) return "chem";
   return null;
+}
+
+/**
+ * @param {unknown} collegeIdRaw
+ * @returns {string[]}
+ */
+export function hubClusterKeysForCollege(collegeIdRaw) {
+  const id = normalizeCollegeId(collegeIdRaw);
+  if (id === COLLEGE_ID_RVITM) return [...PLACEMENT_HUB_CLUSTER_KEYS_RVITM];
+  return [...PLACEMENT_HUB_CLUSTER_KEYS];
+}
+
+/**
+ * @param {unknown} clusterRaw
+ * @param {unknown} collegeIdRaw
+ * @returns {boolean}
+ */
+export function isHubClusterAllowedForCollege(clusterRaw, collegeIdRaw) {
+  const key = normalizePlacementClusterQuery(clusterRaw);
+  if (!key) return false;
+  return hubClusterKeysForCollege(collegeIdRaw).includes(key);
 }

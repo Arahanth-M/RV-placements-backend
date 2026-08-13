@@ -3,6 +3,7 @@
  */
 import {
   clusterKeyFromPlacementVisitClusterField,
+  normalizePlacementClusterQuery,
   placementHubClusterFromPpoBranchCode,
 } from "../utils/placementCluster.js";
 import {
@@ -55,4 +56,56 @@ export function spcVisitScopeErrorMessage(yearRaw, branchCodeRaw) {
     return `No approved company visit for placement year ${year} and ${branch} hub (${hub}). Add or approve the visit for that department cluster first.`;
   }
   return `No approved company visit for placement year ${year}.`;
+}
+
+/**
+ * Filter visit candidates to the SPC's assigned hub.
+ * @param {Record<string, unknown>[]} candidates
+ * @param {unknown} spcClusterRaw
+ * @param {{ strict?: boolean }} [opts]
+ * @returns {{ visits: Record<string, unknown>[], hub: string|null, strictMiss: boolean }}
+ */
+export function scopeVisitsBySpcCluster(candidates, spcClusterRaw, opts = {}) {
+  const list = Array.isArray(candidates) ? candidates : [];
+  const hub = normalizePlacementClusterQuery(spcClusterRaw);
+  if (!hub) {
+    if (opts.strict) return { visits: [], hub: null, strictMiss: true };
+    return { visits: list, hub: null, strictMiss: false };
+  }
+  const scoped = list.filter(
+    (v) => clusterKeyFromPlacementVisitClusterField(v?.cluster) === hub
+  );
+  if (scoped.length > 0) {
+    return { visits: scoped, hub, strictMiss: false };
+  }
+  if (opts.strict) {
+    return { visits: [], hub, strictMiss: true };
+  }
+  return { visits: list, hub, strictMiss: false };
+}
+
+/**
+ * @param {unknown} visit
+ * @param {unknown} spcClusterRaw
+ * @returns {boolean}
+ */
+export function visitMatchesSpcCluster(visit, spcClusterRaw) {
+  const hub = normalizePlacementClusterQuery(spcClusterRaw);
+  if (!hub) return false;
+  return clusterKeyFromPlacementVisitClusterField(visit?.cluster) === hub;
+}
+
+/**
+ * @param {unknown} branchCodeRaw
+ * @param {unknown} spcClusterRaw
+ * @returns {boolean}
+ */
+export function branchMatchesSpcCluster(branchCodeRaw, spcClusterRaw) {
+  const hub = placementHubClusterFromPpoBranchCode(branchCodeRaw);
+  const spc = normalizePlacementClusterQuery(spcClusterRaw);
+  return Boolean(hub && spc && hub === spc);
+}
+
+export function spcAssignedClusterWriteErrorMessage() {
+  return "You can only add data for your assigned cluster.";
 }

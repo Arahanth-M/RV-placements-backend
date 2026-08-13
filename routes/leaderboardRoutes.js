@@ -7,7 +7,7 @@ import { redisUrl } from "../src/utils/redisClient.js";
 import { deleteKey, getJSON, setJSON } from "../src/utils/redisHelpers.js";
 
 const leaderboardRouter = express.Router();
-const LEADERBOARD_CACHE_KEY = "rv:leaderboard:top_contributors";
+const LEADERBOARD_CACHE_KEY = "rv:leaderboard:top_contributors:v10";
 const LEADERBOARD_TTL_SECONDS = 3 * 60 * 60; // 3 hours
 const PREVIOUS_DAY_TOP_CACHE_KEY_PREFIX = "rv:leaderboard:previous_day_top";
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
@@ -176,7 +176,7 @@ leaderboardRouter.get("/", authJWT, async (req, res) => {
     const users = await User1.find({})
       .select("googleId username profilePicture points")
       .sort({ points: -1 })
-      .limit(100)
+      .limit(10)
       .lean();
 
     const leaderboard = users.map((u, index) => ({

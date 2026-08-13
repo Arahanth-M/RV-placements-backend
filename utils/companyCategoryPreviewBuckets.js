@@ -544,8 +544,7 @@ function summerTileEligibleCompany(c) {
 }
 
 function dreamTileBaseCompany(c) {
-  if (c.placementHasDreamTierVisit === true) return !isOffCampusCompany(c);
-  if (c.placementHasDreamTierVisit === false) return false;
+  // Match CompanyStats dreamTierListBase: exclude off-campus, PPO, and internship-only.
   return (
     !isOffCampusCompany(c) &&
     !isPpoCompany(c) &&

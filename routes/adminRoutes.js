@@ -13,6 +13,7 @@ import authJWT from "../middleware/authJWT.js";
 import authorize from "../middleware/authorize.js";
 import requireAdmin from "../middleware/requireAdmin.js";
 import requireAdminOrSpc from "../middleware/requireAdminOrSpc.js";
+import attachSpcCluster from "../middleware/attachSpcCluster.js";
 import validateRequest from "../middleware/validateRequest.js";
 import {
   adminOaQuestionUpdateSchema,
@@ -64,7 +65,14 @@ import {
   approveSubmissionsBatch,
   MAX_SUBMISSION_APPROVE_BATCH_SIZE,
 } from "../services/submissionApprovalService.js";
-import { normalizePlacementClusterQuery, clusterKeyFromPlacementVisitClusterField, canonicalVisitClusterLabel, PLACEMENT_HUB_CLUSTER_LABELS } from "../utils/placementCluster.js";
+import { normalizePlacementClusterQuery, clusterKeyFromPlacementVisitClusterField, canonicalVisitClusterLabel, PLACEMENT_HUB_CLUSTER_LABELS, mongoMatchForPlacementHubCluster } from "../utils/placementCluster.js";
+import {
+  isSpcActor,
+  normalizeAssignedSpcCluster,
+  SPC_CLUSTER_MISSING_VISIT_MESSAGE,
+  SPC_CLUSTER_NOT_ASSIGNED_MESSAGE,
+  SPC_CLUSTER_SUBMISSION_FORBIDDEN_MESSAGE,
+} from "../utils/spcCluster.js";
 
 async function invalidateSubmitterListCaches(submission) {
   const email = submitterEmailFromSubmission(submission);
@@ -165,6 +173,7 @@ const jdPdfUpload = multer({
 adminRouter.use(authJWT);
 submissionModRouter.use(authorize(["admin", "spc"]));
 submissionModRouter.use(requireAdminOrSpc);
+submissionModRouter.use(attachSpcCluster);
 adminRouter.use(submissionModRouter);
 adminRouter.use(authorize(["admin"]));
 adminRouter.use(requireAdmin);
@@ -536,17 +545,39 @@ adminRouter.get("/students/placement-stats/export", async (req, res) => {
   }
 });
 
+function serializeSpcUser(user) {
+  const cluster = normalizePlacementClusterQuery(user?.spcCluster);
+  return {
+    _id: user._id,
+    email: user.email,
+    username: user.username,
+    role: user.role,
+    spcCluster: cluster,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+    profilePicture: user.profilePicture,
+  };
+}
+
 // Assign SPC role to an existing user (admin-only via router middleware)
 adminRouter.post("/assign-spc", async (req, res) => {
   try {
+    const collegeId = collegeIdFromUser(req.user);
     const normalizedEmail = String(req.body?.email || "").trim().toLowerCase();
     const normalizedUsn = String(req.body?.usn || "").trim().toUpperCase();
+    const spcCluster = normalizeAssignedSpcCluster(req.body?.cluster ?? req.body?.spcCluster, collegeId);
 
     if (!normalizedEmail) {
       return res.status(400).json({ error: "Email is required" });
     }
     if (!normalizedUsn) {
       return res.status(400).json({ error: "USN is required" });
+    }
+    if (!spcCluster) {
+      return res.status(400).json({ error: "Cluster is required" });
+    }
+    if (!emailBelongsToCollege(normalizedEmail, collegeId)) {
+      return res.status(403).json({ error: "Student is outside your college scope." });
     }
 
     const studentRecord = await Student.findOne({
@@ -568,6 +599,7 @@ adminRouter.post("/assign-spc", async (req, res) => {
         $set: {
           username: usernameFallback,
           role: "spc",
+          spcCluster,
         },
         $setOnInsert: {
           profilePicture: "",
@@ -578,17 +610,15 @@ adminRouter.post("/assign-spc", async (req, res) => {
       {
         new: true,
         upsert: true,
+        runValidators: true,
       }
     );
 
+    await invalidateSpcMyRecordsCacheByEmail(normalizedEmail).catch(() => {});
+
     return res.json({
       message: "SPC role assigned successfully",
-      user: {
-        _id: user._id,
-        email: user.email,
-        username: user.username,
-        role: user.role,
-      },
+      user: serializeSpcUser(user),
       student: {
         email: normalizedEmail,
         usn: normalizedUsn,
@@ -602,20 +632,55 @@ adminRouter.post("/assign-spc", async (req, res) => {
 
 adminRouter.get("/spcs", async (req, res) => {
   try {
-    const spcs = await User1.find({ role: "spc" })
-      .select("_id username email profilePicture role createdAt updatedAt")
+    const collegeId = collegeIdFromUser(req.user);
+    const spcs = await User1.find(withCollegeEmailScope({ role: "spc" }, collegeId, "email"))
+      .select("_id username email profilePicture role spcCluster createdAt updatedAt")
       .sort({ createdAt: -1 })
       .lean();
 
-    return res.json({ items: spcs });
+    return res.json({ items: spcs.map(serializeSpcUser) });
   } catch (error) {
     console.error("❌ Error fetching SPC users:", error.message);
     return res.status(500).json({ error: "Server error" });
   }
 });
 
+adminRouter.patch("/spcs/:id/cluster", async (req, res) => {
+  try {
+    const collegeId = collegeIdFromUser(req.user);
+    const spcCluster = normalizeAssignedSpcCluster(req.body?.cluster ?? req.body?.spcCluster, collegeId);
+    if (!spcCluster) {
+      return res.status(400).json({ error: "Cluster is required" });
+    }
+
+    const user = await User1.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    if (user.role !== "spc") {
+      return res.status(400).json({ error: "User is not currently an SPC" });
+    }
+    if (!emailBelongsToCollege(user.email, collegeId)) {
+      return res.status(403).json({ error: "SPC is outside your college scope." });
+    }
+
+    user.spcCluster = spcCluster;
+    await user.save();
+    await invalidateSpcMyRecordsCacheByEmail(user.email).catch(() => {});
+
+    return res.json({
+      message: "SPC cluster updated successfully",
+      user: serializeSpcUser(user),
+    });
+  } catch (error) {
+    console.error("❌ Error updating SPC cluster:", error.message);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
 adminRouter.patch("/spcs/:id/revoke", async (req, res) => {
   try {
+    const collegeId = collegeIdFromUser(req.user);
     const user = await User1.findById(req.params.id);
     if (!user) {
       return res.status(404).json({ error: "User not found" });
@@ -624,18 +689,20 @@ adminRouter.patch("/spcs/:id/revoke", async (req, res) => {
     if (user.role !== "spc") {
       return res.status(400).json({ error: "User is not currently an SPC" });
     }
+    if (!emailBelongsToCollege(user.email, collegeId)) {
+      return res.status(403).json({ error: "SPC is outside your college scope." });
+    }
 
-    user.role = "student";
-    await user.save();
+    const updated = await User1.findByIdAndUpdate(
+      user._id,
+      { $set: { role: "student" }, $unset: { spcCluster: 1 } },
+      { new: true }
+    );
+    await invalidateSpcMyRecordsCacheByEmail(user.email).catch(() => {});
 
     return res.json({
       message: "SPC access revoked successfully",
-      user: {
-        _id: user._id,
-        email: user.email,
-        username: user.username,
-        role: user.role,
-      },
+      user: serializeSpcUser({ ...(updated?.toObject?.() || updated), spcCluster: null }),
     });
   } catch (error) {
     console.error("❌ Error revoking SPC access:", error.message);
@@ -723,14 +790,73 @@ function rejectIfSubmissionOutsideAdminCollege(submission, req, res) {
   return true;
 }
 
+async function visitIdsForSpcCluster(spcCluster) {
+  const visitMatch = mongoMatchForPlacementHubCluster(spcCluster);
+  if (!visitMatch) return [];
+  const visits = await CompanyVisit.find(visitMatch).select("_id").lean();
+  return visits.map((visit) => visit._id);
+}
+
+function withSpcVisitClusterScope(baseQuery, visitIds) {
+  const visitScope = {
+    companyVisitId: { $in: visitIds, $ne: null },
+  };
+  if (!baseQuery || typeof baseQuery !== "object" || Object.keys(baseQuery).length === 0) {
+    return visitScope;
+  }
+  return { $and: [baseQuery, visitScope] };
+}
+
+/** @returns {Promise<boolean>} true when response already sent (forbidden) */
+async function rejectIfSubmissionOutsideSpcCluster(submission, req, res) {
+  if (!isSpcActor(req.user)) return false;
+  const cluster = req.spcCluster;
+  if (!cluster) {
+    res.status(403).json({ error: SPC_CLUSTER_NOT_ASSIGNED_MESSAGE });
+    return true;
+  }
+  const visitId = submission?.companyVisitId;
+  if (!visitId) {
+    res.status(403).json({ error: SPC_CLUSTER_MISSING_VISIT_MESSAGE });
+    return true;
+  }
+  const visit = await CompanyVisit.findById(visitId).select("cluster").lean();
+  if (!visit) {
+    res.status(403).json({ error: SPC_CLUSTER_MISSING_VISIT_MESSAGE });
+    return true;
+  }
+  const hub = clusterKeyFromPlacementVisitClusterField(visit.cluster);
+  if (hub !== cluster) {
+    res.status(403).json({ error: SPC_CLUSTER_SUBMISSION_FORBIDDEN_MESSAGE });
+    return true;
+  }
+  return false;
+}
+
 // Paginated submissions list (trimmed content for table rows; use GET /submissions/:id for full body)
 submissionModRouter.get("/submissions", async (req, res) => {
   try {
     const collegeId = collegeIdFromUser(req.user);
     const { status } = req.query;
     const baseQuery = status ? { status } : {};
-    const query = withCollegeEmailScope(baseQuery, collegeId, "submittedBy.email");
+    let query = withCollegeEmailScope(baseQuery, collegeId, "submittedBy.email");
     const { page, limit, skip } = parseAdminPagination(req.query);
+
+    if (isSpcActor(req.user)) {
+      if (!req.spcCluster) {
+        return res.json({
+          items: [],
+          total: 0,
+          page,
+          limit,
+          totalPages: 1,
+          collegeId,
+          spcCluster: null,
+        });
+      }
+      const visitIds = await visitIdsForSpcCluster(req.spcCluster);
+      query = withSpcVisitClusterScope(query, visitIds);
+    }
 
     const [total, docs] = await Promise.all([
       Submission.countDocuments(query),
@@ -756,6 +882,7 @@ submissionModRouter.get("/submissions", async (req, res) => {
       limit,
       totalPages,
       collegeId,
+      ...(isSpcActor(req.user) ? { spcCluster: req.spcCluster } : {}),
     });
   } catch (error) {
     console.error("❌ Error fetching submissions:", error.message);
@@ -774,6 +901,7 @@ submissionModRouter.get("/submissions/:id", async (req, res) => {
     if (!emailBelongsToCollege(submission?.submittedBy?.email, collegeId)) {
       return res.status(403).json({ error: "Submission is outside your college scope." });
     }
+    if (await rejectIfSubmissionOutsideSpcCluster(submission, req, res)) return;
     const [enrichedSubmission] = await enrichSubmissionVisitMeta([submission]);
     res.json(enrichedSubmission);
   } catch (error) {
@@ -936,6 +1064,7 @@ submissionModRouter.post("/submissions/:id/enhance", async (req, res) => {
       return res.status(404).json({ error: "Submission not found" });
     }
     if (rejectIfSubmissionOutsideAdminCollege(submission, req, res)) return;
+    if (await rejectIfSubmissionOutsideSpcCluster(submission, req, res)) return;
     if (submission.status !== "pending") {
       return res.status(400).json({ error: "Only pending submissions can be enhanced." });
     }
@@ -969,6 +1098,7 @@ submissionModRouter.post("/submissions/:id/add-answer", async (req, res) => {
       return res.status(404).json({ error: "Submission not found" });
     }
     if (rejectIfSubmissionOutsideAdminCollege(submission, req, res)) return;
+    if (await rejectIfSubmissionOutsideSpcCluster(submission, req, res)) return;
     if (submission.status !== "pending") {
       return res.status(400).json({ error: "Only pending submissions can receive a generated answer." });
     }
@@ -1036,9 +1166,15 @@ submissionModRouter.post("/submissions/approve-batch", async (req, res) => {
         }
       })
       .filter(Boolean);
-    const scoped = await Submission.find(
-      withCollegeEmailScope({ _id: { $in: objectIds } }, collegeId, "submittedBy.email")
-    )
+    let scopedQuery = withCollegeEmailScope({ _id: { $in: objectIds } }, collegeId, "submittedBy.email");
+    if (isSpcActor(req.user)) {
+      if (!req.spcCluster) {
+        return res.status(403).json({ error: SPC_CLUSTER_NOT_ASSIGNED_MESSAGE });
+      }
+      const visitIds = await visitIdsForSpcCluster(req.spcCluster);
+      scopedQuery = withSpcVisitClusterScope(scopedQuery, visitIds);
+    }
+    const scoped = await Submission.find(scopedQuery)
       .select("_id")
       .lean();
     const scopedIds = scoped.map((s) => String(s._id));
@@ -1073,6 +1209,7 @@ submissionModRouter.post("/submissions/:id/approve", async (req, res) => {
       return res.status(404).json({ error: "Submission not found" });
     }
     if (rejectIfSubmissionOutsideAdminCollege(submission, req, res)) return;
+    if (await rejectIfSubmissionOutsideSpcCluster(submission, req, res)) return;
 
     if (submission.status !== "pending") {
       return res.status(400).json({ error: "Only pending submissions can be approved." });
@@ -2228,6 +2365,7 @@ submissionModRouter.delete("/submissions/:id/reject", async (req, res) => {
       return res.status(404).json({ error: "Submission not found" });
     }
     if (rejectIfSubmissionOutsideAdminCollege(submission, req, res)) return;
+    if (await rejectIfSubmissionOutsideSpcCluster(submission, req, res)) return;
 
     // Delete the submission
     await Submission.findByIdAndDelete(req.params.id);

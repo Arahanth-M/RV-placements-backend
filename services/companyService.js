@@ -52,6 +52,7 @@ import {
 } from "./spcCompensationMerge.js";
 import {
   scopeVisitsByBranchCluster,
+  scopeVisitsBySpcCluster,
   spcVisitScopeErrorMessage,
 } from "./spcVisitScope.js";
 import {
@@ -65,6 +66,10 @@ import {
   normalizeCollegeId,
   sumPlacementGotIn,
 } from "../utils/collegeScope.js";
+import {
+  buildCompanyVisitWriteLockKey,
+  withKeyedAsyncMutex,
+} from "../utils/keyedAsyncMutex.js";
 
 export { mergeSpcOfferIntoVisitRoles } from "./spcCompensationMerge.js";
 
@@ -1768,7 +1773,8 @@ export async function resolveApprovedVisitForSpcPlacementOffer(
   yearRaw,
   typeOfOfferRaw,
   placementContextRaw,
-  branchCodeRaw = null
+  branchCodeRaw = null,
+  spcClusterRaw = null
 ) {
   const cid = toObjectId(companyId);
   if (!cid) {
@@ -1786,11 +1792,22 @@ export async function resolveApprovedVisitForSpcPlacementOffer(
 
   const candidatesRaw = await fetchApprovedVisitsForCompanyDetailYear(cid, year);
   const branchStrict = Boolean(String(branchCodeRaw || "").trim());
-  const { visits: candidates, strictMiss } = scopeVisitsByBranchCluster(
+  let { visits: candidates, strictMiss } = scopeVisitsByBranchCluster(
     candidatesRaw,
     branchCodeRaw,
     { strict: branchStrict }
   );
+  if (spcClusterRaw != null && String(spcClusterRaw).trim() !== "") {
+    const spcScoped = scopeVisitsBySpcCluster(candidates, spcClusterRaw, { strict: true });
+    candidates = spcScoped.visits;
+    if (spcScoped.strictMiss) {
+      return {
+        ok: false,
+        reason: "spc_cluster_mismatch",
+        message: "You can only add data for your assigned cluster.",
+      };
+    }
+  }
   if (strictMiss || !candidates.length) {
     return {
       ok: false,
@@ -2534,40 +2551,30 @@ async function listApprovedMinimalRowsForCategoryPreview(
 
 /**
  * Small JSON for 2026 category tiles: counts per bucket + up to 5 logo rows each.
+ * Uses the same merged list as GET /api/companies so hub counts match tier lists.
  * @param {unknown} [placementYear]
  * @param {unknown} [clusterRaw] — optional `cs` / `ec` / `me` (same as GET /api/companies?cluster=)
+ * @param {unknown} [collegeIdRaw] — same college scoping as GET /api/companies
  * @returns {Promise<{ counts: object, logos: object }>}
  */
-export async function getCompanyCategoryPreviewLogos(placementYear = null, clusterRaw = null) {
+export async function getCompanyCategoryPreviewLogos(
+  placementYear = null,
+  clusterRaw = null,
+  collegeIdRaw = null
+) {
   const requestedCluster = normalizePlacementClusterQuery(clusterRaw);
-  const rows = await listApprovedMinimalRowsForCategoryPreview(
+  const companies = await listApprovedCompaniesLegacyMerged(
     placementYear,
+    collegeIdRaw,
     requestedCluster
   );
-  const withCategory = rows.map((c) => {
-    const base = attachPlacementCategoryToCompany(c);
-    return {
-      ...base,
-      category: c.category,
-      totalCtcRupees: c.totalCtcRupees,
-      placementAnyYearPpoOnCampus: c.placementAnyYearPpoOnCampus,
-      placementHasDreamTierVisit: c.placementHasDreamTierVisit,
-      placementDreamDisplayType: c.placementDreamDisplayType,
-      placementDreamDetailYear: c.placementDreamDetailYear,
-      placementSummerDisplayType: c.placementSummerDisplayType,
-      placementSummerDetailYear: c.placementSummerDetailYear,
-    };
-  });
   const previewSortYear =
     placementYear != null && placementYear !== ""
       ? normalizeCompanyDetailYear(placementYear) ?? COMPANY_VISIT_DEFAULT_YEAR
       : COMPANY_VISIT_DEFAULT_YEAR;
-  let ordered = sortCompaniesForCategoryPreview(withCategory, {
+  const ordered = sortCompaniesForCategoryPreview(companies, {
     defaultYear: previewSortYear,
   });
-  if (requestedCluster != null) {
-    ordered = ordered.filter((c) => c.placementListClusterKey === requestedCluster);
-  }
   return buildCategoryPreviewResponse(ordered, 5);
 }
 
@@ -3047,7 +3054,7 @@ export async function adjustVisitTotalGotIn(
  * @param {unknown} limitRaw — capped at 20
  * @returns {Promise<{ id: string, name: string }[]>}
  */
-export async function suggestCompaniesForSpc(query, limitRaw = 15) {
+export async function suggestCompaniesForSpc(query, limitRaw = 15, options = {}) {
   const q = String(query ?? "").trim();
   if (q.length < 2) return [];
   const limit = Math.min(Math.max(Number(limitRaw) || 15, 1), 20);
@@ -3057,7 +3064,22 @@ export async function suggestCompaniesForSpc(query, limitRaw = 15) {
     .sort({ name: 1 })
     .limit(limit)
     .lean();
-  return rows.map((r) => ({ id: String(r._id), name: String(r?.name || "") }));
+  const clusterHub = normalizePlacementClusterQuery(options?.cluster);
+  if (!clusterHub) {
+    return rows.map((r) => ({ id: String(r._id), name: String(r?.name || "") }));
+  }
+  const companyIds = rows.map((r) => r._id);
+  if (companyIds.length === 0) return [];
+  const clusterMatch = mongoMatchForPlacementHubCluster(clusterHub);
+  const visits = await CompanyVisit.find({
+    $and: [{ companyId: { $in: companyIds } }, { status: "approved" }, clusterMatch],
+  })
+    .select("companyId")
+    .lean();
+  const allowed = new Set(visits.map((v) => String(v.companyId)));
+  return rows
+    .filter((r) => allowed.has(String(r._id)))
+    .map((r) => ({ id: String(r._id), name: String(r?.name || "") }));
 }
 
 /** Only the synthetic fallback row is hidden from the SPC role dropdown (TBD/TBA stay selectable). */
@@ -3093,7 +3115,8 @@ export async function getSpcCompanyRoleNamesForForm(
   yearRaw,
   placementContextRaw = null,
   branchCodeRaw = null,
-  collegeIdRaw = null
+  collegeIdRaw = null,
+  spcClusterRaw = null
 ) {
   const cid =
     companyId instanceof mongoose.Types.ObjectId
@@ -3105,11 +3128,16 @@ export async function getSpcCompanyRoleNamesForForm(
 
   const candidatesRaw = await fetchApprovedVisitsForCompanyDetailYear(cid, yearRaw);
   const branchStrict = Boolean(String(branchCodeRaw || "").trim());
-  const { visits: pool, strictMiss } = scopeVisitsByBranchCluster(
+  let { visits: pool, strictMiss } = scopeVisitsByBranchCluster(
     candidatesRaw,
     branchCodeRaw,
     { strict: branchStrict }
   );
+  if (spcClusterRaw != null && String(spcClusterRaw).trim() !== "") {
+    const spcScoped = scopeVisitsBySpcCluster(pool, spcClusterRaw, { strict: true });
+    pool = spcScoped.visits;
+    if (spcScoped.strictMiss) return { roles: [] };
+  }
   if (strictMiss || !pool.length) return { roles: [] };
 
   const ctx = normalizePlacementContextParam(placementContextRaw);
@@ -3259,22 +3287,29 @@ export async function syncAnchoredVisitSpcConversionFields(
           "ppo_branch",
           branchForScope
         );
-  const staticRow = await CompanyStatic.findById(cid).lean();
-  if (!visitHint?._id || !staticRow) return { ok: false, reason: "visit_not_found" };
-  const merged = mergeToLegacyShape(staticRow, visitHint);
+  if (!visitHint?._id) return { ok: false, reason: "visit_not_found" };
 
-  const collegeId =
-    options?.collegeId != null && String(options.collegeId).trim() !== ""
-      ? normalizeCollegeId(options.collegeId)
-      : null;
-  const rolesForPatch = collegeId
-    ? filterRolesForCollege(merged.roles || [], collegeId)
-    : merged.roles || [];
-  const patch = buildSpcConversionVisitPatch(rolesForPatch, fields || {});
-  if (Object.keys(patch).length === 0) return { ok: true };
+  return withKeyedAsyncMutex(buildCompanyVisitWriteLockKey(visitHint._id), async () => {
+    const [freshVisit, staticRow] = await Promise.all([
+      CompanyVisit.findById(visitHint._id).lean(),
+      CompanyStatic.findById(cid).lean(),
+    ]);
+    if (!freshVisit?._id || !staticRow) return { ok: false, reason: "visit_not_found" };
+    const merged = mergeToLegacyShape(staticRow, freshVisit);
 
-  await updateCompanyVisit(cid, patch, year, visitHint, collegeId ? { collegeId } : {});
-  return { ok: true };
+    const collegeId =
+      options?.collegeId != null && String(options.collegeId).trim() !== ""
+        ? normalizeCollegeId(options.collegeId)
+        : null;
+    const rolesForPatch = collegeId
+      ? filterRolesForCollege(merged.roles || [], collegeId)
+      : merged.roles || [];
+    const patch = buildSpcConversionVisitPatch(rolesForPatch, fields || {});
+    if (Object.keys(patch).length === 0) return { ok: true };
+
+    await updateCompanyVisit(cid, patch, year, freshVisit, collegeId ? { collegeId } : {});
+    return { ok: true };
+  });
 }
 
 /**
@@ -3353,74 +3388,82 @@ export async function incrementPpoBranchGotInForAnchoredVisit(
     options?.resolvedVisit && options.resolvedVisit._id
       ? /** @type {Record<string, unknown>} */ (options.resolvedVisit)
       : await findApprovedVisitForSpcWrite(cid, year, listCtx, "ppo_branch", code);
-  const staticRow = await CompanyStatic.findById(cid).lean();
-  if (!visitHint?._id || !staticRow) {
+  if (!visitHint?._id) {
     return { ok: false, reason: "visit_not_found" };
   }
-  const merged = mergeToLegacyShape(staticRow, visitHint);
 
-  const rawRows = Array.isArray(merged.ppoBranchStats) ? merged.ppoBranchStats : [];
-  /** @type {Map<string, { branchCode: string, gotIn: number, converted: number, convertedNotApplicable: boolean }>} */
-  const byCode = new Map();
-  for (const row of rawRows) {
-    const bc = normalizePpoBranchCode(row?.branchCode);
-    if (!isValidPpoBranchCode(bc)) continue;
-    const gotIn = Math.max(0, Number.parseInt(String(row?.gotIn ?? 0), 10)) || 0;
-    const converted = Math.max(0, Number.parseInt(String(row?.converted ?? 0), 10)) || 0;
-    const convertedNotApplicable = Boolean(row?.convertedNotApplicable);
-    byCode.set(bc, { branchCode: bc, gotIn, converted, convertedNotApplicable });
-  }
-
-  const cur = byCode.get(code) || {
-    branchCode: code,
-    gotIn: 0,
-    converted: 0,
-    convertedNotApplicable: false,
-  };
-  if (dOk) {
-    cur.gotIn = Math.max(0, Math.max(0, cur.gotIn) + d);
-  }
-  if (cdOk) {
-    cur.converted = Math.max(0, Math.max(0, cur.converted) + cd);
-    if (cd > 0) {
-      cur.convertedNotApplicable = false;
+  return withKeyedAsyncMutex(buildCompanyVisitWriteLockKey(visitHint._id), async () => {
+    const [freshVisit, staticRow] = await Promise.all([
+      CompanyVisit.findById(visitHint._id).lean(),
+      CompanyStatic.findById(cid).lean(),
+    ]);
+    if (!freshVisit?._id || !staticRow) {
+      return { ok: false, reason: "visit_not_found" };
     }
-  }
-  byCode.set(code, cur);
+    const merged = mergeToLegacyShape(staticRow, freshVisit);
 
-  const normalized = PPO_BRANCH_CODES_ARRAY.filter((bc) => byCode.has(bc)).map((bc) => byCode.get(bc));
-  const aggregates = recomputePpoConversionAggregatesFromNormalized(normalized);
+    const rawRows = Array.isArray(merged.ppoBranchStats) ? merged.ppoBranchStats : [];
+    /** @type {Map<string, { branchCode: string, gotIn: number, converted: number, convertedNotApplicable: boolean }>} */
+    const byCode = new Map();
+    for (const row of rawRows) {
+      const bc = normalizePpoBranchCode(row?.branchCode);
+      if (!isValidPpoBranchCode(bc)) continue;
+      const gotIn = Math.max(0, Number.parseInt(String(row?.gotIn ?? 0), 10)) || 0;
+      const converted = Math.max(0, Number.parseInt(String(row?.converted ?? 0), 10)) || 0;
+      const convertedNotApplicable = Boolean(row?.convertedNotApplicable);
+      byCode.set(bc, { branchCode: bc, gotIn, converted, convertedNotApplicable });
+    }
 
-  /** @type {Record<string, unknown>} */
-  /** @type {Record<string, unknown>} */
-  const payload = {};
-  if (dOk || cdOk) {
-    payload.ppoBranchStats = normalized;
-    Object.assign(payload, aggregates);
-  }
-  if (hasSpcPatch) {
-    const collegeId =
-      options?.collegeId != null && String(options.collegeId).trim() !== ""
-        ? normalizeCollegeId(options.collegeId)
-        : null;
-    const rolesForPatch = collegeId
-      ? filterRolesForCollege(merged.roles || [], collegeId)
-      : merged.roles || [];
-    const visitPatch = buildSpcConversionVisitPatch(rolesForPatch, spc);
-    if (visitPatch.ppoConversionType) payload.ppoConversionType = visitPatch.ppoConversionType;
-    if (visitPatch.roles) payload.roles = visitPatch.roles;
-    await updateCompanyVisit(
-      cid,
-      payload,
-      year,
-      visitHint,
-      collegeId ? { collegeId } : {}
-    );
-  } else {
-    await updateCompanyVisit(cid, payload, year, visitHint);
-  }
+    const cur = byCode.get(code) || {
+      branchCode: code,
+      gotIn: 0,
+      converted: 0,
+      convertedNotApplicable: false,
+    };
+    if (dOk) {
+      cur.gotIn = Math.max(0, Math.max(0, cur.gotIn) + d);
+    }
+    if (cdOk) {
+      cur.converted = Math.max(0, Math.max(0, cur.converted) + cd);
+      if (cd > 0) {
+        cur.convertedNotApplicable = false;
+      }
+    }
+    byCode.set(code, cur);
 
-  return { ok: true };
+    const normalized = PPO_BRANCH_CODES_ARRAY.filter((bc) => byCode.has(bc)).map((bc) => byCode.get(bc));
+    const aggregates = recomputePpoConversionAggregatesFromNormalized(normalized);
+
+    /** @type {Record<string, unknown>} */
+    const payload = {};
+    if (dOk || cdOk) {
+      payload.ppoBranchStats = normalized;
+      Object.assign(payload, aggregates);
+    }
+    if (hasSpcPatch) {
+      const collegeId =
+        options?.collegeId != null && String(options.collegeId).trim() !== ""
+          ? normalizeCollegeId(options.collegeId)
+          : null;
+      const rolesForPatch = collegeId
+        ? filterRolesForCollege(merged.roles || [], collegeId)
+        : merged.roles || [];
+      const visitPatch = buildSpcConversionVisitPatch(rolesForPatch, spc);
+      if (visitPatch.ppoConversionType) payload.ppoConversionType = visitPatch.ppoConversionType;
+      if (visitPatch.roles) payload.roles = visitPatch.roles;
+      await updateCompanyVisit(
+        cid,
+        payload,
+        year,
+        freshVisit,
+        collegeId ? { collegeId } : {}
+      );
+    } else {
+      await updateCompanyVisit(cid, payload, year, freshVisit);
+    }
+
+    return { ok: true };
+  });
 }
 
 /**
@@ -3473,101 +3516,110 @@ export async function incrementPlacementAndPpoConvertedForSpcConversionDetails(
           "placement_got_in",
           code
         );
-  const staticRow = await CompanyStatic.findById(cid).lean();
-  if (!visitHint?._id || !staticRow) {
+  if (!visitHint?._id) {
     return { ok: false, reason: "visit_not_found" };
   }
-  const merged = mergeToLegacyShape(staticRow, visitHint);
 
-  const collegeId =
-    options?.collegeId != null && String(options.collegeId).trim() !== ""
-      ? normalizeCollegeId(options.collegeId)
-      : null;
+  return withKeyedAsyncMutex(buildCompanyVisitWriteLockKey(visitHint._id), async () => {
+    const [freshVisit, staticRow] = await Promise.all([
+      CompanyVisit.findById(visitHint._id).lean(),
+      CompanyStatic.findById(cid).lean(),
+    ]);
+    if (!freshVisit?._id || !staticRow) {
+      return { ok: false, reason: "visit_not_found" };
+    }
+    const merged = mergeToLegacyShape(staticRow, freshVisit);
 
-  const rawPlacement = Array.isArray(merged.placementGotInBranchStats)
-    ? merged.placementGotInBranchStats
-    : [];
-  const otherCollegePlacement = collegeId
-    ? rawPlacement.filter((row) => collegeIdOfScopedRow(row) !== collegeId)
-    : [];
-  const scopedPlacement = collegeId
-    ? filterPlacementGotInForCollege(rawPlacement, collegeId)
-    : rawPlacement;
+    const collegeId =
+      options?.collegeId != null && String(options.collegeId).trim() !== ""
+        ? normalizeCollegeId(options.collegeId)
+        : null;
 
-  /** @type {Map<string, { branchCode: string, gotIn: number, collegeId?: string }>} */
-  const placeByCode = new Map();
-  for (const row of scopedPlacement) {
-    const bc = normalizePpoBranchCode(row?.branchCode);
-    if (!isValidPpoBranchCode(bc)) continue;
-    const gotIn = Math.max(0, Number.parseInt(String(row?.gotIn ?? 0), 10)) || 0;
-    /** @type {{ branchCode: string, gotIn: number, collegeId?: string }} */
-    const entry = { branchCode: bc, gotIn };
-    if (collegeId) entry.collegeId = collegeId;
-    placeByCode.set(bc, entry);
-  }
-  const curPl = placeByCode.get(code) || {
-    branchCode: code,
-    gotIn: 0,
-    ...(collegeId ? { collegeId } : {}),
-  };
-  curPl.gotIn = Math.max(0, curPl.gotIn) + dPl;
-  if (collegeId) curPl.collegeId = collegeId;
-  placeByCode.set(code, curPl);
-  const normalizedPlacementScoped = PPO_BRANCH_CODES_ARRAY.map((bc) =>
-    placeByCode.has(bc)
-      ? placeByCode.get(bc)
-      : {
-          branchCode: bc,
-          gotIn: 0,
-          ...(collegeId ? { collegeId } : {}),
-        }
-  );
-  const nextTotal = Math.max(0, sumPlacementGotIn(rawPlacement) + dPl);
+    const rawPlacement = Array.isArray(merged.placementGotInBranchStats)
+      ? merged.placementGotInBranchStats
+      : [];
+    const otherCollegePlacement = collegeId
+      ? rawPlacement.filter((row) => collegeIdOfScopedRow(row) !== collegeId)
+      : [];
+    const scopedPlacement = collegeId
+      ? filterPlacementGotInForCollege(rawPlacement, collegeId)
+      : rawPlacement;
 
-  const rawPpo = Array.isArray(merged.ppoBranchStats) ? merged.ppoBranchStats : [];
-  /** @type {Map<string, { branchCode: string, gotIn: number, converted: number, convertedNotApplicable: boolean }>} */
-  const ppoByCode = new Map();
-  for (const row of rawPpo) {
-    const bc = normalizePpoBranchCode(row?.branchCode);
-    if (!isValidPpoBranchCode(bc)) continue;
-    const gotIn = Math.max(0, Number.parseInt(String(row?.gotIn ?? 0), 10)) || 0;
-    const converted = Math.max(0, Number.parseInt(String(row?.converted ?? 0), 10)) || 0;
-    const convertedNotApplicable = Boolean(row?.convertedNotApplicable);
-    ppoByCode.set(bc, { branchCode: bc, gotIn, converted, convertedNotApplicable });
-  }
-  const curPpo = ppoByCode.get(code) || {
-    branchCode: code,
-    gotIn: 0,
-    converted: 0,
-    convertedNotApplicable: false,
-  };
-  curPpo.converted = Math.max(0, curPpo.converted) + dConv;
-  curPpo.convertedNotApplicable = false;
-  ppoByCode.set(code, curPpo);
-  const normalizedPpo = PPO_BRANCH_CODES_ARRAY.filter((bc) => ppoByCode.has(bc)).map((bc) =>
-    ppoByCode.get(bc)
-  );
-  const aggregates = recomputePpoConversionAggregatesFromNormalized(normalizedPpo);
+    /** @type {Map<string, { branchCode: string, gotIn: number, collegeId?: string }>} */
+    const placeByCode = new Map();
+    for (const row of scopedPlacement) {
+      const bc = normalizePpoBranchCode(row?.branchCode);
+      if (!isValidPpoBranchCode(bc)) continue;
+      const gotIn = Math.max(0, Number.parseInt(String(row?.gotIn ?? 0), 10)) || 0;
+      /** @type {{ branchCode: string, gotIn: number, collegeId?: string }} */
+      const entry = { branchCode: bc, gotIn };
+      if (collegeId) entry.collegeId = collegeId;
+      placeByCode.set(bc, entry);
+    }
+    const curPl = placeByCode.get(code) || {
+      branchCode: code,
+      gotIn: 0,
+      ...(collegeId ? { collegeId } : {}),
+    };
+    curPl.gotIn = Math.max(0, curPl.gotIn) + dPl;
+    if (collegeId) curPl.collegeId = collegeId;
+    placeByCode.set(code, curPl);
+    const normalizedPlacementScoped = PPO_BRANCH_CODES_ARRAY.map((bc) =>
+      placeByCode.has(bc)
+        ? placeByCode.get(bc)
+        : {
+            branchCode: bc,
+            gotIn: 0,
+            ...(collegeId ? { collegeId } : {}),
+          }
+    );
+    const nextTotal = Math.max(0, sumPlacementGotIn(rawPlacement) + dPl);
 
-  const rolesForPatch = collegeId
-    ? filterRolesForCollege(merged.roles || [], collegeId)
-    : merged.roles || [];
-  const visitPatch = buildSpcConversionVisitPatch(rolesForPatch, visitSyncFields || {});
+    const rawPpo = Array.isArray(merged.ppoBranchStats) ? merged.ppoBranchStats : [];
+    /** @type {Map<string, { branchCode: string, gotIn: number, converted: number, convertedNotApplicable: boolean }>} */
+    const ppoByCode = new Map();
+    for (const row of rawPpo) {
+      const bc = normalizePpoBranchCode(row?.branchCode);
+      if (!isValidPpoBranchCode(bc)) continue;
+      const gotIn = Math.max(0, Number.parseInt(String(row?.gotIn ?? 0), 10)) || 0;
+      const converted = Math.max(0, Number.parseInt(String(row?.converted ?? 0), 10)) || 0;
+      const convertedNotApplicable = Boolean(row?.convertedNotApplicable);
+      ppoByCode.set(bc, { branchCode: bc, gotIn, converted, convertedNotApplicable });
+    }
+    const curPpo = ppoByCode.get(code) || {
+      branchCode: code,
+      gotIn: 0,
+      converted: 0,
+      convertedNotApplicable: false,
+    };
+    curPpo.converted = Math.max(0, curPpo.converted) + dConv;
+    curPpo.convertedNotApplicable = false;
+    ppoByCode.set(code, curPpo);
+    const normalizedPpo = PPO_BRANCH_CODES_ARRAY.filter((bc) => ppoByCode.has(bc)).map((bc) =>
+      ppoByCode.get(bc)
+    );
+    const aggregates = recomputePpoConversionAggregatesFromNormalized(normalizedPpo);
 
-  /** @type {Record<string, unknown>} */
-  const payload = {
-    placementGotInBranchStats: collegeId
-      ? normalizedPlacementScoped
-      : [...otherCollegePlacement, ...normalizedPlacementScoped],
-    totalGotIn: nextTotal,
-    ppoBranchStats: normalizedPpo,
-    ...aggregates,
-  };
-  if (visitPatch.ppoConversionType) payload.ppoConversionType = visitPatch.ppoConversionType;
-  if (visitPatch.roles) payload.roles = visitPatch.roles;
+    const rolesForPatch = collegeId
+      ? filterRolesForCollege(merged.roles || [], collegeId)
+      : merged.roles || [];
+    const visitPatch = buildSpcConversionVisitPatch(rolesForPatch, visitSyncFields || {});
 
-  await updateCompanyVisit(cid, payload, year, visitHint, collegeId ? { collegeId } : {});
-  return { ok: true };
+    /** @type {Record<string, unknown>} */
+    const payload = {
+      placementGotInBranchStats: collegeId
+        ? normalizedPlacementScoped
+        : [...otherCollegePlacement, ...normalizedPlacementScoped],
+      totalGotIn: nextTotal,
+      ppoBranchStats: normalizedPpo,
+      ...aggregates,
+    };
+    if (visitPatch.ppoConversionType) payload.ppoConversionType = visitPatch.ppoConversionType;
+    if (visitPatch.roles) payload.roles = visitPatch.roles;
+
+    await updateCompanyVisit(cid, payload, year, freshVisit, collegeId ? { collegeId } : {});
+    return { ok: true };
+  });
 }
 
 /**
@@ -3610,69 +3662,78 @@ export async function incrementPlacementGotInBranchForAnchoredVisit(
           "placement_got_in",
           code
         );
-  const staticRow = await CompanyStatic.findById(cid).lean();
-  if (!visitHint?._id || !staticRow) {
+  if (!visitHint?._id) {
     return { ok: false, reason: "visit_not_found" };
   }
-  const merged = mergeToLegacyShape(staticRow, visitHint);
 
-  const collegeId =
-    options?.collegeId != null && String(options.collegeId).trim() !== ""
-      ? normalizeCollegeId(options.collegeId)
-      : null;
+  return withKeyedAsyncMutex(buildCompanyVisitWriteLockKey(visitHint._id), async () => {
+    const [freshVisit, staticRow] = await Promise.all([
+      CompanyVisit.findById(visitHint._id).lean(),
+      CompanyStatic.findById(cid).lean(),
+    ]);
+    if (!freshVisit?._id || !staticRow) {
+      return { ok: false, reason: "visit_not_found" };
+    }
+    const merged = mergeToLegacyShape(staticRow, freshVisit);
 
-  const rawRows = Array.isArray(merged.placementGotInBranchStats)
-    ? merged.placementGotInBranchStats
-    : [];
-  const scopedRows = collegeId
-    ? filterPlacementGotInForCollege(rawRows, collegeId)
-    : rawRows;
+    const collegeId =
+      options?.collegeId != null && String(options.collegeId).trim() !== ""
+        ? normalizeCollegeId(options.collegeId)
+        : null;
 
-  /** @type {Map<string, { branchCode: string, gotIn: number, collegeId?: string }>} */
-  const byCode = new Map();
-  for (const row of scopedRows) {
-    const bc = normalizePpoBranchCode(row?.branchCode);
-    if (!isValidPpoBranchCode(bc)) continue;
-    const gotIn = Math.max(0, Number.parseInt(String(row?.gotIn ?? 0), 10)) || 0;
-    /** @type {{ branchCode: string, gotIn: number, collegeId?: string }} */
-    const entry = { branchCode: bc, gotIn };
-    if (collegeId) entry.collegeId = collegeId;
-    byCode.set(bc, entry);
-  }
+    const rawRows = Array.isArray(merged.placementGotInBranchStats)
+      ? merged.placementGotInBranchStats
+      : [];
+    const scopedRows = collegeId
+      ? filterPlacementGotInForCollege(rawRows, collegeId)
+      : rawRows;
 
-  const cur = byCode.get(code) || {
-    branchCode: code,
-    gotIn: 0,
-    ...(collegeId ? { collegeId } : {}),
-  };
-  cur.gotIn = Math.max(0, Math.max(0, cur.gotIn) + d);
-  if (collegeId) cur.collegeId = collegeId;
-  byCode.set(code, cur);
+    /** @type {Map<string, { branchCode: string, gotIn: number, collegeId?: string }>} */
+    const byCode = new Map();
+    for (const row of scopedRows) {
+      const bc = normalizePpoBranchCode(row?.branchCode);
+      if (!isValidPpoBranchCode(bc)) continue;
+      const gotIn = Math.max(0, Number.parseInt(String(row?.gotIn ?? 0), 10)) || 0;
+      /** @type {{ branchCode: string, gotIn: number, collegeId?: string }} */
+      const entry = { branchCode: bc, gotIn };
+      if (collegeId) entry.collegeId = collegeId;
+      byCode.set(bc, entry);
+    }
 
-  const normalized = PPO_BRANCH_CODES_ARRAY.map((bc) =>
-    byCode.has(bc)
-      ? byCode.get(bc)
-      : {
-          branchCode: bc,
-          gotIn: 0,
-          ...(collegeId ? { collegeId } : {}),
-        }
-  );
+    const cur = byCode.get(code) || {
+      branchCode: code,
+      gotIn: 0,
+      ...(collegeId ? { collegeId } : {}),
+    };
+    cur.gotIn = Math.max(0, Math.max(0, cur.gotIn) + d);
+    if (collegeId) cur.collegeId = collegeId;
+    byCode.set(code, cur);
 
-  const nextTotal = Math.max(0, sumPlacementGotIn(rawRows) + d);
+    const normalized = PPO_BRANCH_CODES_ARRAY.map((bc) =>
+      byCode.has(bc)
+        ? byCode.get(bc)
+        : {
+            branchCode: bc,
+            gotIn: 0,
+            ...(collegeId ? { collegeId } : {}),
+          }
+    );
 
-  await updateCompanyVisit(
-    cid,
-    {
-      placementGotInBranchStats: normalized,
-      totalGotIn: nextTotal,
-    },
-    year,
-    visitHint,
-    collegeId ? { collegeId } : {}
-  );
+    const nextTotal = Math.max(0, sumPlacementGotIn(rawRows) + d);
 
-  return { ok: true };
+    await updateCompanyVisit(
+      cid,
+      {
+        placementGotInBranchStats: normalized,
+        totalGotIn: nextTotal,
+      },
+      year,
+      freshVisit,
+      collegeId ? { collegeId } : {}
+    );
+
+    return { ok: true };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -4093,45 +4154,4 @@ export async function persistMergedCompany(
  * Idempotent: one vote per `userEmail`. Increments `helpfulCount` only if email not in `helpfulUsers`.
  * @param {string|import("mongoose").Types.ObjectId} companyId
  * @param {string} userEmail
- * @returns {Promise<{ updateResult: import("mongodb").UpdateResult, alreadyVoted: boolean }>}
- */
-export async function addHelpfulVote(companyId, userEmail) {
-  const cid = toObjectId(companyId);
-  if (!cid || !userEmail || typeof userEmail !== "string") {
-    return {
-      updateResult: {
-        acknowledged: true,
-        modifiedCount: 0,
-        upsertedCount: 0,
-        matchedCount: 0,
-      },
-      alreadyVoted: false,
-    };
-  }
-
-  const res = await CompanyStatic.updateOne(
-    {
-      _id: cid,
-      $expr: {
-        $not: {
-          $in: [userEmail, { $ifNull: ["$helpfulUsers", []] }],
-        },
-      },
-    },
-    {
-      $inc: { helpfulCount: 1 },
-      $push: { helpfulUsers: userEmail },
-    }
-  );
-
-  if (res.modifiedCount > 0) {
-    await invalidateCompanyDetailCache(cid);
-    return { updateResult: res, alreadyVoted: false };
-  }
-  const doc = await CompanyStatic.findOne({ _id: cid }).lean();
-  if (!doc) {
-    return { updateResult: res, alreadyVoted: false };
-  }
-  const arr = Array.isArray(doc.helpfulUsers) ? doc.helpfulUsers : [];
-  return { updateResult: res, alreadyVoted: arr.includes(userEmail) };
-}
+ * @returns {Promise<{ updateResult: import("mongodb")

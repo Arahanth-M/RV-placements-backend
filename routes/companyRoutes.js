@@ -175,11 +175,18 @@ companyRouter.get("/placement-hub-settings", async (_req, res) => {
 });
 
 /** Lightweight category-tile data (counts + 5 logo rows per bucket) — must stay above `GET /:id` */
-companyRouter.get("/preview-logos", async (req, res) => {
+companyRouter.get("/preview-logos", optionalAuthJWT, async (req, res) => {
   try {
     const selectedYear = req.query?.year;
     const cluster = normalizePlacementClusterQuery(req.query?.cluster);
-    const payload = await getCompanyCategoryPreviewLogos(selectedYear, cluster);
+    const collegeId = req.user
+      ? collegeIdFromUser(req.user)
+      : DEFAULT_COLLEGE_ID;
+    const payload = await getCompanyCategoryPreviewLogos(
+      selectedYear,
+      cluster,
+      collegeId
+    );
     return res.json(payload);
   } catch (e) {
     console.error("❌ Error fetching preview logos:", e?.message);

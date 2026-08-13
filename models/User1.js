@@ -34,6 +34,14 @@ const user1Schema = new mongoose.Schema(
       enum: ["student", "spc"],
       default: "student",
     },
+    /**
+     * Placement hub this SPC may review/write (`cs` | `ec` | `me` | `chem`).
+     * Unset on students and on SPCs not yet re-assigned in the cluster flow.
+     */
+    spcCluster: {
+      type: String,
+      enum: ["cs", "ec", "me", "chem"],
+    },
     hasSubmittedMissingCompanyRequest: {
       type: Boolean,
       default: false,

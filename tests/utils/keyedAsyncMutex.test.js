@@ -1,4 +1,7 @@
-import { withKeyedAsyncMutex } from "../../utils/keyedAsyncMutex.js";
+import {
+  buildCompanyVisitWriteLockKey,
+  withKeyedAsyncMutex,
+} from "../../utils/keyedAsyncMutex.js";
 
 describe("withKeyedAsyncMutex", () => {
   it("runs different keys in parallel", async () => {
@@ -33,6 +36,4 @@ describe("withKeyedAsyncMutex", () => {
         return 2;
       }),
     ]);
-    expect(order).toEqual(["first-start", "first-end", "second-start", "second-end"]);
-  });
-});
+    expect(order).toEqual(["first-start", "first-end", "secon

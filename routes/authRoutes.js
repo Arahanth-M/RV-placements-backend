@@ -4,6 +4,8 @@ import passport from "passport";
 import { config, urls, messages, isAdminEmail } from "../config/constants.js";
 import authJWT from "../middleware/authJWT.js";
 import { buildJwtPayloadFromUser } from "../utils/jwtUserClaims.js";
+import User1 from "../models/User1.js";
+import { normalizePlacementClusterQuery } from "../utils/placementCluster.js";
 
 const router = express.Router();
 
@@ -184,10 +186,23 @@ router.get("/current_user", authJWT, async (req, res) => {
     createdAt &&
     Date.now() - createdAt.getTime() < 60 * 60 * 1000;
 
+  let spcCluster = null;
+  if (String(claims.role || "").toLowerCase() === "spc" && claims.isAdminSession !== true) {
+    try {
+      const doc = await User1.findById(claims._id).select("spcCluster role").lean();
+      if (doc && String(doc.role || "").toLowerCase() === "spc") {
+        spcCluster = normalizePlacementClusterQuery(doc.spcCluster);
+      }
+    } catch (error) {
+      console.error("current_user spcCluster:", error?.message || error);
+    }
+  }
+
   res.json({
     ...claims,
     createdAt: createdAt || claims.createdAt,
     isNewUser: isNewUser || false,
+    spcCluster,
   });
 });
 
