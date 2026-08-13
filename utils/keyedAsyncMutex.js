@@ -23,4 +23,23 @@ export async function withKeyedAsyncMutex(key, fn) {
   const previous = tailByKey.get(safeKey) || Promise.resolve();
 
   let release = () => {};
-  const current = new Promise((reso
+  const current = new Promise((resolve) => {
+    release = resolve;
+  });
+
+  const chained = previous
+    .catch(() => {})
+    .then(() => current);
+  tailByKey.set(safeKey, chained);
+
+  await previous.catch(() => {});
+
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (tailByKey.get(safeKey) === chained) {
+      tailByKey.delete(safeKey);
+    }
+  }
+}

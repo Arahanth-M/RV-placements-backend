@@ -628,11 +628,4 @@ companyRouter.post("/", validateRequest(submissionInputSchema), async (req, res)
     const newSubmission = new Submission({ companyId, type, content });
     await newSubmission.save();
 
-    res.status(201).json({ message: "Submission received and pending approval." });
-  } catch (error) {
-    res.status(500).json({ error: "Error saving submission" });
-  }
-});
-
-
-export default companyRouter;
+    res.status(201).json({ message: "Submission received and 

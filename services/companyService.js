@@ -4154,4 +4154,45 @@ export async function persistMergedCompany(
  * Idempotent: one vote per `userEmail`. Increments `helpfulCount` only if email not in `helpfulUsers`.
  * @param {string|import("mongoose").Types.ObjectId} companyId
  * @param {string} userEmail
- * @returns {Promise<{ updateResult: import("mongodb")
+ * @returns {Promise<{ updateResult: import("mongodb").UpdateResult, alreadyVoted: boolean }>}
+ */
+export async function addHelpfulVote(companyId, userEmail) {
+  const cid = toObjectId(companyId);
+  if (!cid || !userEmail || typeof userEmail !== "string") {
+    return {
+      updateResult: {
+        acknowledged: true,
+        modifiedCount: 0,
+        upsertedCount: 0,
+        matchedCount: 0,
+      },
+      alreadyVoted: false,
+    };
+  }
+
+  const res = await CompanyStatic.updateOne(
+    {
+      _id: cid,
+      $expr: {
+        $not: {
+          $in: [userEmail, { $ifNull: ["$helpfulUsers", []] }],
+        },
+      },
+    },
+    {
+      $inc: { helpfulCount: 1 },
+      $push: { helpfulUsers: userEmail },
+    }
+  );
+
+  if (res.modifiedCount > 0) {
+    await invalidateCompanyDetailCache(cid);
+    return { updateResult: res, alreadyVoted: false };
+  }
+  const doc = await CompanyStatic.findOne({ _id: cid }).lean();
+  if (!doc) {
+    return { updateResult: res, alreadyVoted: false };
+  }
+  const arr = Array.isArray(doc.helpfulUsers) ? doc.helpfulUsers : [];
+  return { updateResult: res, alreadyVoted: arr.includes(userEmail) };
+}

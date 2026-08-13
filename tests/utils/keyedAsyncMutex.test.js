@@ -36,4 +36,13 @@ describe("withKeyedAsyncMutex", () => {
         return 2;
       }),
     ]);
-    expect(order).toEqual(["first-start", "first-end", "secon
+    expect(order).toEqual(["first-start", "first-end", "second-start", "second-end"]);
+  });
+
+  it("buildCompanyVisitWriteLockKey is stable per visit id", () => {
+    expect(buildCompanyVisitWriteLockKey("abc123")).toBe("company-visit-write:abc123");
+    expect(buildCompanyVisitWriteLockKey("abc123")).toBe(
+      buildCompanyVisitWriteLockKey("abc123")
+    );
+  });
+});

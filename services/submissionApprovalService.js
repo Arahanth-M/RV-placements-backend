@@ -263,4 +263,7 @@ export async function approveSubmissionsBatch(submissionIds, reviewer) {
   return {
     successCount,
     failCount,
-    total: results.leng
+    total: results.length,
+    results,
+  };
+}
