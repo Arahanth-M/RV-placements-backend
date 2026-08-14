@@ -1215,15 +1215,4 @@ router.get("/student/status", authJWT, async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    return res.json({
-      isPlaced: records.length > 0,
-      data: records,
-    });
-  } catch (error) {
-    console.error("❌ Error fetching student placement status:", error.message);
-    return res.status(500).json({ message: "Server error" });
-  }
-});
-
-export default router;
-
+    return res.json(

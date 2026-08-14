@@ -31,17 +31,4 @@ placementGeneralStatsRouter.get("/:year", optionalAuthJWT, async (req, res) => {
     const stats = await getGeneralStatsByYear(year, collegeId);
     if (!stats) {
       return res.status(404).json({
-        error: "Stats not available",
-        message: `Placement statistics for ${year} are not available yet.`,
-        year,
-      });
-    }
-
-    return res.json(stats);
-  } catch (error) {
-    console.error("❌ Error fetching general stats:", error?.message || error);
-    return res.status(500).json({ error: "Server error" });
-  }
-});
-
-export default placementGeneralStatsRouter;
+        error: "Stats 

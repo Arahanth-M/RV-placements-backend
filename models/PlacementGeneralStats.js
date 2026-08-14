@@ -31,7 +31,4 @@ const placementGeneralStatsSchema = new mongoose.Schema(
   { timestamps: true, collection: "placement_general_stats" }
 );
 
-placementGeneralStatsSchema.index({ year: 1, collegeId: 1 }, { unique: true });
-
-export default mongoose.models.PlacementGeneralStats ||
-  mongoose.model("PlacementGeneralStats", placementGeneralStatsSchema);
+placementGeneralStats
