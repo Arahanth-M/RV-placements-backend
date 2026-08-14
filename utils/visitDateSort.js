@@ -293,4 +293,35 @@ export function companyHasPositiveGotIn(company) {
   };
 
   if (sumGotIn(company.placementGotInBranchStats) > 0) return true;
-  if (sumGotIn(co
+  if (sumGotIn(company.ppoBranchStats) > 0) return true;
+  return false;
+}
+
+export function compareCompaniesByVisitDate(a, b, options = {}) {
+  if (options.prioritizeNonZeroGotIn === true) {
+    const aHas = companyHasPositiveGotIn(a) ? 1 : 0;
+    const bHas = companyHasPositiveGotIn(b) ? 1 : 0;
+    if (aHas !== bHas) return bHas - aHas;
+  }
+
+  const aVisitTs = companyVisitSortTimestamp(a, options);
+  const bVisitTs = companyVisitSortTimestamp(b, options);
+
+  if (aVisitTs !== null && bVisitTs !== null && aVisitTs !== bVisitTs) {
+    return aVisitTs - bVisitTs;
+  }
+  if (aVisitTs !== null && bVisitTs === null) return -1;
+  if (aVisitTs === null && bVisitTs !== null) return 1;
+
+  const byName = (a?.name || "").localeCompare(b?.name || "");
+  if (byName !== 0) return byName;
+  const byCompanyId = String(a?._id || "").localeCompare(String(b?._id || ""));
+  if (byCompanyId !== 0) return byCompanyId;
+  return String(a?.placementCompanyVisitId || "").localeCompare(
+    String(b?.placementCompanyVisitId || "")
+  );
+}
+
+export function sortCompaniesByVisitDate(companies, options = {}) {
+  return [...companies].sort((a, b) => compareCompaniesByVisitDate(a, b, options));
+}

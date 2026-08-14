@@ -612,4 +612,16 @@ export function buildCategoryPreviewResponse(orderedCompanies, logoLimit = 5) {
     counts: {
       dream: allDream.length,
       openDream: allOpenDream.length,
-      internshipOnly: allInternship
+      internshipOnly: allInternshipOnly.length,
+      summerInternship: allSummer.length,
+      offCampus: allOff.length,
+    },
+    logos: {
+      dream: allDream.slice(0, logoLimit).map(toLogoItem),
+      openDream: allOpenDream.slice(0, logoLimit).map(toLogoItem),
+      internshipOnly: allInternshipOnly.slice(0, logoLimit).map(toLogoItem),
+      summerInternship: allSummer.slice(0, logoLimit).map(toLogoItem),
+      offCampus: allOff.slice(0, logoLimit).map(toLogoItem),
+    },
+  };
+}

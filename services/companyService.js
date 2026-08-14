@@ -4177,4 +4177,87 @@ export async function updateCompanyStatic(companyId, data) {
   if (!cid) {
     return { acknowledged: true, modifiedCount: 0, upsertedCount: 0, matchedCount: 0 };
   }
-  const $set = pickStat
+  const $set = pickStaticUpdatePayload(data, { recomputeNameKey: true });
+  if (Object.keys($set).length === 0) {
+    return { acknowledged: true, modifiedCount: 0, upsertedCount: 0, matchedCount: 0 };
+  }
+  $set.updatedAt = new Date();
+  const result = await CompanyStatic.updateOne({ _id: cid }, { $set });
+  if (result.modifiedCount > 0) {
+    await invalidateCompanyDetailCache(cid);
+  }
+  return result;
+}
+
+/**
+ * Apply both static and visit updates from a single merged payload (each layer picks its fields only).
+ * @param {string|import("mongoose").Types.ObjectId} companyId
+ * @param {Record<string, unknown>} mergedPayload
+ * @param {number} [placementYear] visit row to update (defaults to {@link COMPANY_VISIT_YEAR})
+ */
+export async function persistMergedCompany(
+  companyId,
+  mergedPayload,
+  placementYear = COMPANY_VISIT_YEAR,
+  placementListContext = null,
+  companyVisitIdHint = null,
+  placementClusterRaw = null
+) {
+  await updateCompanyStatic(companyId, mergedPayload);
+  await ensureAdminVisitForYear(companyId, placementYear);
+  const { visit } = await getCompanyMergedForAdminById(
+    companyId,
+    placementYear,
+    placementListContext,
+    companyVisitIdHint,
+    placementClusterRaw
+  );
+  await updateCompanyVisit(companyId, mergedPayload, placementYear, visit);
+}
+
+/**
+ * Idempotent: one vote per `userEmail`. Increments `helpfulCount` only if email not in `helpfulUsers`.
+ * @param {string|import("mongoose").Types.ObjectId} companyId
+ * @param {string} userEmail
+ * @returns {Promise<{ updateResult: import("mongodb").UpdateResult, alreadyVoted: boolean }>}
+ */
+export async function addHelpfulVote(companyId, userEmail) {
+  const cid = toObjectId(companyId);
+  if (!cid || !userEmail || typeof userEmail !== "string") {
+    return {
+      updateResult: {
+        acknowledged: true,
+        modifiedCount: 0,
+        upsertedCount: 0,
+        matchedCount: 0,
+      },
+      alreadyVoted: false,
+    };
+  }
+
+  const res = await CompanyStatic.updateOne(
+    {
+      _id: cid,
+      $expr: {
+        $not: {
+          $in: [userEmail, { $ifNull: ["$helpfulUsers", []] }],
+        },
+      },
+    },
+    {
+      $inc: { helpfulCount: 1 },
+      $push: { helpfulUsers: userEmail },
+    }
+  );
+
+  if (res.modifiedCount > 0) {
+    await invalidateCompanyDetailCache(cid);
+    return { updateResult: res, alreadyVoted: false };
+  }
+  const doc = await CompanyStatic.findOne({ _id: cid }).lean();
+  if (!doc) {
+    return { updateResult: res, alreadyVoted: false };
+  }
+  const arr = Array.isArray(doc.helpfulUsers) ? doc.helpfulUsers : [];
+  return { updateResult: res, alreadyVoted: arr.includes(userEmail) };
+}

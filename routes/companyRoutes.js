@@ -632,4 +632,9 @@ companyRouter.post("/", validateRequest(submissionInputSchema), async (req, res)
 
     res.status(201).json({ message: "Submission received and pending approval." });
   } catch (error) {
-    res.status(500).js
+    res.status(500).json({ error: "Error saving submission" });
+  }
+});
+
+
+export default companyRouter;
