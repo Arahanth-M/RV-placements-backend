@@ -543,13 +543,25 @@ function summerTileEligibleCompany(c) {
   return isPpoCompany(c) && !isOffCampusCompany(c);
 }
 
+function internshipOnlyTileCompany(c) {
+  if (isPpoCompany(c) || isOffCampusCompany(c)) return false;
+  if (c.placementInternshipOnlyForListingYear === true) return true;
+  if (c.placementInternshipOnlyForListingYear === false) return false;
+  return isInternshipOnlyCompany(c);
+}
+
 function dreamTileBaseCompany(c) {
   // Match CompanyStats dreamTierListBase: exclude off-campus, PPO, and internship-only.
-  return (
-    !isOffCampusCompany(c) &&
-    !isPpoCompany(c) &&
-    !isInternshipOnlyCompany(c)
-  );
+  // College-scoped roles may be empty (RVITM) even when the visit is internship-only.
+  if (isOffCampusCompany(c) || isPpoCompany(c)) return false;
+  if (isInternshipOnlyCompany(c)) return false;
+  if (
+    c.placementInternshipOnlyForListingYear === true &&
+    c.placementHasDreamTierVisit !== true
+  ) {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -561,7 +573,10 @@ function dreamTileBaseCompany(c) {
  * @param {{ defaultYear?: number }} [options]
  */
 export function sortCompaniesForCategoryPreview(companies, options = {}) {
-  return sortCompaniesByVisitDate(companies, { ...options, hub: options.hub ?? "dream" });
+  return sortCompaniesByVisitDate(companies, {
+    ...options,
+    hub: options.hub ?? "dream",
+  });
 }
 
 function toLogoItem(c) {
@@ -581,12 +596,7 @@ function toLogoItem(c) {
 export function buildCategoryPreviewResponse(orderedCompanies, logoLimit = 5) {
   const allSummer = orderedCompanies.filter((c) => summerTileEligibleCompany(c));
   const allOff = orderedCompanies.filter(isOffCampusCompany);
-  const allInternshipOnly = orderedCompanies.filter(
-    (c) =>
-      isInternshipOnlyCompany(c) &&
-      !isPpoCompany(c) &&
-      !isOffCampusCompany(c)
-  );
+  const allInternshipOnly = orderedCompanies.filter(internshipOnlyTileCompany);
   const allDream = orderedCompanies.filter(
     (c) =>
       dreamTileBaseCompany(c) &&

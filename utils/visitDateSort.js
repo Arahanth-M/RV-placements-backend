@@ -271,7 +271,39 @@ export function companyVisitSortTimestamp(company, options = {}) {
   return parseVisitDateToTimestamp(dateRaw, { defaultYear: sortYear });
 }
 
+/**
+ * True when college-scoped got-in on the payload is positive
+ * (placement total and/or PPO conversion got-in / branch rows).
+ * @param {Record<string, unknown>|null|undefined} company
+ * @returns {boolean}
+ */
+export function companyHasPositiveGotIn(company) {
+  if (!company || typeof company !== "object") return false;
+  const total = Number(company.totalGotIn);
+  if (Number.isFinite(total) && total > 0) return true;
+  const ppoTotal = Number(company.ppoConversionGotIn);
+  if (Number.isFinite(ppoTotal) && ppoTotal > 0) return true;
+
+  const sumGotIn = (rows) => {
+    if (!Array.isArray(rows)) return 0;
+    return rows.reduce((sum, row) => {
+      const n = Number(/** @type {{ gotIn?: unknown }} */ (row)?.gotIn);
+      return sum + (Number.isFinite(n) && n > 0 ? Math.floor(n) : 0);
+    }, 0);
+  };
+
+  if (sumGotIn(company.placementGotInBranchStats) > 0) return true;
+  if (sumGotIn(company.ppoBranchStats) > 0) return true;
+  return false;
+}
+
 export function compareCompaniesByVisitDate(a, b, options = {}) {
+  if (options.prioritizeNonZeroGotIn === true) {
+    const aHas = companyHasPositiveGotIn(a) ? 1 : 0;
+    const bHas = companyHasPositiveGotIn(b) ? 1 : 0;
+    if (aHas !== bHas) return bHas - aHas;
+  }
+
   const aVisitTs = companyVisitSortTimestamp(a, options);
   const bVisitTs = companyVisitSortTimestamp(b, options);
 

@@ -4,12 +4,15 @@ import {
   listGeneralStatsMeta,
 } from "../services/placementGeneralStatsCache.js";
 import { parseGeneralStatsYear } from "../utils/generalStatsYears.js";
+import optionalAuthJWT from "../middleware/optionalAuthJWT.js";
+import { collegeIdFromUser, DEFAULT_COLLEGE_ID } from "../utils/collegeScope.js";
 
 const placementGeneralStatsRouter = express.Router();
 
-placementGeneralStatsRouter.get("/years", async (_req, res) => {
+placementGeneralStatsRouter.get("/years", optionalAuthJWT, async (req, res) => {
   try {
-    const meta = await listGeneralStatsMeta();
+    const collegeId = req.user ? collegeIdFromUser(req.user) : DEFAULT_COLLEGE_ID;
+    const meta = await listGeneralStatsMeta(collegeId);
     return res.json(meta);
   } catch (error) {
     console.error("❌ Error listing general stats years:", error?.message || error);
@@ -17,14 +20,15 @@ placementGeneralStatsRouter.get("/years", async (_req, res) => {
   }
 });
 
-placementGeneralStatsRouter.get("/:year", async (req, res) => {
+placementGeneralStatsRouter.get("/:year", optionalAuthJWT, async (req, res) => {
   try {
     const year = parseGeneralStatsYear(req.params.year);
     if (year == null) {
       return res.status(400).json({ error: "Invalid year. Must be 2024–2028." });
     }
 
-    const stats = await getGeneralStatsByYear(year);
+    const collegeId = req.user ? collegeIdFromUser(req.user) : DEFAULT_COLLEGE_ID;
+    const stats = await getGeneralStatsByYear(year, collegeId);
     if (!stats) {
       return res.status(404).json({
         error: "Stats not available",

@@ -19,7 +19,7 @@ const DETAIL_CLUSTER_SLUGS = ["_", "cs", "ec", "me", "chem"];
  * Bump when cached GET /companies/:id payload shape changes so stale Redis rows are not reused.
  * @see placementDetailHeadlineType, placementContext merge selection, placementCluster
  */
-export const COMPANY_DETAIL_CACHE_SCHEMA = "v18";
+export const COMPANY_DETAIL_CACHE_SCHEMA = "v19";
 
 /**
  * @param {unknown} raw — req.query.placementContext or equivalent
@@ -88,7 +88,7 @@ export async function invalidateCompanyDetailCache(companyId) {
     `company:${id}`,
     ...DETAIL_CACHE_YEAR_SUFFIXES.flatMap((y) => {
       const parts = [`company:${id}:y${y}`, `company:${id}:y${y}:v5`];
-      for (const schema of ["v6", "v7", COMPANY_DETAIL_CACHE_SCHEMA]) {
+      for (const schema of ["v6", "v7", "v18", COMPANY_DETAIL_CACHE_SCHEMA]) {
         for (const slug of DETAIL_CONTEXT_SLUGS) {
           parts.push(`company:${id}:y${y}:${schema}:${slug}`);
           for (const cl of DETAIL_CLUSTER_SLUGS) {

@@ -2,6 +2,7 @@ import optionalAuthJWT from "../middleware/optionalAuthJWT.js";
 import {
   applyCollegeScopeToCompanyPayload,
   collegeIdFromUser,
+  COLLEGE_ID_RVITM,
   DEFAULT_COLLEGE_ID,
 } from "../utils/collegeScope.js";
 import express from "express";
@@ -154,6 +155,7 @@ companyRouter.get("/", optionalAuthJWT, async (req, res) => {
 
     const sorted = sortCompaniesForCategoryPreview(list, {
       defaultYear: visitSortYear,
+      prioritizeNonZeroGotIn: collegeId === COLLEGE_ID_RVITM,
     });
     await setCachedCompanyList(selectedYear, requestedCluster, collegeId, sorted);
     return res.json(sorted);

@@ -59,6 +59,7 @@ import {
   applyCollegeScopeToCompanyPayload,
   collegeIdFromEmail,
   collegeIdOfScopedRow,
+  COLLEGE_ID_RVITM,
   filterPlacementGotInForCollege,
   filterRolesForCollege,
   mergePlacementGotInForCollege,
@@ -1191,31 +1192,60 @@ function buildPlacementBranchStatsByYearFromVisits(
         ? filterPlacementGotInForCollege(picked.placementGotInBranchStats, collegeId)
         : picked.placementGotInBranchStats
       : [];
-    /** @type {Map<string, { gotIn: number, converted: number, convertedNotApplicable: boolean }>} */
-    const byCode = new Map();
+    if (collegeId) {
+      /** @type {Map<string, { gotIn: number, converted: number, convertedNotApplicable: boolean }>} */
+      const byCode = new Map();
+      for (const row of rawRows) {
+        const bc = normalizePpoBranchCode(row?.branchCode);
+        if (!isValidPpoBranchCode(bc)) continue;
+        const prev = byCode.get(bc) || {
+          gotIn: 0,
+          converted: 0,
+          convertedNotApplicable: false,
+        };
+        byCode.set(bc, {
+          gotIn: prev.gotIn + Math.max(0, Number(row?.gotIn) || 0),
+          converted: prev.converted + Math.max(0, Number(row?.converted) || 0),
+          convertedNotApplicable: prev.convertedNotApplicable || Boolean(row?.convertedNotApplicable),
+        });
+      }
+      out[year] = PPO_BRANCH_CODES_ARRAY.map((branchCode) => {
+        const hit = byCode.get(branchCode);
+        return {
+          branchCode,
+          gotIn: hit?.gotIn ?? 0,
+          converted: hit?.converted ?? 0,
+          convertedNotApplicable: Boolean(hit?.convertedNotApplicable),
+        };
+      });
+      continue;
+    }
+
+    /** Keep collegeId so applyCollegeScope can hide the other campus on cache hits. */
+    /** @type {Map<string, { branchCode: string, gotIn: number, converted: number, convertedNotApplicable: boolean, collegeId: string }>} */
+    const byKey = new Map();
     for (const row of rawRows) {
       const bc = normalizePpoBranchCode(row?.branchCode);
       if (!isValidPpoBranchCode(bc)) continue;
-      const prev = byCode.get(bc) || {
+      const rowCollege = collegeIdOfScopedRow(row);
+      const key = `${bc}::${rowCollege}`;
+      const prev = byKey.get(key) || {
+        branchCode: bc,
         gotIn: 0,
         converted: 0,
         convertedNotApplicable: false,
+        collegeId: rowCollege,
       };
-      byCode.set(bc, {
+      byKey.set(key, {
+        branchCode: bc,
         gotIn: prev.gotIn + Math.max(0, Number(row?.gotIn) || 0),
         converted: prev.converted + Math.max(0, Number(row?.converted) || 0),
         convertedNotApplicable: prev.convertedNotApplicable || Boolean(row?.convertedNotApplicable),
+        collegeId: rowCollege,
       });
     }
-    out[year] = PPO_BRANCH_CODES_ARRAY.map((branchCode) => {
-      const hit = byCode.get(branchCode);
-      return {
-        branchCode,
-        gotIn: hit?.gotIn ?? 0,
-        converted: hit?.converted ?? 0,
-        convertedNotApplicable: Boolean(hit?.convertedNotApplicable),
-      };
-    });
+    const collapsed = [...byKey.values()];
+    out[year] = collapsed.length > 0 ? collapsed : emptyRows();
   }
   return out;
 }
@@ -2572,8 +2602,13 @@ export async function getCompanyCategoryPreviewLogos(
     placementYear != null && placementYear !== ""
       ? normalizeCompanyDetailYear(placementYear) ?? COMPANY_VISIT_DEFAULT_YEAR
       : COMPANY_VISIT_DEFAULT_YEAR;
+  const collegeId =
+    collegeIdRaw != null && String(collegeIdRaw).trim() !== ""
+      ? normalizeCollegeId(collegeIdRaw)
+      : null;
   const ordered = sortCompaniesForCategoryPreview(companies, {
     defaultYear: previewSortYear,
+    prioritizeNonZeroGotIn: collegeId === COLLEGE_ID_RVITM,
   });
   return buildCategoryPreviewResponse(ordered, 5);
 }
@@ -3402,16 +3437,27 @@ export async function incrementPpoBranchGotInForAnchoredVisit(
     }
     const merged = mergeToLegacyShape(staticRow, freshVisit);
 
+    const collegeId =
+      options?.collegeId != null && String(options.collegeId).trim() !== ""
+        ? normalizeCollegeId(options.collegeId)
+        : null;
+
     const rawRows = Array.isArray(merged.ppoBranchStats) ? merged.ppoBranchStats : [];
-    /** @type {Map<string, { branchCode: string, gotIn: number, converted: number, convertedNotApplicable: boolean }>} */
+    const scopedRows = collegeId
+      ? filterPlacementGotInForCollege(rawRows, collegeId)
+      : rawRows;
+    /** @type {Map<string, { branchCode: string, gotIn: number, converted: number, convertedNotApplicable: boolean, collegeId?: string }>} */
     const byCode = new Map();
-    for (const row of rawRows) {
+    for (const row of scopedRows) {
       const bc = normalizePpoBranchCode(row?.branchCode);
       if (!isValidPpoBranchCode(bc)) continue;
       const gotIn = Math.max(0, Number.parseInt(String(row?.gotIn ?? 0), 10)) || 0;
       const converted = Math.max(0, Number.parseInt(String(row?.converted ?? 0), 10)) || 0;
       const convertedNotApplicable = Boolean(row?.convertedNotApplicable);
-      byCode.set(bc, { branchCode: bc, gotIn, converted, convertedNotApplicable });
+      /** @type {{ branchCode: string, gotIn: number, converted: number, convertedNotApplicable: boolean, collegeId?: string }} */
+      const entry = { branchCode: bc, gotIn, converted, convertedNotApplicable };
+      if (collegeId) entry.collegeId = collegeId;
+      byCode.set(bc, entry);
     }
 
     const cur = byCode.get(code) || {
@@ -3419,6 +3465,7 @@ export async function incrementPpoBranchGotInForAnchoredVisit(
       gotIn: 0,
       converted: 0,
       convertedNotApplicable: false,
+      ...(collegeId ? { collegeId } : {}),
     };
     if (dOk) {
       cur.gotIn = Math.max(0, Math.max(0, cur.gotIn) + d);
@@ -3429,6 +3476,7 @@ export async function incrementPpoBranchGotInForAnchoredVisit(
         cur.convertedNotApplicable = false;
       }
     }
+    if (collegeId) cur.collegeId = collegeId;
     byCode.set(code, cur);
 
     const normalized = PPO_BRANCH_CODES_ARRAY.filter((bc) => byCode.has(bc)).map((bc) => byCode.get(bc));
@@ -3441,26 +3489,20 @@ export async function incrementPpoBranchGotInForAnchoredVisit(
       Object.assign(payload, aggregates);
     }
     if (hasSpcPatch) {
-      const collegeId =
-        options?.collegeId != null && String(options.collegeId).trim() !== ""
-          ? normalizeCollegeId(options.collegeId)
-          : null;
       const rolesForPatch = collegeId
         ? filterRolesForCollege(merged.roles || [], collegeId)
         : merged.roles || [];
       const visitPatch = buildSpcConversionVisitPatch(rolesForPatch, spc);
       if (visitPatch.ppoConversionType) payload.ppoConversionType = visitPatch.ppoConversionType;
       if (visitPatch.roles) payload.roles = visitPatch.roles;
-      await updateCompanyVisit(
-        cid,
-        payload,
-        year,
-        freshVisit,
-        collegeId ? { collegeId } : {}
-      );
-    } else {
-      await updateCompanyVisit(cid, payload, year, freshVisit);
     }
+    await updateCompanyVisit(
+      cid,
+      payload,
+      year,
+      freshVisit,
+      collegeId ? { collegeId } : {}
+    );
 
     return { ok: true };
   });
@@ -3576,24 +3618,32 @@ export async function incrementPlacementAndPpoConvertedForSpcConversionDetails(
     const nextTotal = Math.max(0, sumPlacementGotIn(rawPlacement) + dPl);
 
     const rawPpo = Array.isArray(merged.ppoBranchStats) ? merged.ppoBranchStats : [];
-    /** @type {Map<string, { branchCode: string, gotIn: number, converted: number, convertedNotApplicable: boolean }>} */
+    const scopedPpo = collegeId
+      ? filterPlacementGotInForCollege(rawPpo, collegeId)
+      : rawPpo;
+    /** @type {Map<string, { branchCode: string, gotIn: number, converted: number, convertedNotApplicable: boolean, collegeId?: string }>} */
     const ppoByCode = new Map();
-    for (const row of rawPpo) {
+    for (const row of scopedPpo) {
       const bc = normalizePpoBranchCode(row?.branchCode);
       if (!isValidPpoBranchCode(bc)) continue;
       const gotIn = Math.max(0, Number.parseInt(String(row?.gotIn ?? 0), 10)) || 0;
       const converted = Math.max(0, Number.parseInt(String(row?.converted ?? 0), 10)) || 0;
       const convertedNotApplicable = Boolean(row?.convertedNotApplicable);
-      ppoByCode.set(bc, { branchCode: bc, gotIn, converted, convertedNotApplicable });
+      /** @type {{ branchCode: string, gotIn: number, converted: number, convertedNotApplicable: boolean, collegeId?: string }} */
+      const entry = { branchCode: bc, gotIn, converted, convertedNotApplicable };
+      if (collegeId) entry.collegeId = collegeId;
+      ppoByCode.set(bc, entry);
     }
     const curPpo = ppoByCode.get(code) || {
       branchCode: code,
       gotIn: 0,
       converted: 0,
       convertedNotApplicable: false,
+      ...(collegeId ? { collegeId } : {}),
     };
     curPpo.converted = Math.max(0, curPpo.converted) + dConv;
     curPpo.convertedNotApplicable = false;
+    if (collegeId) curPpo.collegeId = collegeId;
     ppoByCode.set(code, curPpo);
     const normalizedPpo = PPO_BRANCH_CODES_ARRAY.filter((bc) => ppoByCode.has(bc)).map((bc) =>
       ppoByCode.get(bc)
@@ -3976,7 +4026,9 @@ export async function updateCompanyVisit(
 
   if (
     collegeId &&
-    ($set.roles !== undefined || $set.placementGotInBranchStats !== undefined)
+    ($set.roles !== undefined ||
+      $set.placementGotInBranchStats !== undefined ||
+      $set.ppoBranchStats !== undefined)
   ) {
     const existing =
       hintVisitDoc &&
@@ -3998,6 +4050,19 @@ export async function updateCompanyVisit(
         collegeId
       );
       $set.totalGotIn = sumPlacementGotIn($set.placementGotInBranchStats);
+    }
+    if ($set.ppoBranchStats !== undefined) {
+      $set.ppoBranchStats = mergePlacementGotInForCollege(
+        existing?.ppoBranchStats,
+        $set.ppoBranchStats,
+        collegeId
+      );
+      Object.assign(
+        $set,
+        recomputePpoConversionAggregatesFromNormalized(
+          Array.isArray($set.ppoBranchStats) ? $set.ppoBranchStats : []
+        )
+      );
     }
   }
 

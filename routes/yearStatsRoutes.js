@@ -58,4 +58,3 @@ yearStatsRouter.get("/:year", requireAuthForRestrictedYears, async (req, res) =>
 });
 
 export default yearStatsRouter;
-

@@ -515,7 +515,10 @@ router.put(
                     previousBranchCode,
                     -1,
                     0,
-                    { resolvedVisit: oldResolved.visit }
+                    {
+                      resolvedVisit: oldResolved.visit,
+                      collegeId: collegeIdFromUser(req.user),
+                    }
                   )
                 : await incrementPlacementGotInBranchForAnchoredVisit(
                     previousCompanyId,
@@ -553,7 +556,10 @@ router.put(
                     nextBranchCode,
                     1,
                     0,
-                    { resolvedVisit: nextResolved.visit }
+                    {
+                      resolvedVisit: nextResolved.visit,
+                      collegeId: collegeIdFromUser(req.user),
+                    }
                   )
                 : await incrementPlacementGotInBranchForAnchoredVisit(
                     nextCompanyId,
@@ -1091,6 +1097,7 @@ router.post(
             {
               placementListContext: placementCtxForVisit,
               resolvedVisit: resolvedVisitSubmit,
+              collegeId: collegeIdFromUser(req.user),
             }
           )
         : await incrementPlacementGotInBranchForAnchoredVisit(

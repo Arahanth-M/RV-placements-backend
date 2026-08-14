@@ -5,7 +5,13 @@ const placementGeneralStatsSchema = new mongoose.Schema(
     year: {
       type: Number,
       required: true,
-      unique: true,
+      index: true,
+    },
+    collegeId: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      default: "rvce",
       index: true,
     },
     totalOffers: { type: Number, required: true },
@@ -24,6 +30,8 @@ const placementGeneralStatsSchema = new mongoose.Schema(
   },
   { timestamps: true, collection: "placement_general_stats" }
 );
+
+placementGeneralStatsSchema.index({ year: 1, collegeId: 1 }, { unique: true });
 
 export default mongoose.models.PlacementGeneralStats ||
   mongoose.model("PlacementGeneralStats", placementGeneralStatsSchema);

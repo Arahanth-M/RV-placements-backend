@@ -118,14 +118,13 @@ import {
   planJdRoleFieldUpdate,
   normalizeAdminRoleInput,
 } from "../utils/normalizeAdminRole.js";
-import PlacementGeneralStats from "../models/PlacementGeneralStats.js";
 import {
   buildGeneralStatsFromXlsxBuffer,
   statsDocumentFromPayload,
 } from "../services/placementGeneralStatsImportService.js";
 import {
-  invalidateGeneralStatsCache,
   listGeneralStatsMeta,
+  saveGeneralStatsForCollege,
 } from "../services/placementGeneralStatsCache.js";
 import { parseGeneralStatsYear } from "../utils/generalStatsYears.js";
 import {
@@ -219,9 +218,9 @@ adminRouter.post(
   }
 );
 
-adminRouter.get("/placement-general-stats/meta", async (_req, res) => {
+adminRouter.get("/placement-general-stats/meta", async (req, res) => {
   try {
-    const meta = await listGeneralStatsMeta();
+    const meta = await listGeneralStatsMeta(collegeIdFromUser(req.user));
     return res.json(meta);
   } catch (error) {
     console.error("❌ Admin general stats meta:", error?.message || error);
@@ -276,13 +275,11 @@ adminRouter.post(
         sourceFileName
       );
 
-      const saved = await PlacementGeneralStats.findOneAndUpdate(
-        { year },
-        { $set: docPayload },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      ).lean();
-
-      await invalidateGeneralStatsCache(year);
+      const saved = await saveGeneralStatsForCollege(
+        year,
+        collegeIdFromUser(req.user),
+        docPayload
+      );
 
       return res.json({
         success: true,

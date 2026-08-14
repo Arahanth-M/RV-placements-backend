@@ -271,7 +271,48 @@ export function sumPlacementGotIn(rows, collegeIdRaw = null) {
 }
 
 /**
- * Filter API-facing company payload so roles / got-in are college-scoped.
+ * PPO conversion aggregates from college-scoped `ppoBranchStats` rows.
+ * @param {unknown[]} rows
+ * @returns {{
+ *   ppoConversionGotIn: number,
+ *   ppoConversionConverted: number,
+ *   ppoConversionNotApplicable: boolean,
+ *   ppoConversionAcceptanceRate: number,
+ * }}
+ */
+function ppoConversionAggregatesFromRows(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const gotInTotal = list.reduce((sum, item) => {
+    const n = Number(/** @type {{ gotIn?: unknown }} */ (item)?.gotIn);
+    return sum + (Number.isFinite(n) && n > 0 ? Math.floor(n) : 0);
+  }, 0);
+  const gotInTotalWithKnownConversion = list.reduce((sum, item) => {
+    const row = /** @type {{ gotIn?: unknown, convertedNotApplicable?: unknown }} */ (item);
+    if (row?.convertedNotApplicable) return sum;
+    const n = Number(row?.gotIn);
+    return sum + (Number.isFinite(n) && n > 0 ? Math.floor(n) : 0);
+  }, 0);
+  const convertedTotal = list.reduce((sum, item) => {
+    const row = /** @type {{ converted?: unknown, convertedNotApplicable?: unknown }} */ (item);
+    if (row?.convertedNotApplicable) return sum;
+    const n = Number(row?.converted);
+    return sum + (Number.isFinite(n) && n > 0 ? Math.floor(n) : 0);
+  }, 0);
+  return {
+    ppoConversionGotIn: gotInTotal,
+    ppoConversionConverted: convertedTotal,
+    ppoConversionNotApplicable: list.some(
+      (item) => Boolean(/** @type {{ convertedNotApplicable?: unknown }} */ (item)?.convertedNotApplicable)
+    ),
+    ppoConversionAcceptanceRate:
+      gotInTotalWithKnownConversion > 0
+        ? Number(((convertedTotal / gotInTotalWithKnownConversion) * 100).toFixed(2))
+        : 0,
+  };
+}
+
+/**
+ * Filter API-facing company payload so roles / got-in / PPO stats are college-scoped.
  * Mutates a shallow copy; safe to call on cached payloads before respond.
  * @param {Record<string, unknown>|null|undefined} company
  * @param {unknown} collegeIdRaw
@@ -299,24 +340,13 @@ export function applyCollegeScopeToCompanyPayload(company, collegeIdRaw) {
     out.totalGotIn = sumPlacementGotIn(out.placementGotInBranchStats);
   }
 
-  if (out.totalGotInByYear && typeof out.totalGotInByYear === "object") {
-    const byYear = /** @type {Record<string, unknown>} */ (out.totalGotInByYear);
-    const next = { ...byYear };
-    const branchByYear = out.placementBranchStatsByYear;
-    if (branchByYear && typeof branchByYear === "object") {
-      for (const y of Object.keys(next)) {
-        const rows = /** @type {Record<string, unknown>} */ (branchByYear)[y];
-        if (Array.isArray(rows)) {
-          next[y] = sumPlacementGotIn(rows);
-        }
-      }
-    }
-    out.totalGotInByYear = next;
+  if (Array.isArray(out.ppoBranchStats)) {
+    out.ppoBranchStats = filterPlacementGotInForCollege(out.ppoBranchStats, collegeId);
+    Object.assign(out, ppoConversionAggregatesFromRows(out.ppoBranchStats));
   }
 
   if (out.placementBranchStatsByYear && typeof out.placementBranchStatsByYear === "object") {
-    // Rows are already collapsed without collegeId at build time when college filter
-    // was applied upstream; if still present as multi-college raw, filter here.
+    // Filter college-tagged rows first so year totals below use scoped numbers.
     const src = /** @type {Record<string, unknown>} */ (out.placementBranchStatsByYear);
     /** @type {Record<string, unknown>} */
     const next = {};
@@ -331,6 +361,21 @@ export function applyCollegeScopeToCompanyPayload(company, collegeIdRaw) {
       next[y] = hasCollege ? filterPlacementGotInForCollege(rows, collegeId) : rows;
     }
     out.placementBranchStatsByYear = next;
+  }
+
+  if (out.totalGotInByYear && typeof out.totalGotInByYear === "object") {
+    const byYear = /** @type {Record<string, unknown>} */ (out.totalGotInByYear);
+    const next = { ...byYear };
+    const branchByYear = out.placementBranchStatsByYear;
+    if (branchByYear && typeof branchByYear === "object") {
+      for (const y of Object.keys(next)) {
+        const rows = /** @type {Record<string, unknown>} */ (branchByYear)[y];
+        if (Array.isArray(rows)) {
+          next[y] = sumPlacementGotIn(rows);
+        }
+      }
+    }
+    out.totalGotInByYear = next;
   }
 
   return out;

@@ -15,7 +15,7 @@ function normalizeListYear(raw) {
 }
 
 /** Bump when list payload shape changes. */
-export const COMPANY_LIST_CACHE_SCHEMA = "v1";
+export const COMPANY_LIST_CACHE_SCHEMA = "v2";
 
 /** Safety TTL for full list responses (hard invalidate on writes too). */
 export const COMPANY_LIST_REDIS_TTL_SECONDS = 10 * 60;
