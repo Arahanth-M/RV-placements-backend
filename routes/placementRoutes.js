@@ -942,7 +942,7 @@ router.post(
         message: shouldBumpConverted ? "Conversion details saved" : "Conversion details updated",
         studentId: student._id,
         placementId: existing._id,
-        ppoBranchConvertedIncremented: shouldIncrementConvertedOnly,
+        ppoBranchConvertedIncremented: shouldBumpConverted,
       });
     } catch (error) {
       console.error("❌ Error submitting SPC conversion details:", error.message);
