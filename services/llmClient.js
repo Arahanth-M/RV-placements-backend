@@ -5,11 +5,15 @@ import {
   GROQ_KEY_ENV_BY_SLOT,
   resolveGroqApiKey,
 } from "../config/groqApiKey.js";
+import { GROQ_FAST_MODEL, GROQ_QUALITY_MODEL } from "../config/groqModels.js";
 
 const DEFAULT_ORCHESTRATOR_MODEL =
   process.env.GROQ_ORCHESTRATOR_MODEL ||
   process.env.GROQ_MODEL ||
-  "llama-3.3-70b-versatile";
+  GROQ_QUALITY_MODEL;
+
+const RATE_LIMIT_FALLBACK_MODEL =
+  process.env.GROQ_FALLBACK_MODEL || GROQ_FAST_MODEL;
 
 /** @type {Map<string, import("groq-sdk").Groq>} */
 const groqClientsByApiKey = new Map();
@@ -102,13 +106,14 @@ export const callLLM = async (messages, options = {}) => {
       error?.status === 413;
 
     const alreadyOnFallback =
+      options?.model === RATE_LIMIT_FALLBACK_MODEL ||
       options?.model === "llama-3.1-8b-instant" ||
       options?.model === "llama3-8b-8192";
 
-    // Retry once with 8b (+ smaller max_tokens) if 70b hits rate/TPM limits
+    // Retry once with the fast model (+ smaller max_tokens) if the primary hits TPM limits
     if (isRateLimit && !alreadyOnFallback) {
       console.warn(
-        `⚠️ [Groq] Rate/TPM limit on ${options?.model || DEFAULT_ORCHESTRATOR_MODEL}. Falling back to 8b...`
+        `⚠️ [Groq] Rate/TPM limit on ${options?.model || DEFAULT_ORCHESTRATOR_MODEL}. Falling back to ${RATE_LIMIT_FALLBACK_MODEL}...`
       );
       const nextMax =
         typeof options?.max_tokens === "number" && Number.isFinite(options.max_tokens)
@@ -116,7 +121,7 @@ export const callLLM = async (messages, options = {}) => {
           : options?.max_tokens;
       return callLLM(messages, {
         ...options,
-        model: "llama-3.1-8b-instant",
+        model: RATE_LIMIT_FALLBACK_MODEL,
         max_tokens: nextMax,
       });
     }

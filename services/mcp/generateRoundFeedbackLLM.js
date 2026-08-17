@@ -1,9 +1,10 @@
 import { callLLM } from "../llmClient.js";
 import { parseJSONResponse } from "../../utils/parseJSONResponse.js";
 import { logInterviewDsaLlmDebug } from "../interviewDebugLog.js";
+import { GROQ_QUALITY_MODEL } from "../../config/groqModels.js";
 
 const TOOL_ROUND_FEEDBACK_MODEL =
-  process.env.GROQ_TOOL_MODEL || "llama-3.1-8b-instant";
+  process.env.GROQ_TOOL_MODEL || GROQ_QUALITY_MODEL;
 
 const toSafeString = (value) => (typeof value === "string" ? value.trim() : "");
 

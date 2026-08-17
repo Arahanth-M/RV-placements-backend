@@ -1,12 +1,13 @@
 import { callLLM } from "./llmClient.js";
 import { parseJSONResponse } from "../utils/parseJSONResponse.js";
+import { GROQ_QUALITY_MODEL } from "../config/groqModels.js";
 
 const MAX_CONTENT_CHARS = 70000;
 const ENHANCE_MODEL =
   typeof process.env.GROQ_SUBMISSION_ENHANCE_MODEL === "string" &&
   process.env.GROQ_SUBMISSION_ENHANCE_MODEL.trim()
     ? process.env.GROQ_SUBMISSION_ENHANCE_MODEL.trim()
-    : "llama-3.1-8b-instant";
+    : GROQ_QUALITY_MODEL;
 
 /** Submission types that support AI polish before approve. */
 export function isSubmissionEnhancementSupported(type) {

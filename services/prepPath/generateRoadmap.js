@@ -1,11 +1,12 @@
 import { callLLM } from "../llmClient.js";
 import { parseJSONResponse } from "../../utils/parseJSONResponse.js";
+import { GROQ_QUALITY_MODEL } from "../../config/groqModels.js";
 
 const PREP_PATH_MODEL =
   process.env.GROQ_PREP_PATH_MODEL ||
   process.env.GROQ_ORCHESTRATOR_MODEL ||
   process.env.GROQ_MODEL ||
-  "llama-3.3-70b-versatile";
+  GROQ_QUALITY_MODEL;
 
 const MOTIVATION_SLOGANS = [
   "One focused hour today beats a week of worry — start small, stay consistent.",
@@ -467,7 +468,7 @@ No urls, no hours, no motivationSlogans.`;
       model: PREP_PATH_MODEL,
       apiKeySlot: "prep_path",
       temperature: 0.35,
-      max_tokens: 2500,
+      max_tokens: 4096,
     }
   );
 

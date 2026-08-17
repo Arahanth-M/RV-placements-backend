@@ -1,4 +1,5 @@
 import { getEmbedding, cosineSimilarity } from "../../utils/embedding.js";
+import { GROQ_QUALITY_MODEL } from "../../config/groqModels.js";
 import { callLLM } from "../llmClient.js";
 import { parseJSONResponse } from "../../utils/parseJSONResponse.js";
 import { logInterviewDsaLlmDebug } from "../interviewDebugLog.js";
@@ -11,9 +12,9 @@ import {
   LLM_GENERATED_EMPTY_MUST_HAVE_COVERAGE,
 } from "./llmGeneratedQuestionScoring.js";
 
-const TOOL_EVAL_MODEL = process.env.GROQ_TOOL_MODEL || "llama-3.1-8b-instant";
+const TOOL_EVAL_MODEL = process.env.GROQ_TOOL_MODEL || GROQ_QUALITY_MODEL;
 const LLM_GENERATED_GRADING_MODEL =
-  process.env.GROQ_GENERATED_GRADING_MODEL || process.env.GROQ_TOOL_MODEL || "llama-3.1-8b-instant";
+  process.env.GROQ_GENERATED_GRADING_MODEL || process.env.GROQ_TOOL_MODEL || GROQ_QUALITY_MODEL;
 const SCORING_VERSION = "v3-rubric-strict";
 const RUBRIC_MATCH_THRESHOLD = 0.72;
 const RUBRIC_PARTIAL_THRESHOLD = 0.55;

@@ -1,6 +1,7 @@
 import { callLLM } from "./llmClient.js";
 import { parseJSONResponse } from "../utils/parseJSONResponse.js";
 import { assertMergeContentValidForSubmissionType } from "./submissionEnhanceService.js";
+import { GROQ_QUALITY_MODEL } from "../config/groqModels.js";
 
 const MAX_CONTENT_CHARS = 70000;
 const ANSWER_MODEL =
@@ -10,7 +11,7 @@ const ANSWER_MODEL =
     : typeof process.env.GROQ_SUBMISSION_ENHANCE_MODEL === "string" &&
         process.env.GROQ_SUBMISSION_ENHANCE_MODEL.trim()
       ? process.env.GROQ_SUBMISSION_ENHANCE_MODEL.trim()
-      : "llama-3.3-70b-versatile";
+      : GROQ_QUALITY_MODEL;
 
 const ANSWER_MAX_TOKENS = 8192;
 
