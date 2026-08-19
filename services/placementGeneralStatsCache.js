@@ -24,17 +24,16 @@ function cacheKeyForYear(year, collegeIdRaw) {
 }
 
 /**
- * RVCE docs may predate `collegeId` (untagged). RVITM always requires an explicit tag.
- * @param {number} year
+ * RVCE docs may predate `collegeId` (untagged). RVITM prefers an explicit tag, then
+ * falls back to RVCE/untagged so years like 2026 stay visible before an RVITM upload.
  * @param {unknown} collegeIdRaw
  */
-export function mongoFilterForGeneralStats(year, collegeIdRaw) {
+export function mongoMatchForGeneralStatsCollege(collegeIdRaw) {
   const collegeId = normalizeCollegeId(collegeIdRaw);
   if (collegeId === COLLEGE_ID_RVITM) {
-    return { year, collegeId: COLLEGE_ID_RVITM };
+    return { collegeId: COLLEGE_ID_RVITM };
   }
   return {
-    year,
     $or: [
       { collegeId: COLLEGE_ID_RVCE },
       { collegeId: { $exists: false } },
@@ -42,6 +41,14 @@ export function mongoFilterForGeneralStats(year, collegeIdRaw) {
       { collegeId: "" },
     ],
   };
+}
+
+/**
+ * @param {number} year
+ * @param {unknown} collegeIdRaw
+ */
+export function mongoFilterForGeneralStats(year, collegeIdRaw) {
+  return { year, ...mongoMatchForGeneralStatsCollege(collegeIdRaw) };
 }
 
 let indexesEnsured = false;
@@ -74,9 +81,15 @@ function isValidStatsPayload(value) {
  */
 export async function getGeneralStatsByYearFromDb(year, collegeIdRaw = COLLEGE_ID_RVCE) {
   await ensureGeneralStatsIndexes();
-  const doc = await PlacementGeneralStats.findOne(
-    mongoFilterForGeneralStats(year, collegeIdRaw)
+  const collegeId = normalizeCollegeId(collegeIdRaw);
+  let doc = await PlacementGeneralStats.findOne(
+    mongoFilterForGeneralStats(year, collegeId)
   ).lean();
+  if (!doc && collegeId === COLLEGE_ID_RVITM) {
+    doc = await PlacementGeneralStats.findOne(
+      mongoFilterForGeneralStats(year, COLLEGE_ID_RVCE)
+    ).lean();
+  }
   return serializeGeneralStatsDoc(doc);
 }
 
@@ -123,19 +136,7 @@ export async function getGeneralStatsByYear(year, collegeIdRaw = COLLEGE_ID_RVCE
 export async function listGeneralStatsMeta(collegeIdRaw = COLLEGE_ID_RVCE) {
   await ensureGeneralStatsIndexes();
   const collegeId = normalizeCollegeId(collegeIdRaw);
-  const match =
-    collegeId === COLLEGE_ID_RVITM
-      ? { collegeId: COLLEGE_ID_RVITM }
-      : {
-          $or: [
-            { collegeId: COLLEGE_ID_RVCE },
-            { collegeId: { $exists: false } },
-            { collegeId: null },
-            { collegeId: "" },
-          ],
-        };
-
-  const docs = await PlacementGeneralStats.find(match, {
+  const docs = await PlacementGeneralStats.find(mongoMatchForGeneralStatsCollege(collegeId), {
     year: 1,
     totalOffers: 1,
     updatedAt: 1,
@@ -145,7 +146,26 @@ export async function listGeneralStatsMeta(collegeIdRaw = COLLEGE_ID_RVCE) {
     .sort({ year: -1 })
     .lean();
 
-  const availableYears = docs.map((d) => d.year);
+  let visibleDocs = docs;
+  if (collegeId === COLLEGE_ID_RVITM) {
+    const rvitmYears = new Set(docs.map((d) => d.year));
+    const rvceDocs = await PlacementGeneralStats.find(
+      mongoMatchForGeneralStatsCollege(COLLEGE_ID_RVCE),
+      {
+        year: 1,
+        totalOffers: 1,
+        updatedAt: 1,
+        uploadedBy: 1,
+        sourceFileName: 1,
+      }
+    )
+      .sort({ year: -1 })
+      .lean();
+    const fallbackDocs = rvceDocs.filter((d) => !rvitmYears.has(d.year));
+    visibleDocs = [...docs, ...fallbackDocs].sort((a, b) => Number(b.year) - Number(a.year));
+  }
+
+  const availableYears = visibleDocs.map((d) => d.year);
   const defaultYear = availableYears.includes(DEFAULT_GENERAL_STATS_YEAR)
     ? DEFAULT_GENERAL_STATS_YEAR
     : availableYears[0] ?? DEFAULT_GENERAL_STATS_YEAR;
