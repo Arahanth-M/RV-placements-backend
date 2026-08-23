@@ -5,6 +5,7 @@ import Submission from '../../models/Submission.js';
 import User from '../../models/User.js';
 import { buildJwtPayloadFromUser } from '../../utils/jwtUserClaims.js';
 import { seedApprovedSplitCompany } from '../helpers/seedSplitCompany.js';
+import CompanyVisit from '../../models/CompanyVisit.js';
 
 /** Cookie header value for authJWT (same secret as tests/setup.js default). */
 const authCookieForUser = (user) => {
@@ -16,10 +17,11 @@ const authCookieForUser = (user) => {
 
 describe('Submissions API Routes', () => {
   let testCompany;
+  let testVisit;
   let testUser;
 
   beforeEach(async () => {
-    const { staticRow } = await seedApprovedSplitCompany({
+    const { staticRow, visit } = await seedApprovedSplitCompany({
       name: 'Google Inc.',
       type: 'FTE',
       business_model: 'B2C',
@@ -27,6 +29,7 @@ describe('Submissions API Routes', () => {
       date_of_visit: '2024-01-15',
     });
     testCompany = staticRow;
+    testVisit = visit;
 
     testUser = new User({
       userId: 'testGoogleId123',
@@ -271,6 +274,156 @@ describe('Submissions API Routes', () => {
       expect(response.body.submissions[0].type).toBe('interviewProcess');
       expect(response.body.submissions[0].companyName).toBe('Google Inc.');
       expect(response.body.submissions[1].type).toBe('mustDoTopics');
+    });
+  });
+
+  describe('GET /api/submissions/since-last-login', () => {
+    const authCookieWithPreviousLogin = (user, previousLastLoginAt) => {
+      const secret = process.env.JWT_SECRET;
+      const payload = buildJwtPayloadFromUser(user, { previousLastLoginAt });
+      const token = jwt.sign(payload, secret, { expiresIn: '1h' });
+      return `token=${token}`;
+    };
+
+    it('returns an empty digest when previousLastLoginAt is missing', async () => {
+      const response = await request(app)
+        .get('/api/submissions/since-last-login')
+        .set('Cookie', authCookieForUser(testUser))
+        .expect(200);
+
+      expect(response.body.companies).toEqual([]);
+      expect(response.body.since).toBeNull();
+    });
+
+    it('groups approved OA, interview questions, experiences, must-do, and recruitment since last login', async () => {
+      const previousLogin = new Date('2026-08-20T10:00:00.000Z');
+
+      await Submission.insertMany([
+        {
+          companyId: testCompany._id,
+          type: 'onlineQuestions',
+          content: 'OA 1',
+          status: 'approved',
+          approvedAt: new Date('2026-08-21T10:00:00.000Z'),
+          submittedBy: { name: 'other', email: 'other@example.com' },
+        },
+        {
+          companyId: testCompany._id,
+          type: 'onlineQuestions',
+          content: 'OA 2',
+          status: 'approved',
+          approvedAt: new Date('2026-08-21T11:00:00.000Z'),
+          submittedBy: { name: 'other', email: 'other@example.com' },
+        },
+        {
+          companyId: testCompany._id,
+          type: 'interviewQuestions',
+          content: 'IQ 1',
+          status: 'approved',
+          approvedAt: new Date('2026-08-21T12:00:00.000Z'),
+          submittedBy: { name: 'other', email: 'other@example.com' },
+        },
+        {
+          companyId: testCompany._id,
+          type: 'interviewProcess',
+          content: 'Experience',
+          status: 'approved',
+          approvedAt: new Date('2026-08-21T13:00:00.000Z'),
+          submittedBy: { name: 'other', email: 'other@example.com' },
+        },
+        {
+          companyId: testCompany._id,
+          type: 'mustDoTopics',
+          content: 'Graphs',
+          status: 'approved',
+          approvedAt: new Date('2026-08-21T13:30:00.000Z'),
+          submittedBy: { name: 'other', email: 'other@example.com' },
+        },
+        {
+          companyId: testCompany._id,
+          type: 'onlineQuestions',
+          content: 'Pending should be ignored',
+          status: 'pending',
+          submittedBy: { name: 'other', email: 'other@example.com' },
+        },
+        {
+          companyId: testCompany._id,
+          type: 'onlineQuestions',
+          content: 'Too old',
+          status: 'approved',
+          approvedAt: new Date('2026-08-01T10:00:00.000Z'),
+          submittedBy: { name: 'other', email: 'other@example.com' },
+        },
+        {
+          companyId: testCompany._id,
+          type: 'interviewQuestions',
+          content: 'Own submission ignored',
+          status: 'approved',
+          approvedAt: new Date('2026-08-21T14:00:00.000Z'),
+          submittedBy: { name: testUser.username, email: testUser.email },
+        },
+      ]);
+
+      await CompanyVisit.updateOne(
+        { _id: testVisit._id },
+        {
+          $set: {
+            recruitment_process: {
+              submittedAt: '2026-08-21T15:00:00.000Z',
+              submittedBy: { name: 'other', email: 'other@example.com' },
+            },
+          },
+        }
+      );
+
+      const response = await request(app)
+        .get('/api/submissions/since-last-login')
+        .set('Cookie', authCookieWithPreviousLogin(testUser, previousLogin.toISOString()))
+        .expect(200);
+
+      expect(response.body.companies).toHaveLength(1);
+      expect(response.body.companies[0].companyName).toBe('Google Inc.');
+      expect(response.body.companies[0].year).toBe(2026);
+      expect(response.body.companies[0].onlineQuestions).toBe(2);
+      expect(response.body.companies[0].interviewQuestions).toBe(1);
+      expect(response.body.companies[0].interviewProcess).toBe(1);
+      expect(response.body.companies[0].mustDoTopics).toBe(1);
+      expect(response.body.companies[0].recruitmentProcess).toBe(1);
+      expect(response.body.companies[0].summary).toBe(
+        '2 OA questions, 1 interview question, 1 interview experience, 1 must-do topic, 1 recruitment process'
+      );
+    });
+
+    it('uses the since query param when JWT previousLastLoginAt is missing', async () => {
+      await Submission.insertMany([
+        {
+          companyId: testCompany._id,
+          type: 'onlineQuestions',
+          content: 'OA after visit',
+          status: 'approved',
+          approvedAt: new Date('2026-08-21T10:00:00.000Z'),
+          submittedBy: { name: 'other', email: 'other@example.com' },
+        },
+        {
+          companyId: testCompany._id,
+          type: 'onlineQuestions',
+          content: 'OA after visit 2',
+          status: 'approved',
+          approvedAt: new Date('2026-08-21T10:05:00.000Z'),
+          submittedBy: { name: 'other', email: 'other@example.com' },
+        },
+      ]);
+
+      const response = await request(app)
+        .get('/api/submissions/since-last-login')
+        .query({ since: '2026-08-20T10:00:00.000Z' })
+        .set('Cookie', authCookieForUser(testUser))
+        .expect(200);
+
+      expect(response.body.companies).toHaveLength(1);
+      expect(response.body.companies[0].onlineQuestions).toBe(2);
+      expect(response.body.companies[0].year).toBe(2026);
+      expect(response.body.companies[0].summary).toBe('2 OA questions');
     });
   });
 

@@ -1,6 +1,13 @@
 import CompanyVisit from "../models/CompanyVisit.js";
 import { invalidateCompanyDetailCache } from "./companyDetailCache.js";
+import { touchCardContentUpdated } from "./companyCardContentUpdated.js";
 import { sanitizeSubmissionText } from "./submissionContentSanitize.js";
+
+async function persistVisitContentChange(visitId, companyId, update) {
+  await CompanyVisit.updateOne({ _id: visitId }, update);
+  await invalidateCompanyDetailCache(companyId);
+  await touchCardContentUpdated({ companyId, visitId });
+}
 
 function parseSubmissionContent(mergeSource) {
   try {
@@ -124,17 +131,13 @@ export async function applySubmissionToCompanyVisit(visitId, companyId, submissi
 
     if (!result.changed) return;
 
-    await CompanyVisit.updateOne(
-      { _id: visitId },
-      {
-        $set: {
-          [questionField]: result.questions,
-          [solutionField]: result.solutions,
-          migratedAt: new Date(),
-        },
-      }
-    );
-    await invalidateCompanyDetailCache(companyId);
+    await persistVisitContentChange(visitId, companyId, {
+      $set: {
+        [questionField]: result.questions,
+        [solutionField]: result.solutions,
+        migratedAt: new Date(),
+      },
+    });
     return;
   }
 
@@ -152,14 +155,10 @@ export async function applySubmissionToCompanyVisit(visitId, companyId, submissi
     const current = Array.isArray(visit.interviewProcess) ? visit.interviewProcess : [];
     if (jsonEntryExistsInStringArray(current, sanitizedProcess)) return;
 
-    await CompanyVisit.updateOne(
-      { _id: visitId },
-      {
-        $push: { interviewProcess: buildSubmitterJsonEntry(submission, sanitizedProcess) },
-        $set: { migratedAt: new Date() },
-      }
-    );
-    await invalidateCompanyDetailCache(companyId);
+    await persistVisitContentChange(visitId, companyId, {
+      $push: { interviewProcess: buildSubmitterJsonEntry(submission, sanitizedProcess) },
+      $set: { migratedAt: new Date() },
+    });
     return;
   }
 
@@ -181,14 +180,10 @@ export async function applySubmissionToCompanyVisit(visitId, companyId, submissi
       return;
     }
 
-    await CompanyVisit.updateOne(
-      { _id: visitId },
-      {
-        $push: { internshipExperience: buildSubmitterJsonEntry(submission, sanitizedExperience) },
-        $set: { migratedAt: new Date() },
-      }
-    );
-    await invalidateCompanyDetailCache(companyId);
+    await persistVisitContentChange(visitId, companyId, {
+      $push: { internshipExperience: buildSubmitterJsonEntry(submission, sanitizedExperience) },
+      $set: { migratedAt: new Date() },
+    });
     return;
   }
 
@@ -210,13 +205,9 @@ export async function applySubmissionToCompanyVisit(visitId, companyId, submissi
     const current = Array.isArray(visit.must_do_topics) ? visit.must_do_topics : [];
     if (current.includes(sanitizedTopic)) return;
 
-    await CompanyVisit.updateOne(
-      { _id: visitId },
-      {
-        $push: { must_do_topics: sanitizedTopic },
-        $set: { migratedAt: new Date() },
-      }
-    );
-    await invalidateCompanyDetailCache(companyId);
+    await persistVisitContentChange(visitId, companyId, {
+      $push: { must_do_topics: sanitizedTopic },
+      $set: { migratedAt: new Date() },
+    });
   }
 }

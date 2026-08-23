@@ -81,6 +81,7 @@ export const routes = {
   INTERVIEW: '/api/interview',
   RESUME: '/api/resume',
   PREP_PATH: '/api/prep-path',
+  DAU: '/api/dau',
 };
 
 // Messages

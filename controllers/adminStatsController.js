@@ -181,12 +181,19 @@ async function aggregateTopSubmittedCompanies(limit = 5, collegeId) {
 async function findMostViewedApprovedCompanies(limit = 5) {
   return CompanyVisit.aggregate([
     { $match: { year: COMPANY_VISIT_YEAR, status: "approved" } },
+    {
+      $group: {
+        _id: "$companyId",
+        views: { $sum: { $ifNull: ["$views", 0] } },
+        updatedAt: { $max: "$updatedAt" },
+      },
+    },
     { $sort: { views: -1, updatedAt: -1 } },
     { $limit: limit },
     {
       $lookup: {
         from: "companies",
-        localField: "companyId",
+        localField: "_id",
         foreignField: "_id",
         as: "c",
       },
@@ -205,22 +212,36 @@ async function findMostViewedApprovedCompanies(limit = 5) {
 async function findMostHelpfulApprovedCompanies(limit = 5) {
   return CompanyVisit.aggregate([
     { $match: { year: COMPANY_VISIT_YEAR, status: "approved" } },
+    { $group: { _id: "$companyId" } },
     {
       $lookup: {
         from: "companies",
-        localField: "companyId",
+        localField: "_id",
         foreignField: "_id",
         as: "c",
       },
     },
     { $unwind: { path: "$c", preserveNullAndEmptyArrays: false } },
-    { $sort: { "c.helpfulCount": -1, "c.updatedAt": -1 } },
+    {
+      $group: {
+        _id: {
+          $toLower: {
+            $trim: { input: { $ifNull: ["$c.name", ""] } },
+          },
+        },
+        companyId: { $first: "$c._id" },
+        name: { $first: "$c.name" },
+        helpfulCount: { $max: { $ifNull: ["$c.helpfulCount", 0] } },
+        updatedAt: { $max: "$c.updatedAt" },
+      },
+    },
+    { $sort: { helpfulCount: -1, updatedAt: -1 } },
     { $limit: limit },
     {
       $project: {
-        _id: "$c._id",
-        name: "$c.name",
-        helpfulCount: "$c.helpfulCount",
+        _id: "$companyId",
+        name: 1,
+        helpfulCount: 1,
       },
     },
   ]);

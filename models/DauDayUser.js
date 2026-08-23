@@ -23,6 +23,14 @@ const dauDayUserSchema = new mongoose.Schema(
     role: { type: String, trim: true, default: "" },
     firstSeenAt: { type: Date, default: Date.now },
     lastSeenAt: { type: Date, default: Date.now },
+    /** Coarse activity keys for that day. Optional — existing rows have no field. */
+    actions: { type: [String], default: undefined },
+    /** Unique company names opened that day. Optional — existing rows have no field. */
+    openedCompanies: { type: [String], default: undefined },
+    /** Unique company names a PrepPath was generated for that day. Optional. */
+    prepPathCompanies: { type: [String], default: undefined },
+    /** Engaged milliseconds that day. Optional — $inc only, never backfilled. */
+    activeMs: { type: Number, default: undefined },
   },
   {
     timestamps: true,

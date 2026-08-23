@@ -12,6 +12,7 @@ import {
   listRecentPrepPathPlans,
   PREP_PATH_HISTORY_LIMIT,
 } from "../services/prepPath/prepPathService.js";
+import { recordDauActivitySafe } from "../services/dau/recordDauActivity.js";
 
 const router = express.Router();
 
@@ -135,6 +136,11 @@ router.post("/generate", (req, res) => {
         userId,
         planId: plan?._id,
         latencyMs: Date.now() - startedAt,
+      });
+
+      recordDauActivitySafe(req.user, {
+        action: "prep_path",
+        prepPathCompany: plan?.companyName,
       });
 
       return res.status(201).json({ success: true, plan, quota, peerDemand });

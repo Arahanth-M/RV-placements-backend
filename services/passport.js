@@ -62,7 +62,7 @@ passport.use(
             if (picture) adminUser.profilePicture = picture;
             adminUser.lastLoginAt = new Date();
             await adminUser.save();
-            recordDauActivitySafe(adminUser);
+            recordDauActivitySafe(adminUser, { action: "login" });
             return done(null, adminUser);
           }
 
@@ -74,7 +74,7 @@ passport.use(
             lastLoginAt: new Date(),
           }).save();
 
-          recordDauActivitySafe(createdAdminUser);
+          recordDauActivitySafe(createdAdminUser, { action: "login" });
           return done(null, createdAdminUser);
         }
 
@@ -89,6 +89,9 @@ passport.use(
         const existingUser = existingUserByGoogleId || existingUserByEmail;
 
         if (existingUser) {
+          const previousLastLoginAt = existingUser.lastLoginAt
+            ? new Date(existingUser.lastLoginAt)
+            : null;
           existingUser.googleId = profile.id;
           existingUser.email = normalizedEmail;
           if (displayName) {
@@ -111,7 +114,10 @@ passport.use(
             console.timeEnd("auth:user_update_save");
           }
 
-          recordDauActivitySafe(existingUser);
+          // In-memory only — mongoose $locals is never persisted.
+          existingUser.$locals.previousLastLoginAt = previousLastLoginAt;
+
+          recordDauActivitySafe(existingUser, { action: "login" });
           return done(null, existingUser);
         }
 
@@ -135,7 +141,7 @@ passport.use(
             console.timeEnd("auth:user_create_no_profile");
           }
 
-          recordDauActivitySafe(userWithoutProfile);
+          recordDauActivitySafe(userWithoutProfile, { action: "login" });
           return done(null, userWithoutProfile);
         }
 
@@ -165,7 +171,7 @@ passport.use(
           console.error("Webhook error:", err);
         });
 
-        recordDauActivitySafe(user);
+        recordDauActivitySafe(user, { action: "login" });
         return done(null, user);
       } catch (err) {
         console.error("Passport strategy error:", err);

@@ -17,7 +17,7 @@ export function buildJwtPayloadFromUser(user, options = {}) {
   const picture = doc.picture || doc.profilePicture || "";
   const role =
     isAdminSession ? "admin" : String(doc.role || "student").trim().toLowerCase();
-  return {
+  const payload = {
     userId,
     email,
     collegeId: collegeIdFromEmail(email),
@@ -38,4 +38,14 @@ export function buildJwtPayloadFromUser(user, options = {}) {
       ? new Date(doc.createdAt).toISOString()
       : new Date().toISOString(),
   };
+
+  // Session-only claim (not stored on the user document). Used for the login digest.
+  if (!isAdminSession && options.previousLastLoginAt) {
+    const previous = new Date(options.previousLastLoginAt);
+    if (!Number.isNaN(previous.getTime())) {
+      payload.previousLastLoginAt = previous.toISOString();
+    }
+  }
+
+  return payload;
 }

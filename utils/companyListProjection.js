@@ -89,6 +89,7 @@ export function projectCompanyListResponse(c) {
     createdAt: c.createdAt,
     focusTags: c.focusTags,
     helpfulCount: c.helpfulCount,
+    contentUpdatedAt: c.contentUpdatedAt || c.createdAt || null,
     totalGotIn: c.totalGotIn,
     ppoConversionGotIn: Number(c.ppoConversionGotIn) || 0,
     ppoConversionConverted: Number(c.ppoConversionConverted) || 0,

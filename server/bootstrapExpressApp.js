@@ -91,6 +91,9 @@ export function applySharedHttpMiddleware(app, options = {}) {
       if (req.path === "/api/companies/helpful/status/batch") {
         return next();
       }
+      if (req.path === "/api/dau/heartbeat") {
+        return next();
+      }
       if (req.path === "/health") {
         return next();
       }

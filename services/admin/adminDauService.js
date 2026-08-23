@@ -1,5 +1,11 @@
 import DauDayUser from "../../models/DauDayUser.js";
 import { utcDayKey } from "../dau/recordDauActivity.js";
+import { formatDauActionLabels } from "../dau/dauActions.js";
+import {
+  combineActiveMs,
+  formatActiveMsLabel,
+  getPendingActiveMsMap,
+} from "../dau/dauActiveTime.js";
 import {
   normalizeCollegeId,
   withCollegeEmailScope,
@@ -109,17 +115,31 @@ export async function getDauDayForAdmin(dayKey, collegeIdRaw = null) {
   const collegeId = resolveCollegeId(collegeIdRaw);
   const match = withCollegeEmailScope({ dayKey: key }, collegeId, "email");
   const rows = await DauDayUser.find(match)
-    .select("userId email username role lastSeenAt firstSeenAt")
+    .select("userId email username role lastSeenAt firstSeenAt activeMs")
     .sort({ lastSeenAt: -1 })
     .lean();
 
-  const users = rows.map((u) => ({
-    userId: u.userId || "",
-    username: u.username || "",
-    email: u.email || "",
-    role: u.role || "",
-    lastLoginAt: u.lastSeenAt || u.firstSeenAt || null,
-  }));
+  const today = utcDayKey();
+  const pendingByUser =
+    key === today
+      ? await getPendingActiveMsMap(
+          key,
+          rows.map((u) => u.userId)
+        )
+      : new Map();
+
+  const users = rows.map((u) => {
+    const activeMs = combineActiveMs(u.activeMs, pendingByUser.get(String(u.userId || "")));
+    return {
+      userId: u.userId || "",
+      username: u.username || "",
+      email: u.email || "",
+      role: u.role || "",
+      lastLoginAt: u.lastSeenAt || u.firstSeenAt || null,
+      activeMs,
+      activeLabel: formatActiveMsLabel(activeMs),
+    };
+  });
 
   return {
     date: key,
@@ -132,6 +152,45 @@ export async function getDauDayForAdmin(dayKey, collegeIdRaw = null) {
 }
 
 /**
+ * Activity chips for one DAU row. Fetched only when admin expands that user.
+ * @param {unknown} dayKey
+ * @param {unknown} userIdRaw
+ * @param {unknown} [collegeIdRaw]
+ */
+export async function getDauDayUserActivityForAdmin(
+  dayKey,
+  userIdRaw,
+  collegeIdRaw = null
+) {
+  const key = assertDayKey(dayKey);
+  const userId = String(userIdRaw || "").trim();
+  if (!userId) {
+    const err = new Error("Invalid user.");
+    err.code = "INVALID_USER";
+    throw err;
+  }
+  const collegeId = resolveCollegeId(collegeIdRaw);
+  const match = withCollegeEmailScope({ dayKey: key, userId }, collegeId, "email");
+  const row = await DauDayUser.findOne(match)
+    .select("actions openedCompanies prepPathCompanies")
+    .lean();
+  if (!row) {
+    const err = new Error("User not found for that day.");
+    err.code = "NOT_FOUND";
+    throw err;
+  }
+  return {
+    date: key,
+    userId,
+    actions: formatDauActionLabels(
+      row.actions,
+      row.openedCompanies,
+      row.prepPathCompanies
+    ),
+  };
+}
+
+/**
  * Full history for Excel — dau_day_users scoped to admin college.
  * @param {unknown} [collegeIdRaw]
  */
@@ -139,7 +198,7 @@ export async function getDauFullExportRows(collegeIdRaw = null) {
   const collegeId = resolveCollegeId(collegeIdRaw);
   const match = withCollegeEmailScope({}, collegeId, "email");
   const rowsRaw = await DauDayUser.find(match)
-    .select("dayKey userId email username role lastSeenAt firstSeenAt")
+    .select("dayKey userId email username role lastSeenAt firstSeenAt actions openedCompanies prepPathCompanies activeMs")
     .sort({ dayKey: 1, lastSeenAt: -1 })
     .lean();
 
@@ -148,19 +207,31 @@ export async function getDauFullExportRows(collegeIdRaw = null) {
     countByDay.set(r.dayKey, (countByDay.get(r.dayKey) || 0) + 1);
   }
 
-  const rows = rowsRaw.map((u) => ({
-    date: u.dayKey,
-    count: countByDay.get(u.dayKey) || 0,
-    username: u.username || "",
-    email: u.email || "",
-    role: u.role || "",
-    lastLoginAt: u.lastSeenAt
-      ? new Date(u.lastSeenAt).toISOString()
-      : u.firstSeenAt
-        ? new Date(u.firstSeenAt).toISOString()
-        : "",
-    userId: u.userId || "",
-  }));
+  const today = utcDayKey();
+  const todayIds = rowsRaw.filter((r) => r.dayKey === today).map((r) => r.userId);
+  const pendingByUser = await getPendingActiveMsMap(today, todayIds);
+
+  const rows = rowsRaw.map((u) => {
+    const pending = u.dayKey === today ? pendingByUser.get(String(u.userId || "")) : 0;
+    const activeMs = combineActiveMs(u.activeMs, pending);
+    return {
+      date: u.dayKey,
+      count: countByDay.get(u.dayKey) || 0,
+      username: u.username || "",
+      email: u.email || "",
+      role: u.role || "",
+      lastLoginAt: u.lastSeenAt
+        ? new Date(u.lastSeenAt).toISOString()
+        : u.firstSeenAt
+          ? new Date(u.firstSeenAt).toISOString()
+          : "",
+      userId: u.userId || "",
+      actions: formatDauActionLabels(u.actions, u.openedCompanies, u.prepPathCompanies),
+      activity: formatDauActionLabels(u.actions, u.openedCompanies, u.prepPathCompanies).join(", "),
+      activeMs,
+      activeLabel: formatActiveMsLabel(activeMs),
+    };
+  });
 
   return {
     rows,

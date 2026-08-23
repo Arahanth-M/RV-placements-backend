@@ -12,6 +12,7 @@ import {
 const parseMergePlacementByType = (raw) =>
   raw === true || raw === "true" || raw === "1" || raw === 1;
 import authJWT from "../middleware/authJWT.js";
+import { recordDauActivitySafe } from "../services/dau/recordDauActivity.js";
 import checkBetaAccess from "../middleware/checkBetaAccess.js";
 import authorize from "../middleware/authorize.js";
 import validateRequest from "../middleware/validateRequest.js";
@@ -781,6 +782,8 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
       invalidateInterviewSummaries(userId),
       invalidateInterviewDetail(session._id),
     ]);
+
+    recordDauActivitySafe(req.user, { action: "ai_interview" });
 
     return res.status(201).json({
       sessionId: session._id,

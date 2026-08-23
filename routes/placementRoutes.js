@@ -285,7 +285,7 @@ router.post(
     // Touch the authenticated student account record after submission.
     if (req.user && req.user._id) {
       await User1.findByIdAndUpdate(req.user._id, { lastLoginAt: new Date() }).catch(() => {});
-      recordDauActivitySafe(req.user);
+      recordDauActivitySafe(req.user, { action: "submitted_content" });
     }
 
     res.json({ 

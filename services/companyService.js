@@ -42,6 +42,9 @@ import { PPO_BRANCH_CODES, PPO_BRANCH_CODES_ARRAY, isValidPpoBranchCode, normali
 import { minCgpaFromEligibilityText } from "../utils/extractMinCgpa.js";
 import escapeRegexLiteral from "../utils/regexEscape.js";
 import { invalidateCompanyDetailCache } from "./companyDetailCache.js";
+import { companyCardContentUpdatedAtIso } from "./companyCardContentUpdatedPure.js";
+import { touchCardContentUpdated } from "./companyCardContentUpdated.js";
+import { recordVisitViewVelocity } from "./companyCardTrending.js";
 import {
   hydrateVisitRoles2026FromCache,
   invalidateVisitRoles2026Cache,
@@ -1032,8 +1035,9 @@ export async function mutateMustDoTopicForCompanyCluster(
     const normalizedNext = normalizeMustDoTopicArray(next);
     await CompanyVisit.updateOne(
       { _id: visit._id },
-      { $set: { must_do_topics: normalizedNext } }
+      { $set: { must_do_topics: normalizedNext, migratedAt: new Date() } }
     );
+    await touchCardContentUpdated({ companyId: cid, visitId: visit._id });
     modifiedCount += 1;
   }
 
@@ -2060,16 +2064,23 @@ export async function getApprovedPlacementYearsForCompany(
  * @param {number} [placementYear] when `visitId` is null, increment views for this year's approved visit
  */
 export async function incrementVisitViews(companyId, visitId, placementYear) {
-  if (visitId) {
-    return CompanyVisit.updateOne({ _id: visitId }, { $inc: { views: 1 } });
+  let targetId = visitId;
+  if (!targetId) {
+    const year =
+      placementYear != null ? normalizeCompanyDetailYear(placementYear) : COMPANY_VISIT_YEAR;
+    const v = await findLatestVisitForCompany(companyId, year);
+    targetId = v?._id;
   }
-  const year =
-    placementYear != null ? normalizeCompanyDetailYear(placementYear) : COMPANY_VISIT_YEAR;
-  const v = await findLatestVisitForCompany(companyId, year);
-  if (!v?._id) {
+  if (!targetId) {
     return { acknowledged: true, modifiedCount: 0, matchedCount: 0 };
   }
-  return CompanyVisit.updateOne({ _id: v._id }, { $inc: { views: 1 } });
+  const result = await CompanyVisit.updateOne(
+    { _id: targetId },
+    { $inc: { views: 1 } },
+    { timestamps: false }
+  );
+  recordVisitViewVelocity(targetId).catch(() => {});
+  return result;
 }
 
 /**
@@ -2425,6 +2436,10 @@ export async function listApprovedCompaniesLegacyMerged(
         placementSummerDateOfVisit,
         minCgpaByTier,
         minCgpaByVisitType,
+        contentUpdatedAt: companyCardContentUpdatedAtIso({
+          staticUpdatedAt: staticRow?.updatedAt,
+          visits: scopedVisits,
+        }),
       });
     }
   }
@@ -3079,7 +3094,10 @@ export async function adjustVisitTotalGotIn(
     ],
     { new: true }
   ).select("_id totalGotIn");
-  if (doc) await invalidateCompanyDetailCache(cid);
+  if (doc) {
+    await invalidateCompanyDetailCache(cid);
+    await touchCardContentUpdated({ companyId: cid, visitId: doc._id });
+  }
   return doc;
 }
 
@@ -4072,6 +4090,7 @@ export async function updateCompanyVisit(
   const result = await CompanyVisit.updateOne({ _id: anchor._id }, { $set });
   if (result.modifiedCount > 0) {
     await invalidateCompanyDetailCache(cid);
+    await touchCardContentUpdated({ companyId: cid, visitId: anchor._id });
     if ($set.roles !== undefined) {
       await invalidateVisitRoles2026Cache({
         visitId: anchor._id,
@@ -4185,6 +4204,7 @@ export async function updateCompanyStatic(companyId, data) {
   const result = await CompanyStatic.updateOne({ _id: cid }, { $set });
   if (result.modifiedCount > 0) {
     await invalidateCompanyDetailCache(cid);
+    await touchCardContentUpdated({ companyId: cid });
   }
   return result;
 }
@@ -4252,6 +4272,7 @@ export async function addHelpfulVote(companyId, userEmail) {
 
   if (res.modifiedCount > 0) {
     await invalidateCompanyDetailCache(cid);
+    await touchCardContentUpdated({ companyId: cid });
     return { updateResult: res, alreadyVoted: false };
   }
   const doc = await CompanyStatic.findOne({ _id: cid }).lean();

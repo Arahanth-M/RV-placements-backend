@@ -24,6 +24,8 @@ import {
   getCachedCompanyList,
   setCachedCompanyList,
 } from "../services/companyListCache.js";
+import { attachTrendingFlagsToCompanyList, attachAdminCompanyCardViews, stripCompanyListViews } from "../services/companyCardTrending.js";
+import { attachCardContentUpdatedAt } from "../services/companyCardContentUpdated.js";
 import {
   getCompanyDetailRequestStatus,
   submitCompanyDetailRequest,
@@ -47,12 +49,32 @@ import {
   normalizePlacementClusterQuery,
 } from "../utils/placementCluster.js";
 import { getPlacementHubSettingsForApi } from "../services/placementHubSettingsService.js";
+import { attachExperienceEntryDatesFromDb } from "../services/experienceEntryDatesAttach.js";
 import mongoose from "mongoose";
 import { getAuthUserModel } from "../utils/authUserModel.js";
 dotenv.config();
 
 /** Redis TTL for GET /api/companies/:id payload cache (keep short — placement rows change often) */
 const COMPANY_DETAIL_REDIS_TTL_SECONDS = 3 * 60;
+
+async function presentCompanyListForViewer(list, req) {
+  const withTrending = await attachTrendingFlagsToCompanyList(list);
+  const withContentUpdated = await attachCardContentUpdatedAt(withTrending);
+  const withoutViews = stripCompanyListViews(withContentUpdated);
+  if (req.user?.isAdminSession === true) {
+    return attachAdminCompanyCardViews(withoutViews);
+  }
+  return withoutViews;
+}
+
+function omitViewsUnlessAdmin(payload, req) {
+  if (req.user?.isAdminSession === true) return payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  if (!Object.prototype.hasOwnProperty.call(payload, "views")) return payload;
+  const next = { ...payload };
+  delete next.views;
+  return next;
+}
 
 const companyRouter = express.Router();
 
@@ -101,7 +123,7 @@ companyRouter.get("/", optionalAuthJWT, async (req, res) => {
       collegeId
     );
     if (cachedList) {
-      return res.json(cachedList);
+      return res.json(await presentCompanyListForViewer(cachedList, req));
     }
 
     // Cluster-scoped merge (Mongo read-only). Filter retained as safety net.
@@ -158,7 +180,7 @@ companyRouter.get("/", optionalAuthJWT, async (req, res) => {
       prioritizeNonZeroGotIn: collegeId === COLLEGE_ID_RVITM,
     });
     await setCachedCompanyList(selectedYear, requestedCluster, collegeId, sorted);
-    return res.json(sorted);
+    return res.json(await presentCompanyListForViewer(sorted, req));
   } catch (e) {
     console.error("❌ Error fetching companies:", e.message);
     return res.status(500).json({ error: "Server error" });
@@ -304,8 +326,11 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
     }
 
     const AuthUserModel = getAuthUserModel(req);
-    const touchUserActivity = () => {
-      recordDauActivitySafe(req.user);
+    const touchUserActivity = (companyName) => {
+      recordDauActivitySafe(req.user, {
+        action: "opened_company",
+        openedCompany: companyName,
+      });
       return AuthUserModel.updateOne(
         { _id: req.user?._id },
         { $set: { lastLoginAt: new Date(), lastActiveAt: new Date() } }
@@ -340,7 +365,7 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
           companyOid
             ? incrementVisitViews(companyOid, null, placementVisitYear).catch(() => {})
             : Promise.resolve(),
-          touchUserActivity(),
+          touchUserActivity(parsed?.name),
         ]);
         console.log("HIT — company found in Redis and served from cache:", id, "y=", placementVisitYear);
         const categorized = attachPlacementCategoryToCompany(
@@ -356,11 +381,20 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
           }
         );
         const scoped = applyCollegeScopeToCompanyPayload(categorized, collegeId);
-        return res.json({
-          ...scoped,
-          category: categorized.category,
-          totalCtcRupees: categorized.totalCtcRupees,
-        });
+        const withExperienceDates = await attachExperienceEntryDatesFromDb(
+          scoped,
+          companyOid
+        );
+        return res.json(
+          omitViewsUnlessAdmin(
+            {
+              ...withExperienceDates,
+              category: categorized.category,
+              totalCtcRupees: categorized.totalCtcRupees,
+            },
+            req
+          )
+        );
       } catch {
         // Bad cache payload — fall through to MongoDB
       }
@@ -391,7 +425,7 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
 
     await Promise.all([
       incrementVisitViews(companyOid, visitForViews?._id ?? null, placementVisitYear).catch(() => {}),
-      touchUserActivity(),
+      touchUserActivity(companyObj?.name),
     ]);
 
     // Convert Map -> Object for each role (if any Map slipped through)
@@ -469,11 +503,20 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
       collegeId,
     });
     const scoped = applyCollegeScopeToCompanyPayload(categorized, collegeId);
-    return res.json({
-      ...scoped,
-      category: categorized.category,
-      totalCtcRupees: categorized.totalCtcRupees,
-    });
+    const withExperienceDates = await attachExperienceEntryDatesFromDb(
+      scoped,
+      companyOid
+    );
+    return res.json(
+      omitViewsUnlessAdmin(
+        {
+          ...withExperienceDates,
+          category: categorized.category,
+          totalCtcRupees: categorized.totalCtcRupees,
+        },
+        req
+      )
+    );
   } catch (err) {
     if (err.name === "CastError") {
       return res.status(404).json({ error: "Company not found" });
@@ -576,6 +619,7 @@ companyRouter.post("/:id/helpful", authJWT, async (req, res) => {
     const helpfulCount = companyRow.helpfulCount ?? 0;
 
     if (updateResult.modifiedCount > 0) {
+      recordDauActivitySafe(req.user, { action: "helpful" });
       return res.json({ helpfulCount, hasUpvoted: true });
     }
     if (alreadyVoted) {

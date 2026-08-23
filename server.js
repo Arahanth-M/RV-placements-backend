@@ -34,6 +34,7 @@ import leaderboardRouter from "./routes/leaderboardRoutes.js";
 import interviewRouter from "./routes/interviewRoutes.js";
 import resumeRouter from "./routes/resumeRoutes.js";
 import prepPathRouter from "./routes/prepPathRoutes.js";
+import dauRouter from "./routes/dauRoutes.js";
 
 import "./services/passport.js";
 
@@ -113,6 +114,9 @@ if (process.env.NODE_ENV !== "test") {
     if (req.path === "/api/companies/helpful/status/batch") {
       return next();
     }
+    if (req.path === "/api/dau/heartbeat") {
+      return next();
+    }
     return globalLimiter(req, res, next);
   });
 }
@@ -152,6 +156,7 @@ app.use(routes.LEADERBOARD, leaderboardRouter);
 app.use(routes.INTERVIEW, interviewRouter);
 app.use(routes.RESUME, resumeRouter);
 app.use(routes.PREP_PATH, prepPathRouter);
+app.use(routes.DAU, dauRouter);
 
 /**
  * 6. Server Initialization

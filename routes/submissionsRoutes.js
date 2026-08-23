@@ -16,6 +16,7 @@ import {
   normalizeSubmitterEmail,
 } from "../services/mySubmissionsCache.js";
 import { recordDauActivitySafe } from "../services/dau/recordDauActivity.js";
+import { getLoginContentDigest } from "../services/loginContentDigestService.js";
 
 
 const submissionRouter = express.Router();
@@ -85,6 +86,26 @@ submissionRouter.get(
   }
 );
 
+submissionRouter.get(
+  "/since-last-login",
+  authJWT,
+  checkBetaAccess,
+  authorize(["student", "admin", "spc"]),
+  async (req, res) => {
+    try {
+      const digest = await getLoginContentDigest({
+        since: req.query?.since,
+        previousLastLoginAt: req.user?.previousLastLoginAt,
+        viewerEmail: req.user?.email,
+      });
+      return res.json(digest);
+    } catch (error) {
+      console.error("Error fetching login content digest:", error);
+      return res.status(500).json({ error: "Error fetching recent contributions" });
+    }
+  }
+);
+
 submissionRouter.post(
   "/",
   authJWT,
@@ -137,7 +158,7 @@ submissionRouter.post(
         { $set: { lastLoginAt: new Date(), lastActiveAt: new Date() } }
       ),
     ]);
-    recordDauActivitySafe(req.user);
+    recordDauActivitySafe(req.user, { action: "submitted_content" });
 
     await invalidateMySubmissionsCacheByEmail(req.user?.email);
 

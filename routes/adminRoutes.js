@@ -26,6 +26,8 @@ import {
   adminCompanyRolesSchema,
   adminCompanyGeneralSchema,
   adminPlacementHubSettingsSchema,
+  adminTrendingCardPinSchema,
+  adminTrendingCardCompanyQuerySchema,
 } from "../validations/admin.validation.js";
 import { spcCompanySuggestQuerySchema } from "../validations/placement.validation.js";
 import {
@@ -50,6 +52,7 @@ import { getAdminUsageAnalytics } from "../services/adminUsageAnalyticsService.j
 import {
   getDauSummaryForAdmin,
   getDauDayForAdmin,
+  getDauDayUserActivityForAdmin,
   getDauFullExportRows,
 } from "../services/admin/adminDauService.js";
 import {
@@ -127,6 +130,13 @@ import {
   saveGeneralStatsForCollege,
 } from "../services/placementGeneralStatsCache.js";
 import { parseGeneralStatsYear } from "../utils/generalStatsYears.js";
+import {
+  listPinnedTrendingCards,
+  listApprovedVisitsForTrendingPicker,
+  pinVisitTrending,
+  unpinVisitTrending,
+} from "../services/companyCardTrending.js";
+import { touchCardContentUpdated } from "../services/companyCardContentUpdated.js";
 import {
   generateSubmissionAnswer,
   isSubmissionAddAnswerSupported,
@@ -935,6 +945,29 @@ adminRouter.get("/dau/export", async (req, res) => {
   }
 });
 
+/** Activity chips for one user on one day (fetched when admin expands that row). */
+adminRouter.get("/dau/:dayKey/users/:userId", async (req, res) => {
+  try {
+    const collegeId = collegeIdFromUser(req.user);
+    const data = await getDauDayUserActivityForAdmin(
+      req.params.dayKey,
+      req.params.userId,
+      collegeId
+    );
+    return res.json({ success: true, ...data });
+  } catch (err) {
+    const code = err?.code || "";
+    if (code === "INVALID_DAY" || code === "INVALID_USER") {
+      return res.status(400).json({ error: err.message, code });
+    }
+    if (code === "NOT_FOUND") {
+      return res.status(404).json({ error: err.message, code });
+    }
+    console.error("GET /api/admin/dau/:dayKey/users/:userId:", err?.message || err);
+    return res.status(500).json({ error: "Failed to load user activity" });
+  }
+});
+
 /** Users for one day (fetched only when admin clicks a day chip). */
 adminRouter.get("/dau/:dayKey", async (req, res) => {
   try {
@@ -962,6 +995,65 @@ adminRouter.get("/usage-analytics", async (req, res) => {
     return res.json(data);
   } catch (err) {
     console.error("GET /api/admin/usage-analytics:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+adminRouter.get("/trending-cards", async (_req, res) => {
+  try {
+    const items = await listPinnedTrendingCards();
+    return res.json({ items, pinHours: 24 });
+  } catch (err) {
+    console.error("GET /api/admin/trending-cards:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+adminRouter.get(
+  "/trending-cards/visits",
+  validateRequest({ querySchema: adminTrendingCardCompanyQuerySchema }),
+  async (req, res) => {
+    try {
+      const items = await listApprovedVisitsForTrendingPicker(req.query.companyId);
+      return res.json({ items });
+    } catch (err) {
+      console.error("GET /api/admin/trending-cards/visits:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
+adminRouter.post(
+  "/trending-cards",
+  validateRequest(adminTrendingCardPinSchema),
+  async (req, res) => {
+    try {
+      const item = await pinVisitTrending(req.body.visitId);
+      return res.json({
+        message: "Company card marked trending for 24 hours",
+        item,
+      });
+    } catch (err) {
+      const status = Number(err?.statusCode) || 500;
+      if (status < 500) {
+        return res.status(status).json({ error: err.message });
+      }
+      console.error("POST /api/admin/trending-cards:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
+adminRouter.delete("/trending-cards/:visitId", async (req, res) => {
+  try {
+    const visitId = String(req.params.visitId || "").trim();
+    if (!/^[a-fA-F0-9]{24}$/.test(visitId)) {
+      return res.status(400).json({ error: "Invalid visitId" });
+    }
+    await unpinVisitTrending(visitId);
+    return res.json({ message: "Trending mark removed" });
+  } catch (err) {
+    console.error("DELETE /api/admin/trending-cards/:visitId:", err);
     return res.status(500).json({ error: "Server error" });
   }
 });
@@ -2287,6 +2379,10 @@ submissionModRouter.put(
         }
       );
       await invalidateCompanyDetailCache(req.params.id);
+      await touchCardContentUpdated({
+        companyId: req.params.id,
+        visitId: loaded.visit._id,
+      });
 
       const out = (
         await getCompanyMergedForAdminById(
@@ -2334,6 +2430,10 @@ submissionModRouter.delete("/companies/:id/recruitment-process", async (req, res
       }
     );
     await invalidateCompanyDetailCache(req.params.id);
+    await touchCardContentUpdated({
+      companyId: req.params.id,
+      visitId: loaded.visit._id,
+    });
 
     const out = (
       await getCompanyMergedForAdminById(
@@ -2653,6 +2753,7 @@ adminRouter.post("/jd-import/apply", async (req, res) => {
 
     await CompanyVisit.updateOne({ _id: freshVisit._id }, mongoUpdate);
     await invalidateCompanyDetailCache(companyId);
+    await touchCardContentUpdated({ companyId, visitId: freshVisit._id });
     await invalidateVisitRoles2026Cache({
       visitId: freshVisit._id,
       companyId,
@@ -2809,6 +2910,7 @@ adminRouter.put("/min-cgpa-gaps/:visitId", async (req, res) => {
     }
 
     await invalidateCompanyDetailCache(visit.companyId);
+    await touchCardContentUpdated({ companyId: visit.companyId, visitId: visit._id });
 
     res.json({
       message: hasMinCgpa && hasEligibility
@@ -3117,6 +3219,7 @@ adminRouter.put("/rvitm-data/:visitId", async (req, res) => {
 
     if (updated?.companyId) {
       await invalidateCompanyDetailCache(updated.companyId);
+      await touchCardContentUpdated({ companyId: updated.companyId, visitId: updated._id });
       if (rolesIn != null) {
         await invalidateVisitRoles2026Cache({
           visitId: updated._id,

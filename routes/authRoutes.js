@@ -61,7 +61,12 @@ const setTokenCookie = (res, user, options = {}) => {
     console.warn("JWT_SECRET is not set; skipping token cookie");
     return;
   }
-  const payload = buildJwtPayloadFromUser(user, options);
+  const previousLastLoginAt =
+    options.previousLastLoginAt ?? user?.$locals?.previousLastLoginAt ?? null;
+  const payload = buildJwtPayloadFromUser(user, {
+    ...options,
+    previousLastLoginAt,
+  });
   const token = jwt.sign(payload, config.JWT_SECRET, { expiresIn: "7d" });
   res.cookie("token", token, {
     httpOnly: true,

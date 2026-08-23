@@ -1,4 +1,5 @@
 import DauDayUser from "../../models/DauDayUser.js";
+import { normalizeDauAction, normalizeOpenedCompanyName } from "./dauActions.js";
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -13,7 +14,11 @@ export function utcDayKey(date = new Date()) {
 /**
  * Record that this user was active today.
  * Unique on (dayKey, userId) → same user on two days = two rows = DAU on both days.
- * Never writes to users1.
+ * Never writes to users1. Never rewrites identity fields on existing dau_day_users rows.
+ * Optional `extras.action` is $addToSet onto `actions`.
+ * Optional `extras.openedCompany` is $addToSet onto `openedCompanies`.
+ * Optional `extras.prepPathCompany` is $addToSet onto `prepPathCompanies`.
+ * Existing identity fields on dau_day_users rows are never rewritten.
  */
 export async function recordDauActivity(userOrId, extras = {}) {
   const userId = String(
@@ -31,24 +36,38 @@ export async function recordDauActivity(userOrId, extras = {}) {
   const role = String(extras.role ?? fromObj.role ?? "").trim();
   const dayKey = utcDayKey(extras.at ? new Date(extras.at) : new Date());
   const now = new Date();
+  const action = normalizeDauAction(extras.action);
+  const openedCompany = normalizeOpenedCompanyName(extras.openedCompany);
+  const prepPathCompany = normalizeOpenedCompanyName(extras.prepPathCompany);
+  const resolvedAction =
+    action ||
+    (openedCompany ? "opened_company" : "") ||
+    (prepPathCompany ? "prep_path" : "");
 
-  await DauDayUser.updateOne(
-    { dayKey, userId },
-    {
-      $setOnInsert: {
-        dayKey,
-        userId,
-        email,
-        username,
-        role,
-        firstSeenAt: now,
-      },
-      $set: {
-        lastSeenAt: now,
-      },
+  /** @type {Record<string, unknown>} */
+  const update = {
+    $setOnInsert: {
+      dayKey,
+      userId,
+      email,
+      username,
+      role,
+      firstSeenAt: now,
     },
-    { upsert: true }
-  );
+    $set: {
+      lastSeenAt: now,
+    },
+  };
+  /** @type {Record<string, unknown>} */
+  const addToSet = {};
+  if (resolvedAction) addToSet.actions = resolvedAction;
+  if (openedCompany) addToSet.openedCompanies = openedCompany;
+  if (prepPathCompany) addToSet.prepPathCompanies = prepPathCompany;
+  if (Object.keys(addToSet).length > 0) {
+    update.$addToSet = addToSet;
+  }
+
+  await DauDayUser.updateOne({ dayKey, userId }, update, { upsert: true });
 }
 
 /** Fire-and-forget; never throws to callers. */

@@ -157,6 +157,14 @@ export const adminCompanyGeneralSchema = Joi.object({
     .optional(),
 }).unknown(true);
 
+export const adminTrendingCardPinSchema = Joi.object({
+  visitId: Joi.string().trim().hex().length(24).required(),
+});
+
+export const adminTrendingCardCompanyQuerySchema = Joi.object({
+  companyId: Joi.string().trim().hex().length(24).required(),
+});
+
 export default {
   adminOaQuestionUpdateSchema,
   adminInterviewQuestionUpdateSchema,
