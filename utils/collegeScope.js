@@ -58,6 +58,18 @@ export function collegeIdFromUser(user) {
 }
 
 /**
+ * RVITM placement admins may view shared company content but must not mutate
+ * roles/CTC, OA, interview Qs/experiences, or approve/reject companies.
+ * RVCE admins are unchanged.
+ */
+export function adminMayMutateSharedCompanyContent(user) {
+  if (user?.isAdminSession !== true && String(user?.role || "").toLowerCase() !== "admin") {
+    return false;
+  }
+  return collegeIdFromUser(user) !== COLLEGE_ID_RVITM;
+}
+
+/**
  * True when email maps to the given college (same rules as {@link collegeIdFromEmail}).
  * @param {unknown} email
  * @param {unknown} collegeIdRaw

@@ -57,6 +57,12 @@ dotenv.config();
 /** Redis TTL for GET /api/companies/:id payload cache (keep short — placement rows change often) */
 const COMPANY_DETAIL_REDIS_TTL_SECONDS = 3 * 60;
 
+/** Hover/touch prefetch must not count as opening a company card. */
+function isCompanyDetailPrefetch(req) {
+  const raw = String(req.query?.prefetch ?? "").trim().toLowerCase();
+  return raw === "1" || raw === "true";
+}
+
 async function presentCompanyListForViewer(list, req) {
   const withTrending = await attachTrendingFlagsToCompanyList(list);
   const withContentUpdated = await attachCardContentUpdatedAt(withTrending);
@@ -326,7 +332,9 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
     }
 
     const AuthUserModel = getAuthUserModel(req);
+    const skipOpenSideEffects = isCompanyDetailPrefetch(req);
     const touchUserActivity = (companyName) => {
+      if (skipOpenSideEffects) return Promise.resolve();
       recordDauActivitySafe(req.user, {
         action: "opened_company",
         openedCompany: companyName,
@@ -362,9 +370,9 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
             )
           : [];
         await Promise.all([
-          companyOid
-            ? incrementVisitViews(companyOid, null, placementVisitYear).catch(() => {})
-            : Promise.resolve(),
+          skipOpenSideEffects || !companyOid
+            ? Promise.resolve()
+            : incrementVisitViews(companyOid, null, placementVisitYear).catch(() => {}),
           touchUserActivity(parsed?.name),
         ]);
         console.log("HIT — company found in Redis and served from cache:", id, "y=", placementVisitYear);
@@ -424,7 +432,9 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
     );
 
     await Promise.all([
-      incrementVisitViews(companyOid, visitForViews?._id ?? null, placementVisitYear).catch(() => {}),
+      skipOpenSideEffects
+        ? Promise.resolve()
+        : incrementVisitViews(companyOid, visitForViews?._id ?? null, placementVisitYear).catch(() => {}),
       touchUserActivity(companyObj?.name),
     ]);
 

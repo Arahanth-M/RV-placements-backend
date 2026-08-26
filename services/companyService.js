@@ -2198,6 +2198,16 @@ export async function getCompanyDetailLegacyMergedById(
     totalGotInByYear,
     placementBranchStatsByYear,
   };
+  const clusterMustDo = withClusterMustDoTopics(
+    { cluster: placementClusterRaw },
+    mustDoTopicVisits
+  );
+  if (
+    Array.isArray(clusterMustDo?.must_do_topics) &&
+    clusterMustDo.must_do_topics.length > 0
+  ) {
+    merged.Must_Do_Topics = clusterMustDo.must_do_topics;
+  }
   if (collegeId) {
     merged = applyCollegeScopeToCompanyPayload(merged, collegeId);
   }

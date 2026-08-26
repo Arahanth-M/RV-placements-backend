@@ -1,5 +1,6 @@
 import {
   DEFAULT_COLLEGE_ID,
+  COLLEGE_ID_RVITM,
   collegeIdFromUser,
   emailBelongsToCollege,
   normalizeCollegeId,
@@ -186,6 +187,16 @@ submissionModRouter.use(attachSpcCluster);
 adminRouter.use(submissionModRouter);
 adminRouter.use(authorize(["admin"]));
 adminRouter.use(requireAdmin);
+
+function forbidRvitmAdminCompanyMutations(req, res, next) {
+  if (collegeIdFromUser(req.user) === COLLEGE_ID_RVITM) {
+    return res.status(403).json({
+      error:
+        "RVITM admins cannot edit shared company content or approve/reject companies",
+    });
+  }
+  return next();
+}
 
 adminRouter.get("/students/batch-import/column-guide", (_req, res) => {
   res.json({ columns: STUDENT_BATCH_COLUMN_GUIDE });
@@ -1392,7 +1403,7 @@ adminRouter.get("/companies", async (req, res) => {
 });
 
 // Approve a company (one `company_visits` row — use companyVisitId when several rows share the same year)
-adminRouter.post("/companies/:id/approve", async (req, res) => {
+adminRouter.post("/companies/:id/approve", forbidRvitmAdminCompanyMutations, async (req, res) => {
   try {
     const y = adminVisitYearFromQuery(req);
     const companyIdParam = req.params.id;
@@ -1495,7 +1506,7 @@ adminRouter.post("/companies/:id/approve", async (req, res) => {
 });
 
 // Reject a pending company visit for the selected year (`companyVisitId` when multiple pending rows share the year)
-adminRouter.delete("/companies/:id/reject", async (req, res) => {
+adminRouter.delete("/companies/:id/reject", forbidRvitmAdminCompanyMutations, async (req, res) => {
   try {
     const y = adminVisitYearFromQuery(req);
     const hint = req.query?.companyVisitId ?? null;
@@ -1553,6 +1564,7 @@ adminRouter.delete("/companies/:id/delete", async (req, res) => {
 // ---------- Admin edit/delete OA questions, interview questions, interview process ----------
 adminRouter.put(
   "/companies/:id/oa-questions/:index",
+  forbidRvitmAdminCompanyMutations,
   validateRequest(adminOaQuestionUpdateSchema),
   async (req, res) => {
   try {
@@ -1611,7 +1623,7 @@ adminRouter.put(
   }
 });
 
-adminRouter.delete("/companies/:id/oa-questions/:index", async (req, res) => {
+adminRouter.delete("/companies/:id/oa-questions/:index", forbidRvitmAdminCompanyMutations, async (req, res) => {
   try {
     const { y, placementListContext, companyVisitIdHint, placementCluster } = adminVisitContextFromReq(req);
     const loaded = await getCompanyMergedForAdminById(
@@ -1660,6 +1672,7 @@ adminRouter.delete("/companies/:id/oa-questions/:index", async (req, res) => {
 
 adminRouter.put(
   "/companies/:id/interview-questions/:index",
+  forbidRvitmAdminCompanyMutations,
   validateRequest(adminInterviewQuestionUpdateSchema),
   async (req, res) => {
   try {
@@ -1718,7 +1731,7 @@ adminRouter.put(
   }
 });
 
-adminRouter.delete("/companies/:id/interview-questions/:index", async (req, res) => {
+adminRouter.delete("/companies/:id/interview-questions/:index", forbidRvitmAdminCompanyMutations, async (req, res) => {
   try {
     const { y, placementListContext, companyVisitIdHint, placementCluster } = adminVisitContextFromReq(req);
     const loaded = await getCompanyMergedForAdminById(
@@ -1767,6 +1780,7 @@ adminRouter.delete("/companies/:id/interview-questions/:index", async (req, res)
 
 adminRouter.put(
   "/companies/:id/interview-process/:index",
+  forbidRvitmAdminCompanyMutations,
   validateRequest(adminInterviewProcessUpdateSchema),
   async (req, res) => {
   try {
@@ -1826,7 +1840,7 @@ adminRouter.put(
   }
 });
 
-adminRouter.delete("/companies/:id/interview-process/:index", async (req, res) => {
+adminRouter.delete("/companies/:id/interview-process/:index", forbidRvitmAdminCompanyMutations, async (req, res) => {
   try {
     const { y, placementListContext, companyVisitIdHint, placementCluster } = adminVisitContextFromReq(req);
     const loaded = await getCompanyMergedForAdminById(
@@ -2218,6 +2232,7 @@ adminRouter.patch(
 // PUT /api/admin/companies/:id/roles - replace roles & CTC details (admin only)
 adminRouter.put(
   "/companies/:id/roles",
+  forbidRvitmAdminCompanyMutations,
   validateRequest(adminCompanyRolesSchema),
   async (req, res) => {
   try {

@@ -68,16 +68,36 @@ function fillDaySeries(days, rangeStartUtc, docs) {
 }
 
 /**
- * InterviewSession / PrepPathPlan store `userId` as users1._id string.
- * Resolve college members once per analytics request (read-only).
+ * InterviewSession / PrepPathPlan store `userId` as users1.googleId (JWT userId),
+ * not Mongo `_id`. Include both so analytics match either storage shape.
+ * @param {Array<{ _id?: unknown, googleId?: unknown }>} rows
+ * @returns {string[]}
+ */
+export function usageAnalyticsIdentityIdsFromUsers(rows) {
+  const seen = new Set();
+  const ids = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    for (const raw of [row?.googleId, row?._id]) {
+      const id = String(raw || "").trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * InterviewSession / PrepPathPlan store JWT `userId` (users1.googleId).
+ * College members are resolved read-only from users1 email.
  * @param {string} collegeId
  * @returns {Promise<string[]>}
  */
 async function listUserIdStringsForCollege(collegeId) {
   const rows = await User1.find(withCollegeEmailScope({}, collegeId, "email"))
-    .select("_id")
+    .select("_id googleId")
     .lean();
-  return rows.map((r) => String(r._id));
+  return usageAnalyticsIdentityIdsFromUsers(rows);
 }
 
 async function aggregateByIstDay(Model, rangeStartUtc, userIds) {
