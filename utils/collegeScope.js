@@ -59,8 +59,8 @@ export function collegeIdFromUser(user) {
 
 /**
  * RVITM placement admins may view shared company content but must not mutate
- * roles/CTC, OA, interview Qs/experiences, or approve/reject companies.
- * RVCE admins are unchanged.
+ * roles/CTC, eligibility, program got-in, OA, interview Qs/experiences, or
+ * approve/reject companies. RVCE admins are unchanged.
  */
 export function adminMayMutateSharedCompanyContent(user) {
   if (user?.isAdminSession !== true && String(user?.role || "").toLowerCase() !== "admin") {

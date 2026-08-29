@@ -198,6 +198,10 @@ function forbidRvitmAdminCompanyMutations(req, res, next) {
   return next();
 }
 
+function isRvitmAdminUser(user) {
+  return collegeIdFromUser(user) === COLLEGE_ID_RVITM;
+}
+
 adminRouter.get("/students/batch-import/column-guide", (_req, res) => {
   res.json({ columns: STUDENT_BATCH_COLUMN_GUIDE });
 });
@@ -2020,6 +2024,14 @@ adminRouter.put(
       placementGotInBranchStats,
     } = req.body || {};
     const payload = {};
+    if (
+      isRvitmAdminUser(req.user) &&
+      (totalGotIn !== undefined || placementGotInBranchStats !== undefined)
+    ) {
+      return res.status(403).json({
+        error: "RVITM admins cannot edit program got-in counts",
+      });
+    }
     if (totalStudentsApplied !== undefined) {
       const n = parseInt(totalStudentsApplied, 10);
       if (isNaN(n) || n < 0) return res.status(400).json({ error: "totalStudentsApplied must be a non-negative number" });
@@ -2195,6 +2207,7 @@ adminRouter.put(
 
 adminRouter.patch(
   "/companies/:id/total-got-in",
+  forbidRvitmAdminCompanyMutations,
   validateRequest(adminCompanyTotalGotInAdjustmentSchema),
   async (req, res) => {
     try {
@@ -2299,6 +2312,12 @@ adminRouter.put(
     const { y, placementListContext, companyVisitIdHint, placementCluster } = adminVisitContextFromReq(req);
     const { eligibility, business_model, type, offCampus, date_of_visit, cluster } =
       req.body || {};
+
+    if (isRvitmAdminUser(req.user) && eligibility !== undefined) {
+      return res.status(403).json({
+        error: "RVITM admins cannot edit eligibility details",
+      });
+    }
 
     const updateData = {};
     if (eligibility !== undefined) updateData.eligibility = sanitizeText(eligibility);
