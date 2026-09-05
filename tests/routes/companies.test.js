@@ -72,4 +72,13 @@ describe('Company API Routes (split schema)', () => {
       }
     });
   });
+
+  describe("GET /api/companies/home-stats", () => {
+    it("returns a registered user count", async () => {
+      const res = await request(app).get("/api/companies/home-stats").expect(200);
+      expect(res.body).toHaveProperty("registeredUsers");
+      expect(typeof res.body.registeredUsers).toBe("number");
+      expect(res.body.registeredUsers).toBeGreaterThanOrEqual(0);
+    });
+  });
 });

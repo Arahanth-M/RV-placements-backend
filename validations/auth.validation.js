@@ -16,7 +16,14 @@ export const googleAuthFallbackSchema = Joi.object({
   email: emailField,
 }).unknown(false);
 
+export const blockedLoginInterestSchema = Joi.object({
+  token: Joi.string().trim().min(20).max(2000).required(),
+  collegeName: Joi.string().trim().min(2).max(120).required(),
+  wantsPlatformAtCollege: Joi.boolean().optional(),
+}).unknown(false);
+
 export default {
   loginSchema,
   googleAuthFallbackSchema,
+  blockedLoginInterestSchema,
 };

@@ -45,4 +45,11 @@ describe("Resume routes auth", () => {
       .expect(401);
     expect(response.body).toHaveProperty("error");
   });
+
+  it("rejects unauthenticated uploaded resume ATS scoring", async () => {
+    const response = await request(app)
+      .post("/api/resume/analyze-upload")
+      .expect(401);
+    expect(response.body).toHaveProperty("error");
+  });
 });

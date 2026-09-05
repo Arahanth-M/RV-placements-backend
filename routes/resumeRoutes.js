@@ -1,4 +1,5 @@
 import express from "express";
+import multer from "multer";
 import authJWT from "../middleware/authJWT.js";
 import checkBetaAccess from "../middleware/checkBetaAccess.js";
 import authorize from "../middleware/authorize.js";
@@ -13,14 +14,38 @@ import { buildPdfBufferFromResume } from "../services/resumePdfExport.js";
 import { buildDocxBufferFromResume } from "../services/resumeDocxExport.js";
 import { sanitizeResumePayload } from "../services/resume/sanitizeResumePayload.js";
 import { analyzeResume } from "../services/resume/analyze/index.js";
+import { mapResumeTextToPayload } from "../services/resume/analyze/mapResumeTextToPayload.js";
+import { extractResumeText } from "../services/prepPath/resumeTextExtract.js";
 import {
   createAtsAnalysisCacheKey,
   getCachedAtsAnalysis,
   setCachedAtsAnalysis,
 } from "../services/resume/analyze/cache.js";
 import resumeAnalyzeLimiter from "../middleware/resumeAnalyzeLimiter.js";
+import { atsUploadQuota } from "../middleware/resumeAtsUploadQuota.js";
 
 const router = express.Router();
+
+const atsUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const name = String(file?.originalname || "").toLowerCase();
+    const mime = String(file?.mimetype || "").toLowerCase();
+    const ok =
+      mime.includes("pdf") ||
+      mime.includes("wordprocessingml") ||
+      mime.includes("officedocument") ||
+      name.endsWith(".pdf") ||
+      name.endsWith(".docx");
+    if (!ok) {
+      const err = new Error("Upload a PDF or DOCX resume.");
+      err.code = "RESUME_TYPE";
+      return cb(err);
+    }
+    return cb(null, true);
+  },
+});
 
 function buildEmptyDraft() {
   return {
@@ -235,5 +260,129 @@ router.post(
   }
   }
 );
+
+router.get("/analyze-upload/quota", async (req, res) => {
+  try {
+    const quota = await atsUploadQuota.getQuota(req);
+    return res.json({ success: true, quota });
+  } catch (error) {
+    console.error("[resume] analyze-upload quota failed", error?.message || error);
+    return res.status(500).json({ error: "Failed to load upload quota" });
+  }
+});
+
+router.post("/analyze-upload", (req, res) => {
+  atsUpload.single("resume")(req, res, async (uploadErr) => {
+    if (uploadErr) {
+      const code = uploadErr.code || "";
+      if (code === "LIMIT_FILE_SIZE") {
+        return res.status(400).json({ error: "Resume must be 5MB or smaller." });
+      }
+      return res.status(400).json({
+        error: uploadErr.message || "Invalid resume upload.",
+        code: uploadErr.code || "UPLOAD_ERROR",
+      });
+    }
+
+    const startedAt = Date.now();
+    try {
+      const ownerEmail = String(req.user?.email || "").trim().toLowerCase();
+      if (!ownerEmail) return res.status(401).json({ error: "Unauthorized" });
+
+      if (!req.file?.buffer) {
+        return res.status(400).json({
+          error: "Attach a resume (PDF or DOCX).",
+          code: "RESUME_REQUIRED",
+        });
+      }
+
+      let resumeText;
+      try {
+        resumeText = await extractResumeText({
+          buffer: req.file.buffer,
+          mime: req.file.mimetype,
+          originalName: req.file.originalname,
+        });
+      } catch (parseErr) {
+        const code = parseErr?.code || "";
+        const status =
+          code === "RESUME_EMPTY" || code === "RESUME_TYPE" || code === "RESUME_PARSE"
+            ? 400
+            : 400;
+        return res.status(status).json({
+          error: parseErr?.message || "Could not read the resume.",
+          code: code || "RESUME_PARSE",
+        });
+      }
+
+      const slot = await atsUploadQuota.consume(req);
+      if (slot.exceeded) {
+        if (slot.retryAfterSeconds > 0) {
+          res.setHeader("Retry-After", String(slot.retryAfterSeconds));
+        }
+        return res.status(429).json({
+          error: "You can score 3 uploaded resumes per day. Try again tomorrow.",
+          quota: {
+            used: slot.used,
+            limit: slot.limit,
+            remaining: 0,
+          },
+        });
+      }
+
+      try {
+        const mapped = mapResumeTextToPayload(resumeText);
+        const payload = sanitizeResumePayload(mapped);
+        const cacheKey = createAtsAnalysisCacheKey({
+          sanitizedResumePayload: payload,
+        });
+        let analysis = null;
+        try {
+          analysis = await getCachedAtsAnalysis(cacheKey);
+        } catch {
+          analysis = null;
+        }
+        if (!analysis) {
+          analysis = analyzeResume(payload);
+          try {
+            await setCachedAtsAnalysis(cacheKey, analysis);
+          } catch {
+            // ignore
+          }
+        }
+
+        console.info("[resume] analyzeUpload", {
+          ownerEmail,
+          status: 200,
+          latencyMs: Date.now() - startedAt,
+          bytes: req.file.buffer.length,
+        });
+
+        return res.json({
+          success: true,
+          source: "upload",
+          analysis,
+          quota: {
+            used: slot.used,
+            limit: slot.limit,
+            remaining: slot.remaining,
+          },
+        });
+      } catch (innerErr) {
+        if (typeof slot.refund === "function") {
+          await slot.refund();
+        }
+        throw innerErr;
+      }
+    } catch (error) {
+      console.error("[resume] analyze-upload failed", error?.message || error);
+      return res.status(500).json({ error: "Failed to analyze uploaded resume" });
+    } finally {
+      if (req.file) {
+        req.file.buffer = Buffer.alloc(0);
+      }
+    }
+  });
+});
 
 export default router;

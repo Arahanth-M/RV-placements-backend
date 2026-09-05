@@ -3,9 +3,15 @@ import jwt from "jsonwebtoken";
 import passport from "passport";
 import { config, urls, messages, isAdminEmail } from "../config/constants.js";
 import authJWT from "../middleware/authJWT.js";
+import validateRequest from "../middleware/validateRequest.js";
 import { buildJwtPayloadFromUser } from "../utils/jwtUserClaims.js";
 import User1 from "../models/User1.js";
 import { normalizePlacementClusterQuery } from "../utils/placementCluster.js";
+import { blockedLoginInterestSchema } from "../validations/auth.validation.js";
+import {
+  signBlockedLoginIntentToken,
+  submitBlockedLoginInterest,
+} from "../services/blockedLoginAttempts.js";
 
 const router = express.Router();
 
@@ -145,7 +151,20 @@ router.get(
       }
       if (!user) {
         if (info && info.reason === "domain") {
-          return redirectToAuthCallback(req, res, "login=failed&reason=domain");
+          let query = "login=failed&reason=domain";
+          const attemptId = info.attemptId ? String(info.attemptId).trim() : "";
+          if (attemptId) {
+            try {
+              const intent = signBlockedLoginIntentToken(attemptId);
+              query += `&blocked_intent=${encodeURIComponent(intent)}`;
+            } catch (signErr) {
+              console.warn(
+                "[blocked-login] intent token skipped",
+                signErr?.message || signErr
+              );
+            }
+          }
+          return redirectToAuthCallback(req, res, query);
         }
         if (info && info.reason === "not_allowed") {
           return redirectToAuthCallback(req, res, "login=failed&reason=not_allowed");
@@ -179,6 +198,34 @@ router.get(
   }
 );
 
+
+router.post(
+  "/blocked-login-interest",
+  validateRequest(blockedLoginInterestSchema),
+  async (req, res) => {
+    try {
+      const result = await submitBlockedLoginInterest({
+        token: req.body.token,
+        collegeName: req.body.collegeName,
+        wantsPlatformAtCollege: req.body.wantsPlatformAtCollege,
+      });
+      return res.json({ success: true, ...result });
+    } catch (err) {
+      const code = err?.code;
+      if (code === "INVALID_TOKEN") {
+        return res.status(401).json({ error: "This form link has expired. Please try signing in again." });
+      }
+      if (code === "INVALID_COLLEGE") {
+        return res.status(400).json({ error: err.message || "Invalid response" });
+      }
+      if (code === "NOT_FOUND") {
+        return res.status(404).json({ error: err.message || "Attempt not found" });
+      }
+      console.error("POST /api/auth/blocked-login-interest:", err?.message || err);
+      return res.status(500).json({ error: "Failed to save your response" });
+    }
+  }
+);
 
 router.get("/current_user", authJWT, async (req, res) => {
   if (!req.user) {

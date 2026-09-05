@@ -56,6 +56,7 @@ import {
   getDauDayUserActivityForAdmin,
   getDauFullExportRows,
 } from "../services/admin/adminDauService.js";
+import { getBlockedLoginSummaryForAdmin } from "../services/blockedLoginAttempts.js";
 import {
   invalidateMySubmissionsCacheByEmail,
   submitterEmailFromSubmission,
@@ -980,6 +981,17 @@ adminRouter.get("/dau/:dayKey/users/:userId", async (req, res) => {
     }
     console.error("GET /api/admin/dau/:dayKey/users/:userId:", err?.message || err);
     return res.status(500).json({ error: "Failed to load user activity" });
+  }
+});
+
+/** Out-of-domain sign-in attempts (does not read or write users1 / DAU). */
+adminRouter.get("/blocked-logins", async (req, res) => {
+  try {
+    const data = await getBlockedLoginSummaryForAdmin(req.query?.days);
+    return res.json({ success: true, ...data });
+  } catch (err) {
+    console.error("GET /api/admin/blocked-logins:", err?.message || err);
+    return res.status(500).json({ error: "Failed to load blocked sign-ins" });
   }
 });
 

@@ -1,6 +1,8 @@
 import {
   parseVisitDateToTimestamp,
   companyVisitSortTimestamp,
+  sortCompaniesByVisitDate,
+  bringAdminPinnedTrendingFirst,
 } from "../../utils/visitDateSort.js";
 
 const Y2026 = { defaultYear: 2026 };
@@ -132,6 +134,49 @@ describe("visitDateSort", () => {
         { defaultYear: 2026, hub: "summer_internship" }
       );
       expect(summerTs).toBe(new Date(2026, 8, 15).getTime());
+    });
+  });
+
+  describe("admin pinned trending first", () => {
+    it("places admin-pinned cards before others, including RVITM got-in priority", () => {
+      const later = {
+        name: "Later",
+        date_of_visit: "2026-10-01",
+        totalGotIn: 12,
+      };
+      const pinned = {
+        name: "Pinned",
+        date_of_visit: "2026-12-01",
+        totalGotIn: 0,
+        trending: true,
+        trendingReason: "admin",
+      };
+      const viewSpike = {
+        name: "Views",
+        date_of_visit: "2026-09-01",
+        trending: true,
+        trendingReason: "views",
+      };
+      const sorted = sortCompaniesByVisitDate([later, pinned, viewSpike], {
+        defaultYear: 2026,
+        prioritizeNonZeroGotIn: true,
+      });
+      expect(sorted.map((c) => c.name)).toEqual(["Pinned", "Later", "Views"]);
+    });
+
+    it("keeps relative order when lifting pinned cards", () => {
+      const rows = [
+        { name: "A", date_of_visit: "2026-01-01" },
+        { name: "B", date_of_visit: "2026-02-01", trending: true, trendingReason: "admin" },
+        { name: "C", date_of_visit: "2026-03-01" },
+        { name: "D", date_of_visit: "2026-04-01", trending: true, trendingReason: "admin" },
+      ];
+      expect(bringAdminPinnedTrendingFirst(rows).map((c) => c.name)).toEqual([
+        "B",
+        "D",
+        "A",
+        "C",
+      ]);
     });
   });
 });

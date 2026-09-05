@@ -16,6 +16,7 @@ import Student from "../models/Student.js";
 import { getCompanyFocusTags } from "../utils/companyFocusTags.js";
 import { attachPlacementCategoryToCompany } from "../utils/ctcCategory.js";
 import { sortCompaniesForCategoryPreview } from "../utils/companyCategoryPreviewBuckets.js";
+import { bringAdminPinnedTrendingFirst } from "../utils/visitDateSort.js";
 import { projectCompanyListResponse } from "../utils/companyListProjection.js";
 import { COMPANY_VISIT_DEFAULT_YEAR } from "../utils/placementYears.js";
 import redis from "../utils/redis.js";
@@ -32,6 +33,7 @@ import {
 } from "../services/companyDetailRequestService.js";
 import { recordDauActivitySafe } from "../services/dau/recordDauActivity.js";
 import CompanyStatic from "../models/CompanyStatic.js";
+import User1 from "../models/User1.js";
 import {
   addHelpfulVote,
   createCompanyWithVisit,
@@ -65,7 +67,8 @@ function isCompanyDetailPrefetch(req) {
 
 async function presentCompanyListForViewer(list, req) {
   const withTrending = await attachTrendingFlagsToCompanyList(list);
-  const withContentUpdated = await attachCardContentUpdatedAt(withTrending);
+  const withPinnedFirst = bringAdminPinnedTrendingFirst(withTrending);
+  const withContentUpdated = await attachCardContentUpdatedAt(withPinnedFirst);
   const withoutViews = stripCompanyListViews(withContentUpdated);
   if (req.user?.isAdminSession === true) {
     return attachAdminCompanyCardViews(withoutViews);
@@ -243,6 +246,28 @@ companyRouter.get("/names", async (_req, res) => {
     return res.json(list);
   } catch (e) {
     console.error("❌ Error fetching company names:", e?.message);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+const HOME_STATS_TTL_MS = 60 * 1000;
+let homeStatsCache = { at: 0, registeredUsers: 0 };
+
+/**
+ * Public homepage highlights. Counts every users1 row (RVCE + RVITM).
+ * Must stay above `GET /:id`.
+ */
+companyRouter.get("/home-stats", async (_req, res) => {
+  try {
+    const now = Date.now();
+    if (now - homeStatsCache.at < HOME_STATS_TTL_MS) {
+      return res.json({ registeredUsers: homeStatsCache.registeredUsers });
+    }
+    const registeredUsers = await User1.countDocuments();
+    homeStatsCache = { at: now, registeredUsers };
+    return res.json({ registeredUsers });
+  } catch (e) {
+    console.error("❌ Error fetching home stats:", e?.message);
     return res.status(500).json({ error: "Server error" });
   }
 });

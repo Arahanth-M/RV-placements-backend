@@ -7,6 +7,7 @@ import { urls } from "../config/constants.js";
 import { sendWelcomeEmailWebhook } from "./webhookService.js";
 import { isAllowedCollegeEmail } from "../utils/collegeScope.js";
 import { recordDauActivitySafe } from "./dau/recordDauActivity.js";
+import { recordBlockedLoginAttempt } from "./blockedLoginAttempts.js";
 
 /** Google may expose the avatar on photos[], _json.picture, or legacy profile.picture */
 function pictureFromGoogleProfile(profile) {
@@ -45,7 +46,22 @@ passport.use(
         }
 
         if (!isAllowedCollegeEmail(normalizedEmail)) {
-          return done(null, false, { reason: "domain" });
+          let attemptId = "";
+          try {
+            attemptId = await recordBlockedLoginAttempt({
+              email: normalizedEmail,
+              googleId: profile.id,
+              displayName,
+              flow: isAdminLogin ? "admin" : flow,
+              reason: "domain",
+            });
+          } catch (recordErr) {
+            console.warn(
+              "[blocked-login] record failed",
+              recordErr?.message || recordErr
+            );
+          }
+          return done(null, false, { reason: "domain", attemptId });
         }
 
         if (isAdminLogin) {

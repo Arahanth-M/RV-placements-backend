@@ -297,7 +297,19 @@ export function companyHasPositiveGotIn(company) {
   return false;
 }
 
+/** Admin 24h pin (`trendingReason === "admin"`), not view-spike trending. */
+export function isAdminPinnedTrending(company) {
+  return (
+    company?.trending === true &&
+    String(company?.trendingReason || "").toLowerCase() === "admin"
+  );
+}
+
 export function compareCompaniesByVisitDate(a, b, options = {}) {
+  const aPin = isAdminPinnedTrending(a) ? 1 : 0;
+  const bPin = isAdminPinnedTrending(b) ? 1 : 0;
+  if (aPin !== bPin) return bPin - aPin;
+
   if (options.prioritizeNonZeroGotIn === true) {
     const aHas = companyHasPositiveGotIn(a) ? 1 : 0;
     const bHas = companyHasPositiveGotIn(b) ? 1 : 0;
@@ -324,4 +336,16 @@ export function compareCompaniesByVisitDate(a, b, options = {}) {
 
 export function sortCompaniesByVisitDate(companies, options = {}) {
   return [...companies].sort((a, b) => compareCompaniesByVisitDate(a, b, options));
+}
+
+/** Stable: admin-pinned trending cards first, original order otherwise. */
+export function bringAdminPinnedTrendingFirst(companies) {
+  const rows = Array.isArray(companies) ? companies : [];
+  const pinned = [];
+  const rest = [];
+  for (const row of rows) {
+    if (isAdminPinnedTrending(row)) pinned.push(row);
+    else rest.push(row);
+  }
+  return [...pinned, ...rest];
 }
