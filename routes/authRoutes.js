@@ -57,7 +57,7 @@ const redirectToAuthCallback = (req, res, query) => {
   const clientUrl = getClientBaseUrl(req);
   res.clearCookie("oauth_client_origin", { path: "/" });
   res.clearCookie("oauth_flow", { path: "/" });
-  return res.redirect(`${clientUrl}/auth/callback?${query}`);
+  return res.redirect(`${clientUrl}${urls.FRONTEND_AUTH_CALLBACK_PATH}?${query}`);
 };
 
 const JWT_COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days

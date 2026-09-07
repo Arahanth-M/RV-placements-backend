@@ -61,6 +61,8 @@ export const urls = {
     ? `https://${config.PRODUCTION_DOMAIN}` 
     : config.FRONTEND_URL,
   GOOGLE_CALLBACK_PATH: "/api/auth/google/callback",
+  /** SPA route after Google. Google Console URI stays GOOGLE_CALLBACK_PATH. */
+  FRONTEND_AUTH_CALLBACK_PATH: "/rvce/auth/callback",
 };
 
 // API Routes
