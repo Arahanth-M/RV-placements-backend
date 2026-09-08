@@ -181,6 +181,50 @@ export async function submitBlockedLoginInterest(input = {}) {
   };
 }
 
+/**
+ * Public landing-page enrollment interest. Never writes users1 or DAU.
+ * @param {{ collegeName?: unknown, email?: unknown, contactName?: unknown }} input
+ */
+export async function submitCollegeEnrollmentInterest(input = {}) {
+  const collegeName = normalizeCollegeName(input.collegeName);
+  if (collegeName.length < 2) {
+    const err = new Error("College name is required");
+    err.code = "INVALID_COLLEGE";
+    throw err;
+  }
+
+  const email = String(input.email || "")
+    .trim()
+    .toLowerCase();
+  if (!email || !email.includes("@") || email.length > 320) {
+    const err = new Error("A valid contact email is required");
+    err.code = "INVALID_EMAIL";
+    throw err;
+  }
+
+  const displayName = String(input.contactName || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, 120);
+
+  const doc = await BlockedLoginAttempt.create({
+    email,
+    emailDomain: emailDomainFromEmail(email),
+    displayName,
+    reason: "landing_enroll",
+    flow: "signup",
+    collegeName,
+    wantsPlatformAtCollege: true,
+    respondedAt: new Date(),
+  });
+
+  return {
+    ok: true,
+    id: String(doc._id),
+    collegeName: doc.collegeName || collegeName,
+  };
+}
+
 function clampDays(raw) {
   const n = Number(raw);
   if (!Number.isFinite(n)) return DEFAULT_SUMMARY_DAYS;

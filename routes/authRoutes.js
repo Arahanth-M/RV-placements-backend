@@ -7,11 +7,17 @@ import validateRequest from "../middleware/validateRequest.js";
 import { buildJwtPayloadFromUser } from "../utils/jwtUserClaims.js";
 import User1 from "../models/User1.js";
 import { normalizePlacementClusterQuery } from "../utils/placementCluster.js";
-import { blockedLoginInterestSchema } from "../validations/auth.validation.js";
+import {
+  blockedLoginInterestSchema,
+  collegeEnrollmentInterestSchema,
+  collegeOnboardingRequestSchema,
+} from "../validations/auth.validation.js";
 import {
   signBlockedLoginIntentToken,
   submitBlockedLoginInterest,
+  submitCollegeEnrollmentInterest,
 } from "../services/blockedLoginAttempts.js";
+import { createCollegeOnboardingRequest } from "../services/collegeOnboardingService.js";
 
 const router = express.Router();
 
@@ -223,6 +229,53 @@ router.post(
       }
       console.error("POST /api/auth/blocked-login-interest:", err?.message || err);
       return res.status(500).json({ error: "Failed to save your response" });
+    }
+  }
+);
+
+router.post(
+  "/college-enrollment-interest",
+  validateRequest(collegeEnrollmentInterestSchema),
+  async (req, res) => {
+    try {
+      const result = await submitCollegeEnrollmentInterest({
+        collegeName: req.body.collegeName,
+        email: req.body.email,
+        contactName: req.body.contactName,
+      });
+      return res.json({ success: true, ...result });
+    } catch (err) {
+      const code = err?.code;
+      if (code === "INVALID_COLLEGE" || code === "INVALID_EMAIL") {
+        return res.status(400).json({ error: err.message || "Invalid enrollment details" });
+      }
+      console.error("POST /api/auth/college-enrollment-interest:", err?.message || err);
+      return res.status(500).json({ error: "Failed to save enrollment interest" });
+    }
+  }
+);
+
+router.post(
+  "/college-onboarding",
+  validateRequest(collegeOnboardingRequestSchema),
+  async (req, res) => {
+    try {
+      const result = await createCollegeOnboardingRequest(req.body);
+      return res.status(201).json({ success: true, ...result });
+    } catch (err) {
+      const code = err?.code;
+      if (
+        code === "INVALID_PATH" ||
+        code === "INVALID_COLLEGE" ||
+        code === "INVALID_POC" ||
+        code === "INVALID_EMAIL" ||
+        code === "INVALID_FEATURES" ||
+        code === "INVALID_DATA_EXTENT"
+      ) {
+        return res.status(400).json({ error: err.message || "Invalid onboarding details" });
+      }
+      console.error("POST /api/auth/college-onboarding:", err?.message || err);
+      return res.status(500).json({ error: "Failed to save onboarding request" });
     }
   }
 );

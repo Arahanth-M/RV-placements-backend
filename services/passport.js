@@ -45,14 +45,16 @@ passport.use(
           return done(null, false, { reason: "not_allowed" });
         }
 
-        if (!isAllowedCollegeEmail(normalizedEmail)) {
+        // Admin login stays restricted to known college patterns.
+        // Student login is open: onboarded campuses use /rvce; everyone else uses /general.
+        if (isAdminLogin && !isAllowedCollegeEmail(normalizedEmail)) {
           let attemptId = "";
           try {
             attemptId = await recordBlockedLoginAttempt({
               email: normalizedEmail,
               googleId: profile.id,
               displayName,
-              flow: isAdminLogin ? "admin" : flow,
+              flow: "admin",
               reason: "domain",
             });
           } catch (recordErr) {
