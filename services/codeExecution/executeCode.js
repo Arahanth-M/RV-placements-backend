@@ -8,6 +8,9 @@ import {
   generateCppMainSource,
   parseFlexibleInterviewSignature,
   parseDesignClassNameFromSignature,
+  hasTopLevelMainFunction,
+  isCppMainRedefinitionCompileError,
+  CPP_GRADER_MAIN_CONFLICT_ERROR,
 } from "./cppHarnessGenerator.js";
 import { generateJavaMainSource } from "./javaHarnessGenerator.js";
 import {
@@ -25,6 +28,18 @@ import { dedupeTestCases } from "../../utils/dedupeTestCases.js";
 
 const toSafeString = (value, fallback = "") =>
   typeof value === "string" && value.trim() ? value.trim() : fallback;
+
+const rowsForGlobalFailure = (cases, error) =>
+  (Array.isArray(cases) ? cases : []).map((tc) => ({
+    passed: false,
+    isHidden: Boolean(tc?.isHidden),
+    weight: Number(tc?.weight) || 1,
+    input: tc?.input ?? null,
+    expectedOutput: tc?.expectedOutput ?? null,
+    actualOutput: null,
+    error,
+    executionTime: 0,
+  }));
 
 const DEFAULT_EXECUTION_TIMEOUT_MS = 60000;
 const EXECUTION_TIMEOUT_MS = (() => {
@@ -974,6 +989,17 @@ export async function executeCode({
     });
   }
 
+  if (canonicalLang === "cpp" && hasTopLevelMainFunction(safeCode)) {
+    const error = CPP_GRADER_MAIN_CONFLICT_ERROR;
+    return normalizeExecutionResult({
+      status: EXECUTION_COMPILATION_ERROR,
+      results: rowsForGlobalFailure(normalizedCases, error),
+      executionTime: 0,
+      memoryUsed: 0,
+      error,
+    });
+  }
+
   if (
     canonicalLang === "cpp" &&
     /\bdef\s+\w+\s*\(/.test(safeCode) &&
@@ -1153,16 +1179,22 @@ export async function executeCode({
         const oomLikely =
           /Killed signal|cc1plus|fatal error:.*[Kk]illed/i.test(merged) &&
           (/cc1plus|g\+\+/i.test(merged) || /compilation terminated/i.test(merged));
-        const baseErr = merged.slice(0, 4000) || "C++ compilation or linking failed before the runner printed JSON.";
-        const oomHint = oomLikely
-          ? " (Likely out-of-memory during compile: raise EXECUTION_DOCKER_MEMORY_CPP on the API host, e.g. 1536m or 2g.)"
-          : "";
+        const isMainClash =
+          hasTopLevelMainFunction(safeCode) || isCppMainRedefinitionCompileError(merged);
+        const baseErr = isMainClash
+          ? CPP_GRADER_MAIN_CONFLICT_ERROR
+          : merged.slice(0, 4000) || "C++ compilation or linking failed before the runner printed JSON.";
+        const oomHint =
+          !isMainClash && oomLikely
+            ? " (Likely out-of-memory during compile: raise EXECUTION_DOCKER_MEMORY_CPP on the API host, e.g. 1536m or 2g.)"
+            : "";
+        const error = `${baseErr}${oomHint}`;
         return normalizeExecutionResult({
           status: EXECUTION_COMPILATION_ERROR,
-          results: [],
+          results: rowsForGlobalFailure(normalizedCases, error),
           executionTime: 0,
           memoryUsed: 0,
-          error: `${baseErr}${oomHint}`,
+          error,
         });
       }
       if (canonicalLang === "java" && !dockerResult.timedOut && dockerResult.code !== 0) {
@@ -1177,7 +1209,7 @@ export async function executeCode({
           merged.slice(0, 4000) || "Java compilation or startup failed before the runner printed JSON.";
         return normalizeExecutionResult({
           status: EXECUTION_COMPILATION_ERROR,
-          results: [],
+          results: rowsForGlobalFailure(normalizedCases, baseErr),
           executionTime: 0,
           memoryUsed: 0,
           error: baseErr,
@@ -1188,11 +1220,15 @@ export async function executeCode({
         stderr: dockerResult.stderr,
         exitCode: dockerResult.code,
       });
+      const malformedError =
+        merged.slice(0, 4000) ||
+        "Sandbox produced no test results. Check that your code matches the grader contract.";
       return normalizeExecutionResult({
         status: EXECUTION_ERROR,
-        results: [],
+        results: rowsForGlobalFailure(normalizedCases, malformedError),
         executionTime: 0,
         memoryUsed: 0,
+        error: malformedError,
       });
     }
 

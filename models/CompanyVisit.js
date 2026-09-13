@@ -9,6 +9,8 @@ const companyVisitSchema = new mongoose.Schema(
       required: true,
     },
     year: { type: Number, required: true },
+    /** Campus this visit row belongs to (e.g. rvce / rvitm). */
+    collegeId: { type: String, trim: true, lowercase: true, default: "rvce" },
     /** Part of composite uniqueness with companyId + year + cluster (empty string when unset). */
     type: { type: String, trim: true, default: "" },
     roles: [{ type: mongoose.Schema.Types.Mixed }],

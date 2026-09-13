@@ -208,6 +208,26 @@ const braceDepthBeforeIndex = (code, endIndex) => {
   return depth;
 };
 
+export const CPP_GRADER_MAIN_CONFLICT_ERROR =
+  "Your C++ code defines int main(), but the grader already provides main() to run the test cases. Remove your main() and implement only the required function or class Solution method from the contract.";
+
+/** True if the submission defines a top-level `main` (conflicts with the harness `main()`). */
+export const hasTopLevelMainFunction = (code) => {
+  const src = String(code || "");
+  const re =
+    /\b(?:(?:static|inline|constexpr|signed|unsigned|long|short)\s+)*(?:int|void|auto|int32_t|int64_t|signed)\s+main\s*\(/g;
+  for (const m of src.matchAll(re)) {
+    if (m.index !== undefined && braceDepthBeforeIndex(src, m.index) === 0) {
+      return true;
+    }
+  }
+  return false;
+};
+
+export const isCppMainRedefinitionCompileError = (compilerOutput) =>
+  /redefinition of ['"]int main\(\)['"]/i.test(String(compilerOutput || "")) ||
+  /redefinition of ['"]void main\(\)['"]/i.test(String(compilerOutput || ""));
+
 /** True if user already defined a top-level (non-nested) `retType fnName(` — not a method inside a class. */
 const hasTopLevelReturnNamedFunction = (code, fnName) => {
   const re = new RegExp(
@@ -523,4 +543,7 @@ export default {
   toLeetCodeMethodName,
   buildCppLeetcodeBridgeIfNeeded,
   generateCppMainSource,
+  hasTopLevelMainFunction,
+  isCppMainRedefinitionCompileError,
+  CPP_GRADER_MAIN_CONFLICT_ERROR,
 };

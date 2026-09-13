@@ -175,6 +175,56 @@ export async function bookSlot(userId, slotKey) {
   return createBookingAtomic(userId, slotKey);
 }
 
+export async function getCurrentHourOccupancy(now = new Date()) {
+  const slotKey = utcDateToSlotKey(now);
+  const slotStart = slotKeyToUtcDate(slotKey);
+  if (!slotStart) {
+    return {
+      slotKey: null,
+      slotStart: null,
+      slotEnd: null,
+      bookedCount: 0,
+      capacity: SLOT_CAPACITY,
+      isFull: false,
+      label: "",
+    };
+  }
+  const bookedCount = await InterviewSlotBooking.countDocuments({
+    slotStart,
+    status: "active",
+  });
+  return {
+    slotKey,
+    slotStart: slotStart.toISOString(),
+    slotEnd: slotEndUtc(slotStart).toISOString(),
+    bookedCount,
+    capacity: SLOT_CAPACITY,
+    isFull: bookedCount >= SLOT_CAPACITY,
+    label: formatSlotRangeIst(slotStart),
+  };
+}
+
+/**
+ * Claim the current IST hour for this user if they do not already hold it.
+ * Used when a DSA interview starts without a pre-booked slot.
+ */
+export async function ensureCurrentHourBooking(userId, now = new Date()) {
+  const existingNow = await getUserActiveBookingNow(userId);
+  if (existingNow) return toClientBooking(existingNow);
+
+  const slotKey = utcDateToSlotKey(now);
+  try {
+    return await createBookingAtomic(userId, slotKey);
+  } catch (err) {
+    const isDup = err?.code === "ALREADY_BOOKED" || err?.code === 11000;
+    if (isDup) {
+      const again = await getUserActiveBookingNow(userId);
+      if (again) return toClientBooking(again);
+    }
+    throw err;
+  }
+}
+
 export async function cancelBooking(userId, bookingId) {
   const booking = await InterviewSlotBooking.findOne({
     _id: bookingId,
@@ -267,27 +317,51 @@ export async function assertDsaSlotBookingForStart(userId, customRounds) {
   if (!customRoundsRequireDsaSlot(customRounds)) {
     return { ok: true, requiresSlot: false };
   }
-  const active = await getUserActiveBookingNow(userId);
-  if (!active) {
-    const err = new Error(
-      "Your plan includes a DSA round. Book a slot and start during that hour (IST)."
-    );
-    err.code = "DSA_SLOT_REQUIRED";
-    err.requiresSlot = true;
+  try {
+    const booking = await ensureCurrentHourBooking(userId);
+    return { ok: true, requiresSlot: true, activeBooking: booking };
+  } catch (err) {
+    if (err?.code === "SLOT_FULL") {
+      const full = new Error(
+        "This hour is full (5/5). Book a different IST slot, then start during that hour."
+      );
+      full.code = "DSA_SLOT_FULL";
+      full.requiresSlot = true;
+      throw full;
+    }
     throw err;
   }
-  return { ok: true, requiresSlot: true, activeBooking: toClientBooking(active) };
+}
+
+export function composeSlotBookingStatus({
+  requiresSlot,
+  activeNow,
+  upcoming = [],
+  currentHour,
+} = {}) {
+  const hourFull = Boolean(currentHour?.isFull);
+  const hasActiveBookingNow = Boolean(activeNow);
+  return {
+    requiresSlot: Boolean(requiresSlot),
+    hasActiveBookingNow,
+    activeBooking: activeNow || null,
+    upcomingBookings: upcoming,
+    currentHour: currentHour || null,
+    canStartDsaInterview: !requiresSlot || hasActiveBookingNow || !hourFull,
+  };
 }
 
 export async function getSlotBookingStatus(userId, customRounds) {
   const requiresSlot = customRoundsRequireDsaSlot(customRounds);
-  const activeNow = await getUserActiveBookingNow(userId);
-  const upcoming = await listUserBookings(userId, { includePast: false });
-  return {
+  const [activeNow, upcoming, currentHour] = await Promise.all([
+    getUserActiveBookingNow(userId),
+    listUserBookings(userId, { includePast: false }),
+    requiresSlot ? getCurrentHourOccupancy() : Promise.resolve(null),
+  ]);
+  return composeSlotBookingStatus({
     requiresSlot,
-    hasActiveBookingNow: Boolean(activeNow),
-    activeBooking: activeNow ? toClientBooking(activeNow) : null,
-    upcomingBookings: upcoming,
-    canStartDsaInterview: !requiresSlot || Boolean(activeNow),
-  };
+    activeNow: activeNow ? toClientBooking(activeNow) : null,
+    upcoming,
+    currentHour,
+  });
 }

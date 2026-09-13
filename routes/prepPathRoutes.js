@@ -13,6 +13,13 @@ import {
   PREP_PATH_HISTORY_LIMIT,
 } from "../services/prepPath/prepPathService.js";
 import { recordDauActivitySafe } from "../services/dau/recordDauActivity.js";
+import {
+  evaluatePrepPathAccess,
+  getGeneralAccessSnapshot,
+  markFreePrepConsumed,
+  paywallPayload,
+} from "../services/billing/accessService.js";
+import { PAYWALL_CODE } from "../config/billingPlans.js";
 
 const router = express.Router();
 
@@ -41,10 +48,30 @@ router.use(authJWT, checkBetaAccess, authorize(["student", "admin", "spc"]));
 
 const getAuthenticatedUserId = (req) => String(req.user?.userId || "").trim();
 
+function isPlatformPrepScope(req) {
+  const fromQuery = String(req.query?.scope || "").trim().toLowerCase();
+  const fromBody = String(req.body?.scope || "").trim().toLowerCase();
+  return fromQuery === "platform" || fromBody === "platform";
+}
+
 router.get("/quota", async (req, res) => {
   try {
     const userId = getAuthenticatedUserId(req);
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    if (isPlatformPrepScope(req)) {
+      const snapshot = await getGeneralAccessSnapshot(userId);
+      return res.json({
+        success: true,
+        quota: {
+          unlimited: snapshot.unlimitedPrepPath,
+          limit: snapshot.unlimitedPrepPath ? null : 1,
+          used: snapshot.unlimitedPrepPath ? snapshot.prepPlans : snapshot.freePrepRemaining > 0 ? 0 : 1,
+          remaining: snapshot.unlimitedPrepPath ? null : snapshot.freePrepRemaining,
+          lifetimeFree: true,
+          freePrepRemaining: snapshot.freePrepRemaining,
+        },
+      });
+    }
     const quota = await getPrepPathQuota(userId);
     return res.json({ success: true, quota });
   } catch (err) {
@@ -119,7 +146,23 @@ router.post("/generate", (req, res) => {
         });
       }
 
-      const { plan, quota, peerDemand } = await generateAndSavePrepPathPlan({
+      const platformScope = isPlatformPrepScope(req);
+      if (platformScope) {
+        const access = await evaluatePrepPathAccess({
+          userId,
+          companyId: req.body?.companyId,
+          user: req.user,
+        });
+        if (!access.prepAllowed) {
+          const body = paywallPayload(access.error);
+          return res.status(402).json({
+            code: PAYWALL_CODE,
+            ...body,
+          });
+        }
+      }
+
+      let { plan, quota, peerDemand } = await generateAndSavePrepPathPlan({
         userId,
         companyId: req.body?.companyId,
         role: req.body?.role,
@@ -130,6 +173,7 @@ router.post("/generate", (req, res) => {
         resumeMime: req.file.mimetype,
         resumeOriginalName: req.file.originalname,
         collegeId: collegeIdFromUser(req.user),
+        skipDailyQuota: platformScope,
       });
 
       console.info("[prepPath] generate ok", {
@@ -143,6 +187,19 @@ router.post("/generate", (req, res) => {
         prepPathCompany: plan?.companyName,
       });
 
+      if (platformScope) {
+        await markFreePrepConsumed(userId).catch(() => {});
+        const snapshot = await getGeneralAccessSnapshot(userId);
+        quota = {
+          unlimited: snapshot.unlimitedPrepPath,
+          limit: snapshot.unlimitedPrepPath ? null : 1,
+          used: snapshot.unlimitedPrepPath ? snapshot.prepPlans : snapshot.freePrepRemaining > 0 ? 0 : 1,
+          remaining: snapshot.unlimitedPrepPath ? null : snapshot.freePrepRemaining,
+          lifetimeFree: true,
+          freePrepRemaining: snapshot.freePrepRemaining,
+        };
+      }
+
       return res.status(201).json({ success: true, plan, quota, peerDemand });
     } catch (err) {
       const code = err?.code || "";
@@ -151,6 +208,9 @@ router.post("/generate", (req, res) => {
 
       if (code === "QUOTA_EXCEEDED") {
         return res.status(429).json({ error: message, code });
+      }
+      if (code === PAYWALL_CODE) {
+        return res.status(402).json(paywallPayload(err));
       }
       if (
         [

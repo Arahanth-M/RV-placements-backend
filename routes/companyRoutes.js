@@ -20,13 +20,25 @@ import { bringAdminPinnedTrendingFirst } from "../utils/visitDateSort.js";
 import { projectCompanyListResponse } from "../utils/companyListProjection.js";
 import { COMPANY_VISIT_DEFAULT_YEAR } from "../utils/placementYears.js";
 import redis from "../utils/redis.js";
-import { companyDetailRedisKey } from "../services/companyDetailCache.js";
+import { companyDetailRedisKey, invalidateCompanyDetailCache } from "../services/companyDetailCache.js";
 import {
   getCachedCompanyList,
   setCachedCompanyList,
 } from "../services/companyListCache.js";
 import { attachTrendingFlagsToCompanyList, attachAdminCompanyCardViews, stripCompanyListViews } from "../services/companyCardTrending.js";
 import { attachCardContentUpdatedAt } from "../services/companyCardContentUpdated.js";
+import {
+  getCompanyPlatformDetailById,
+  isPlatformCompanyScope,
+} from "../services/companyPlatformDetailService.js";
+import {
+  getPlatformContentForEditor,
+  savePlatformContentFromEditor,
+} from "../services/platformContentEditorService.js";
+import {
+  evaluateCompanyCardAccess,
+  paywallPayload,
+} from "../services/billing/accessService.js";
 import {
   getCompanyDetailRequestStatus,
   submitCompanyDetailRequest,
@@ -250,6 +262,30 @@ companyRouter.get("/names", async (_req, res) => {
   }
 });
 
+/** Temporary /general/data-entry editor. GET does not create documents. */
+companyRouter.get("/platform-content/:id", authJWT, async (req, res) => {
+  try {
+    const payload = await getPlatformContentForEditor(req.params.id);
+    if (!payload) return res.status(404).json({ error: "Company not found" });
+    return res.json(payload);
+  } catch (e) {
+    console.error("❌ Error fetching platform content:", e?.message);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+companyRouter.put("/platform-content/:id", authJWT, async (req, res) => {
+  try {
+    const payload = await savePlatformContentFromEditor(req.params.id, req.body);
+    await invalidateCompanyDetailCache(req.params.id);
+    return res.json(payload);
+  } catch (e) {
+    const status = Number(e?.status) || 500;
+    if (status >= 500) console.error("❌ Error saving platform content:", e?.message);
+    return res.status(status).json({ error: e?.message || "Server error" });
+  }
+});
+
 const HOME_STATS_TTL_MS = 60 * 1000;
 let homeStatsCache = { at: 0, registeredUsers: 0 };
 
@@ -324,6 +360,7 @@ companyRouter.post("/helpful/status/batch", authJWT, async (req, res) => {
 
 companyRouter.get("/:id", authJWT, async (req, res) => {
   const id = req.params.id;
+  const platformScope = isPlatformCompanyScope(req.query);
   const placementVisitYear = normalizeCompanyDetailYear(req.query?.year);
   const placementCompanyVisitIdRaw = String(req.query?.placementCompanyVisitId || "").trim();
   const useExactVisitHint = placementCompanyVisitIdRaw !== "";
@@ -343,7 +380,7 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
   try {
     const isAdminSession = req.user?.isAdminSession === true || req.user?.role === "admin";
     const collegeId = collegeIdFromUser(req.user);
-    if (!isAdminSession) {
+    if (!isAdminSession && !platformScope) {
       const loginEmail = String(req.user?.email || "").trim().toLowerCase();
       if (!loginEmail) {
         return res.status(403).json({ error: "access is restricted by organization" });
@@ -354,6 +391,61 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
       if (!studentRecord) {
         return res.status(403).json({ error: "access is restricted by organization" });
       }
+    }
+
+    if (platformScope) {
+      let access = null;
+      try {
+        access = await evaluateCompanyCardAccess({
+          userId: String(req.user?.userId || ""),
+          companyId: id,
+          user: req.user,
+        });
+        if (!access.allowed) {
+          const body = paywallPayload(access.error);
+          return res.status(402).json({
+            ...body,
+            locked: true,
+            company: access.company
+              ? {
+                  _id: access.company._id,
+                  name: access.company.name,
+                  logo: access.company.logo,
+                  business_model: access.company.business_model,
+                  category: access.company.categoryId,
+                  isTeaser: false,
+                }
+              : null,
+          });
+        }
+      } catch (accessErr) {
+        if (accessErr?.code === "COMPANY_NOT_FOUND") {
+          return res.status(404).json({ error: "Company not found" });
+        }
+        throw accessErr;
+      }
+      const platformPayload = await getCompanyPlatformDetailById(id);
+      if (!platformPayload) {
+        return res.status(404).json({ error: "Company not found" });
+      }
+      const skipOpenSideEffects = isCompanyDetailPrefetch(req);
+      const AuthUserModel = getAuthUserModel(req);
+      if (!skipOpenSideEffects) {
+        recordDauActivitySafe(req.user, {
+          action: "opened_company",
+          openedCompany: platformPayload?.name,
+        });
+        AuthUserModel.updateOne(
+          { _id: req.user?._id },
+          { $set: { lastLoginAt: new Date(), lastActiveAt: new Date() } }
+        ).catch(() => {});
+      }
+      return res.json(
+        omitViewsUnlessAdmin(
+          { ...platformPayload, isTeaser: access?.isTeaser === true },
+          req
+        )
+      );
     }
 
     const AuthUserModel = getAuthUserModel(req);

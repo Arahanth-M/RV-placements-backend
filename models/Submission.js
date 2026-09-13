@@ -130,6 +130,12 @@ const submissionSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     required: false,
   },
+  /** `/general` contributions target company_platform_content, never visits. */
+  contentScope: {
+    type: String,
+    enum: ["visit", "platform"],
+    required: false,
+  },
 });
 
 const Submission = mongoose.model("Submission", submissionSchema);

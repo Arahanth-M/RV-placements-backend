@@ -95,6 +95,14 @@ export function isAllowedCollegeEmail(email) {
   );
 }
 
+/** RVCE campus shell (`/rvce`) — `@rvce.edu.in` only. */
+export function isRvceCollegeEmail(email) {
+  return String(email || "")
+    .trim()
+    .toLowerCase()
+    .endsWith(RVCE_EMAIL_SUFFIX);
+}
+
 /**
  * Mongo `$match` fragment that scopes documents by institutional email college.
  * Mirrors {@link collegeIdFromEmail}: RVITM = `*.rvitm@rvei.edu.in` (+ test list);

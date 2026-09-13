@@ -5,7 +5,7 @@ import Student from "../models/Student.js";
 import User1 from "../models/User1.js";
 import { urls } from "../config/constants.js";
 import { sendWelcomeEmailWebhook } from "./webhookService.js";
-import { isAllowedCollegeEmail } from "../utils/collegeScope.js";
+import { isAllowedCollegeEmail, isRvceCollegeEmail } from "../utils/collegeScope.js";
 import { recordDauActivitySafe } from "./dau/recordDauActivity.js";
 import { recordBlockedLoginAttempt } from "./blockedLoginAttempts.js";
 
@@ -45,8 +45,9 @@ passport.use(
           return done(null, false, { reason: "not_allowed" });
         }
 
-        // Admin login stays restricted to known college patterns.
-        // Student login is open: onboarded campuses use /rvce; everyone else uses /general.
+        const isCampusLogin = flow === "campus" || flow === "spc";
+
+        // Admin + campus/SPC logins stay restricted. /general Google login has no domain gate.
         if (isAdminLogin && !isAllowedCollegeEmail(normalizedEmail)) {
           let attemptId = "";
           try {
@@ -55,6 +56,25 @@ passport.use(
               googleId: profile.id,
               displayName,
               flow: "admin",
+              reason: "domain",
+            });
+          } catch (recordErr) {
+            console.warn(
+              "[blocked-login] record failed",
+              recordErr?.message || recordErr
+            );
+          }
+          return done(null, false, { reason: "domain", attemptId });
+        }
+
+        if (isCampusLogin && !isRvceCollegeEmail(normalizedEmail)) {
+          let attemptId = "";
+          try {
+            attemptId = await recordBlockedLoginAttempt({
+              email: normalizedEmail,
+              googleId: profile.id,
+              displayName,
+              flow,
               reason: "domain",
             });
           } catch (recordErr) {

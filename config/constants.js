@@ -84,6 +84,7 @@ export const routes = {
   RESUME: '/api/resume',
   PREP_PATH: '/api/prep-path',
   DAU: '/api/dau',
+  BILLING: '/api/billing',
 };
 
 // Messages

@@ -61,11 +61,14 @@ export function applySharedHttpMiddleware(app, options = {}) {
                 "'unsafe-inline'",
                 "https://cdn.voiceflow.com",
                 "https://*.voiceflow.com",
+                "https://checkout.razorpay.com",
               ],
               connectSrc: [
                 "'self'",
                 "https://general-runtime.voiceflow.com",
                 "https://*.voiceflow.com",
+                "https://api.razorpay.com",
+                "https://lumberjack.razorpay.com",
               ],
               imgSrc: [
                 "'self'",
@@ -74,7 +77,7 @@ export function applySharedHttpMiddleware(app, options = {}) {
                 "https://cdn.voiceflow.com",
                 "https://*.voiceflow.com",
               ],
-              frameSrc: ["'self'", "https://*.voiceflow.com"],
+              frameSrc: ["'self'", "https://*.voiceflow.com", "https://api.razorpay.com", "https://checkout.razorpay.com"],
               styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
               fontSrc: ["'self'", "https://fonts.gstatic.com"],
             },
@@ -97,12 +100,25 @@ export function applySharedHttpMiddleware(app, options = {}) {
       if (req.path === "/health") {
         return next();
       }
+      if (req.path === "/api/billing/webhook") {
+        return next();
+      }
       return globalLimiter(req, res, next);
     });
   }
 
-  app.use(express.json());
-  app.use(sanitizeInput);
+  app.use((req, res, next) => {
+    const path = String(req.originalUrl || req.url || "").split("?")[0];
+    if (path === "/api/billing/webhook") {
+      return express.raw({ type: "application/json" })(req, res, next);
+    }
+    return express.json()(req, res, next);
+  });
+  app.use((req, res, next) => {
+    const path = String(req.originalUrl || req.url || "").split("?")[0];
+    if (path === "/api/billing/webhook") return next();
+    return sanitizeInput(req, res, next);
+  });
   app.use(cookieParser());
   app.use(passport.initialize());
 }

@@ -18,6 +18,7 @@ export async function seedApprovedSplitCompany(opts = {}) {
     name,
     nameKey,
     business_model: opts.business_model,
+    about: opts.about,
   });
 
   const visit = await CompanyVisit.create({

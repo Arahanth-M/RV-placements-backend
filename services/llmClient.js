@@ -111,7 +111,7 @@ export const callLLM = async (messages, options = {}) => {
       options?.model === "llama3-8b-8192";
 
     // Retry once with the fast model (+ smaller max_tokens) if the primary hits TPM limits
-    if (isRateLimit && !alreadyOnFallback) {
+    if (isRateLimit && !alreadyOnFallback && options?.allowFallback !== false) {
       console.warn(
         `⚠️ [Groq] Rate/TPM limit on ${options?.model || DEFAULT_ORCHESTRATOR_MODEL}. Falling back to ${RATE_LIMIT_FALLBACK_MODEL}...`
       );

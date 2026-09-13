@@ -35,6 +35,7 @@ import interviewRouter from "./routes/interviewRoutes.js";
 import resumeRouter from "./routes/resumeRoutes.js";
 import prepPathRouter from "./routes/prepPathRoutes.js";
 import dauRouter from "./routes/dauRoutes.js";
+import billingRouter from "./routes/billingRoutes.js";
 
 import "./services/passport.js";
 
@@ -77,12 +78,15 @@ app.use(
           "'self'", 
           "'unsafe-inline'", 
           "https://cdn.voiceflow.com",
-          "https://*.voiceflow.com"
+          "https://*.voiceflow.com",
+          "https://checkout.razorpay.com",
         ],
         connectSrc: [
           "'self'", 
           "https://general-runtime.voiceflow.com",
-          "https://*.voiceflow.com"
+          "https://*.voiceflow.com",
+          "https://api.razorpay.com",
+          "https://lumberjack.razorpay.com",
         ],
         imgSrc: [
           "'self'", 
@@ -91,7 +95,7 @@ app.use(
           "https://cdn.voiceflow.com",
           "https://*.voiceflow.com"
         ],
-        frameSrc: ["'self'", "https://*.voiceflow.com"],
+        frameSrc: ["'self'", "https://*.voiceflow.com", "https://api.razorpay.com", "https://checkout.razorpay.com"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
       },
@@ -117,12 +121,25 @@ if (process.env.NODE_ENV !== "test") {
     if (req.path === "/api/dau/heartbeat") {
       return next();
     }
+    if (req.path === "/api/billing/webhook") {
+      return next();
+    }
     return globalLimiter(req, res, next);
   });
 }
 
-app.use(express.json());
-app.use(sanitizeInput);
+app.use((req, res, next) => {
+  const path = String(req.originalUrl || req.url || "").split("?")[0];
+  if (path === "/api/billing/webhook") {
+    return express.raw({ type: "application/json" })(req, res, next);
+  }
+  return express.json()(req, res, next);
+});
+app.use((req, res, next) => {
+  const path = String(req.originalUrl || req.url || "").split("?")[0];
+  if (path === "/api/billing/webhook") return next();
+  return sanitizeInput(req, res, next);
+});
 app.use(cookieParser());
 app.use(passport.initialize());
 
@@ -157,6 +174,7 @@ app.use(routes.INTERVIEW, interviewRouter);
 app.use(routes.RESUME, resumeRouter);
 app.use(routes.PREP_PATH, prepPathRouter);
 app.use(routes.DAU, dauRouter);
+app.use(routes.BILLING, billingRouter);
 
 /**
  * 6. Server Initialization

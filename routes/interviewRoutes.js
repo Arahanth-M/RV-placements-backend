@@ -8,6 +8,7 @@ import {
   normalizePlacementVisitYear,
   normalizeVisitKeyParts,
 } from "../services/companyService.js";
+import { getCompanyPlatformDetailById } from "../services/companyPlatformDetailService.js";
 
 const parseMergePlacementByType = (raw) =>
   raw === true || raw === "true" || raw === "1" || raw === 1;
@@ -78,6 +79,13 @@ import {
   INTERVIEW_LIMIT_REASON,
   isInterviewWeeklyLimitEnabled,
 } from "../config/interviewLimits.js";
+import {
+  evaluateMockAccess,
+  getGeneralAccessSnapshot,
+  markFreeMockConsumed,
+  paywallPayload,
+} from "../services/billing/accessService.js";
+import { PAYWALL_CODE } from "../config/billingPlans.js";
 import {
   getInterviewLimitRequestStatus,
   resolveInterviewWeeklyLimitMax,
@@ -584,6 +592,59 @@ router.get("/eligibility", async (req, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
+    const platformScope =
+      String(req.query?.contentScope || req.query?.scope || "")
+        .trim()
+        .toLowerCase() === "platform";
+
+    if (platformScope) {
+      const companyId = String(req.query?.companyId || "").trim();
+      if (companyId) {
+        const access = await evaluateMockAccess({
+          userId,
+          companyId,
+          user: req.user,
+        });
+        if (!access.mockAllowed) {
+          const body = paywallPayload(access.error);
+          return res.json({
+            canStart: false,
+            reason: PAYWALL_CODE,
+            message: body.error,
+            completedCount: access.snapshot?.mockStarts || 0,
+            ...body,
+            limitRequest: { status: "none" },
+          });
+        }
+        return res.json({
+          canStart: true,
+          reason: null,
+          message: "",
+          completedCount: access.snapshot?.mockStarts || 0,
+          nextAvailableAt: null,
+          lastCompletedAt: null,
+          freeMockRemaining: access.snapshot?.freeMockRemaining ?? 0,
+          unlimitedMocks: access.snapshot?.unlimitedMocks === true,
+          limitRequest: { status: "none" },
+        });
+      }
+      const snapshot = await getGeneralAccessSnapshot(userId);
+      const canStart = snapshot.unlimitedMocks || snapshot.freeMockRemaining > 0;
+      return res.json({
+        canStart,
+        reason: canStart ? null : PAYWALL_CODE,
+        message: canStart
+          ? ""
+          : "Your free AI mock interview has been used. Unlock unlimited mocks to continue.",
+        completedCount: snapshot.mockStarts,
+        nextAvailableAt: null,
+        lastCompletedAt: null,
+        freeMockRemaining: snapshot.freeMockRemaining,
+        unlimitedMocks: snapshot.unlimitedMocks,
+        limitRequest: { status: "none" },
+      });
+    }
+
     const limitOptions = await resolveInterviewLimitOptions(req);
     const eligibility = await getInterviewStartEligibility(userId, limitOptions);
     const limitRequest = await getInterviewLimitRequestStatus(userId);
@@ -650,6 +711,7 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
       placementCluster,
       placementYear: placementYearRaw,
       mergePlacementByType: mergePlacementByTypeRaw,
+      contentScope: rawContentScope,
       customRounds = [],
     } = req.body;
     const userId = getAuthenticatedUserId(req);
@@ -658,34 +720,54 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const limitOptions = await resolveInterviewLimitOptions(req);
-    if (!limitOptions.bypassLimit) {
-      const eligibility = await getInterviewStartEligibility(userId, limitOptions);
-      if (!eligibility.canStart) {
-        return res.status(403).json({
-          code: eligibility.reason || INTERVIEW_LIMIT_REASON,
-          error: eligibility.message || "Interview limit reached.",
-          completedCount: eligibility.completedCount,
-          nextAvailableAt: eligibility.nextAvailableAt,
-          lastCompletedAt: eligibility.lastCompletedAt,
-          weeklyLimitMax: eligibility.weeklyLimitMax,
-          completionsInWindow: eligibility.completionsInWindow,
-        });
-      }
-    }
-
     if (!companyId) {
       return res.status(400).json({
         error: "companyId is required",
       });
     }
 
+    const contentScope =
+      String(rawContentScope || "").trim().toLowerCase() === "platform"
+        ? "platform"
+        : undefined;
+
+    if (contentScope === "platform") {
+      const access = await evaluateMockAccess({
+        userId,
+        companyId: String(companyId),
+        user: req.user,
+      });
+      if (!access.mockAllowed) {
+        const body = paywallPayload(access.error);
+        return res.status(402).json({
+          code: PAYWALL_CODE,
+          ...body,
+        });
+      }
+    } else {
+      const limitOptions = await resolveInterviewLimitOptions(req);
+      if (!limitOptions.bypassLimit) {
+        const eligibility = await getInterviewStartEligibility(userId, limitOptions);
+        if (!eligibility.canStart) {
+          return res.status(403).json({
+            code: eligibility.reason || INTERVIEW_LIMIT_REASON,
+            error: eligibility.message || "Interview limit reached.",
+            completedCount: eligibility.completedCount,
+            nextAvailableAt: eligibility.nextAvailableAt,
+            lastCompletedAt: eligibility.lastCompletedAt,
+            weeklyLimitMax: eligibility.weeklyLimitMax,
+            completionsInWindow: eligibility.completionsInWindow,
+          });
+        }
+      }
+    }
+
     try {
       await assertDsaSlotBookingForStart(userId, customRounds);
     } catch (slotErr) {
-      if (slotErr?.code === "DSA_SLOT_REQUIRED") {
+      if (slotErr?.code === "DSA_SLOT_REQUIRED" || slotErr?.code === "DSA_SLOT_FULL") {
         return res.status(403).json({
-          code: "DSA_SLOT_REQUIRED",
+          code: slotErr.code,
           error: slotErr.message,
           requiresSlotBooking: true,
         });
@@ -701,17 +783,23 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
     const placementYear = mergePlacementByType
       ? normalizePlacementVisitYear(undefined)
       : normalizePlacementVisitYear(placementYearRaw);
-    const loaded = await getInterviewMergedCompanyPayload(
-      String(companyId),
-      norm.type,
-      norm.cluster,
-      placementYear,
-      mergePlacementByType
-    );
-    if (!loaded?.staticRow || !loaded.merged) {
-      return res.status(404).json({ error: "Company not found" });
+    if (contentScope === "platform") {
+      const platformPayload = await getCompanyPlatformDetailById(String(companyId));
+      if (!platformPayload) {
+        return res.status(404).json({ error: "Company not found" });
+      }
+    } else {
+      const loaded = await getInterviewMergedCompanyPayload(
+        String(companyId),
+        norm.type,
+        norm.cluster,
+        placementYear,
+        mergePlacementByType
+      );
+      if (!loaded?.staticRow || !loaded.merged) {
+        return res.status(404).json({ error: "Company not found" });
+      }
     }
-    const companyData = loaded.merged;
 
     const existingSession = await getInProgressSession(
       userId,
@@ -733,6 +821,7 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
       placementCluster: mergePlacementByType ? "" : norm.cluster,
       placementYear,
       mergePlacementByType,
+      ...(contentScope ? { contentScope } : {}),
     });
 
     let plan;
@@ -784,6 +873,10 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
     ]);
 
     recordDauActivitySafe(req.user, { action: "ai_interview" });
+
+    if (contentScope === "platform") {
+      await markFreeMockConsumed(userId).catch(() => {});
+    }
 
     return res.status(201).json({
       sessionId: session._id,

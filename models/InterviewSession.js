@@ -252,6 +252,12 @@ const interviewSessionSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    /** `/general` mocks use company_platform_content, not visits. */
+    contentScope: {
+      type: String,
+      enum: ["visit", "platform"],
+      required: false,
+    },
     role: {
       type: String,
     },

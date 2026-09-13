@@ -13,6 +13,7 @@ export const interviewStartSchema = Joi.object({
   placementCluster: Joi.string().allow("").optional(),
   placementYear: Joi.number().integer().min(2000).max(2100).optional(),
   mergePlacementByType: Joi.boolean().optional(),
+  contentScope: Joi.string().valid("platform", "visit").optional(),
   interviewPlanMode: Joi.string().valid("custom").optional(),
   customRounds: Joi.array()
     .min(1)

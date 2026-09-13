@@ -57,6 +57,7 @@ export async function generateAndSavePrepPathPlan({
   resumeMime,
   resumeOriginalName,
   collegeId,
+  skipDailyQuota = false,
 }) {
   const uid = String(userId || "").trim();
   if (!uid) {
@@ -104,7 +105,9 @@ export async function generateAndSavePrepPathPlan({
     collegeId,
   });
 
-  const quota = await consumePrepPathQuota(uid);
+  const quota = skipDailyQuota
+    ? await getPrepPathQuota(uid)
+    : await consumePrepPathQuota(uid);
 
   try {
     let web = { snippets: [], sources: [], webAugmented: false };
@@ -174,7 +177,9 @@ export async function generateAndSavePrepPathPlan({
     out.peerDemand = peerDemand;
     return { plan: out, quota, peerDemand };
   } catch (err) {
-    await refundPrepPathQuota(uid).catch(() => {});
+    if (!skipDailyQuota) {
+      await refundPrepPathQuota(uid).catch(() => {});
+    }
     throw err;
   }
 }

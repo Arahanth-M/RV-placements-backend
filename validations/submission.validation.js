@@ -21,6 +21,7 @@ export const submissionInputSchema = Joi.object({
     .trim()
     .pattern(/^[a-fA-F0-9]{24}$/)
     .optional(),
+  contentScope: Joi.string().valid("platform", "visit").optional(),
   isAnonymous: Joi.alternatives()
     .try(Joi.boolean(), Joi.string().valid("true", "false"))
     .optional(),

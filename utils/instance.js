@@ -1,13 +1,2 @@
-// PAYMENT GATEWAY INTEGRATION - COMMENTED OUT
-// import Razorpay from "razorpay";
-
-// const instance = new Razorpay({
-//   key_id: process.env.RAZORPAY_KEY_ID,
-//   key_secret: process.env.RAZORPAY_KEY_SECRET,
-// });
-
-// export default instance;
-
-// Placeholder export to prevent import errors
-const instance = null;
-export default instance;
+// Razorpay Checkout client — keys come from env (RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET).
+export { getRazorpayInstance as default } from "../services/billing/razorpayClient.js";

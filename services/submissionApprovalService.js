@@ -4,6 +4,7 @@ import User1 from "../models/User1.js";
 import { buildCompanyVisitWriteLockKey, withKeyedAsyncMutex } from "../utils/keyedAsyncMutex.js";
 import { resolveSubmissionApproveVisit } from "./companyService.js";
 import { applySubmissionToCompanyVisit } from "./applySubmissionToCompanyVisit.js";
+import { applySubmissionToPlatformContent } from "./applySubmissionToPlatformContent.js";
 import { invalidateAdminDashboardStatsCache } from "./adminDashboardStatsCache.js";
 import {
   invalidateMySubmissionsCacheByEmail,
@@ -81,6 +82,53 @@ export async function approveSubmissionAndUpdateCompany(
   }
   if (submission.status !== "pending") {
     throw new Error("Only pending submissions can be approved.");
+  }
+
+  if (String(submission.contentScope || "") === "platform") {
+    const companyId = submission.companyId;
+    if (!companyId) {
+      throw new Error("Company not found");
+    }
+    const lockKey = `platform-content:${String(companyId)}`;
+    await withKeyedAsyncMutex(lockKey, async () => {
+      await applySubmissionToPlatformContent(companyId, submission, mergeSource);
+    });
+
+    submission.status = "approved";
+    submission.approvedAt = new Date();
+    submission.reviewedBy = reviewer;
+    await submission.save();
+    await invalidateSubmitterListCaches(submission);
+
+    const pointsToAdd =
+      submission.type === "interviewProcess" ? POINTS_INTERVIEW_EXPERIENCE : POINTS_QUESTION;
+
+    const contributor =
+      (await User1.findOne({ email: submission.submittedBy?.email }).select("points")) || null;
+    if (contributor) {
+      contributor.points = (contributor.points || 0) + pointsToAdd;
+      await contributor.save();
+      if (!deferCacheInvalidation) {
+        try {
+          await invalidateLeaderboardCache();
+        } catch (cacheErr) {
+          console.warn(
+            "⚠️ Failed to invalidate leaderboard cache after approval:",
+            cacheErr?.message || cacheErr
+          );
+        }
+      }
+    }
+
+    if (!deferCacheInvalidation) {
+      await invalidateAdminDashboardStatsCache();
+    }
+
+    return {
+      submission,
+      companyId,
+      visitId: null,
+    };
   }
 
   const target = await resolveSubmissionApproveVisit(submission);
@@ -179,11 +227,18 @@ export async function approveSubmissionsBatch(submissionIds, reviewer) {
 
     let visitKey;
     try {
-      const target = await resolveSubmissionApproveVisit(sub);
-      if (!target?.visitId) {
-        throw new Error("Company not found");
+      if (String(sub.contentScope || "") === "platform") {
+        if (!sub.companyId) {
+          throw new Error("Company not found");
+        }
+        visitKey = `platform-content:${String(sub.companyId)}`;
+      } else {
+        const target = await resolveSubmissionApproveVisit(sub);
+        if (!target?.visitId) {
+          throw new Error("Company not found");
+        }
+        visitKey = buildApproveLockKey(target.visitId);
       }
-      visitKey = buildApproveLockKey(target.visitId);
     } catch (err) {
       results.push({
         submissionId: id,

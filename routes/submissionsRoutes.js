@@ -122,6 +122,7 @@ submissionRouter.post(
       placementYear: rawPlacementYear,
       placementListContext,
       companyVisitId: rawCompanyVisitId,
+      contentScope: rawContentScope,
     } = req.body;
 
     if (!companyId || !type || !content) {
@@ -137,13 +138,19 @@ submissionRouter.post(
       companyVisitId = new mongoose.Types.ObjectId(String(rawCompanyVisitId).trim());
     }
 
+    const contentScope =
+      String(rawContentScope || "").trim().toLowerCase() === "platform"
+        ? "platform"
+        : undefined;
+
     const newSubmission = new Submission({
       companyId,
       type,
       content,
-      placementYear,
-      ...(placementListContext ? { placementListContext } : {}),
-      ...(companyVisitId ? { companyVisitId } : {}),
+      ...(contentScope === "platform" ? {} : { placementYear }),
+      ...(contentScope === "platform" ? {} : placementListContext ? { placementListContext } : {}),
+      ...(contentScope === "platform" ? {} : companyVisitId ? { companyVisitId } : {}),
+      ...(contentScope ? { contentScope } : {}),
       isAnonymous: isAnonymous === true || isAnonymous === 'true',
       submittedBy: {
         name: req.user.username, 

@@ -116,15 +116,23 @@ const clearOAuthFlow = (req, res, next) => {
 };
 
 
-router.get(
-  "/google",
-  captureOAuthClientOrigin,
-  clearOAuthFlow,
-  passport.authenticate("google", {
+router.get("/google", captureOAuthClientOrigin, (req, res, next) => {
+  const intent = String(req.query?.intent || "")
+    .trim()
+    .toLowerCase();
+  const campusFlow = intent === "campus" || intent === "spc";
+  if (campusFlow) {
+    res.cookie("oauth_flow", intent, oauthCookieOptions());
+  } else {
+    res.clearCookie("oauth_flow", { path: "/" });
+  }
+  const googleOpts = {
     session: false,
     scope: ["profile", "email"],
-  })
-);
+    ...(campusFlow ? { hd: "rvce.edu.in" } : {}),
+  };
+  return passport.authenticate("google", googleOpts)(req, res, next);
+});
 
 router.get(
   "/google/admin",

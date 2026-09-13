@@ -9,6 +9,7 @@ import {
   normalizePlacementVisitYear,
   normalizeVisitKeyParts,
 } from "./companyService.js";
+import { getCompanyPlatformDetailById } from "./companyPlatformDetailService.js";
 import { getCompanyContext } from "./mcp/getCompanyContext.js";
 import { generateQuestion, normalizeExpectedPoints } from "./mcp/generateQuestion.js";
 import { collectSessionQuestionExclusions } from "./interviewQuestionExclusions.js";
@@ -154,6 +155,9 @@ const resolveCompanyNamesForAnalytics = async (companyIds) => {
 export const resolveInterviewMergedCompanyForSession = async (session) => {
   const cid = String(session?.companyId?._id ?? session?.companyId ?? "").trim();
   if (!cid) return null;
+  if (String(session?.contentScope || "") === "platform") {
+    return getCompanyPlatformDetailById(cid);
+  }
   const typeUnd = session?.placementVisitType;
   const clusterUnd = session?.placementCluster;
   const yearUnd = session?.placementYear;
@@ -216,6 +220,9 @@ export const createSession = async (userId, companyId, placementSlice = {}) => {
     placementCluster: mergeByType ? "" : norm.cluster,
     placementYear,
     mergePlacementByType: mergeByType,
+    ...(String(placementSlice.contentScope || "") === "platform"
+      ? { contentScope: "platform" }
+      : {}),
     state: INTERVIEW_STATES.PREVIEW,
   });
 };
