@@ -19,8 +19,9 @@ const normalizeStringArray = (value) => {
  * MCP tool: getCompanyContext
  * Returns a compact interview-relevant context used by downstream planners.
  */
-export const getCompanyContext = async (companyData) => {
+export const getCompanyContext = async (companyData, { role = "" } = {}) => {
   const name = toSafeString(companyData?.name) || "Unknown Company";
+  const targetRole = toSafeString(role);
   const interviewProcess = normalizeStringArray(
     companyData?.interviewProcess || companyData?.interview_process
   );
@@ -44,6 +45,7 @@ export const getCompanyContext = async (companyData) => {
 
   return {
     name,
+    ...(targetRole ? { role: targetRole, seniority: "fresher" } : {}),
     rounds,
     onlineQuestions: onlineQuestions.slice(0, 20),
     interviewQuestions: interviewQuestions.slice(0, 20),

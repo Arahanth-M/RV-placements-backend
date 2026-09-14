@@ -1,4 +1,9 @@
 import Joi from "joi";
+import {
+  INTERVIEW_DIFFICULTIES,
+  PLATFORM_FRESHER_ROLES,
+  PLATFORM_INTERVIEW_ROUND_TYPES,
+} from "../config/interviewCatalog.js";
 
 const requiredPresent = Joi.custom((value, helpers) => {
   if (value === null || value === undefined || value === "") {
@@ -14,6 +19,21 @@ export const interviewStartSchema = Joi.object({
   placementYear: Joi.number().integer().min(2000).max(2100).optional(),
   mergePlacementByType: Joi.boolean().optional(),
   contentScope: Joi.string().valid("platform", "visit").optional(),
+  role: Joi.string()
+    .trim()
+    .valid(...PLATFORM_FRESHER_ROLES)
+    .when("contentScope", {
+      is: "platform",
+      then: Joi.required(),
+      otherwise: Joi.forbidden(),
+    }),
+  interviewDifficulty: Joi.string()
+    .valid(...INTERVIEW_DIFFICULTIES)
+    .when("contentScope", {
+      is: "platform",
+      then: Joi.required(),
+      otherwise: Joi.forbidden(),
+    }),
   interviewPlanMode: Joi.string().valid("custom").optional(),
   customRounds: Joi.array()
     .min(1)
@@ -21,7 +41,7 @@ export const interviewStartSchema = Joi.object({
     .items(
       Joi.object({
         type: Joi.string()
-          .valid("DSA", "System Design", "SQL", "CS Fundamentals", "HR")
+          .valid(...PLATFORM_INTERVIEW_ROUND_TYPES)
           .required(),
         difficulty: Joi.string().valid("easy", "medium", "hard").required(),
         focus: Joi.string().trim().max(120).optional(),
@@ -74,7 +94,7 @@ export const interviewSlotStatusSchema = Joi.object({
     .items(
       Joi.object({
         type: Joi.string()
-          .valid("DSA", "System Design", "SQL", "CS Fundamentals", "HR")
+          .valid(...PLATFORM_INTERVIEW_ROUND_TYPES)
           .required(),
         difficulty: Joi.string().valid("easy", "medium", "hard").optional(),
       }).unknown(true)

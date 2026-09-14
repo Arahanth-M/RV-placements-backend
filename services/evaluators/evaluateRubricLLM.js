@@ -1,4 +1,4 @@
-import { getEmbedding, cosineSimilarity } from "../../utils/embedding.js";
+import { cosineSimilarity, safeGetEmbedding } from "../../utils/embedding.js";
 import { GROQ_QUALITY_MODEL } from "../../config/groqModels.js";
 import { callLLM } from "../llmClient.js";
 import { parseJSONResponse } from "../../utils/parseJSONResponse.js";
@@ -116,6 +116,77 @@ const tokenize = (text) =>
     .replace(/[^\w\s]/g, " ")
     .split(/\s+/)
     .filter((token) => token.length >= 3);
+
+const STOPWORDS = new Set([
+  "the",
+  "and",
+  "for",
+  "with",
+  "that",
+  "this",
+  "from",
+  "into",
+  "your",
+  "would",
+  "should",
+  "using",
+  "also",
+  "than",
+  "when",
+  "where",
+  "which",
+  "what",
+  "how",
+  "why",
+  "will",
+  "can",
+  "are",
+  "was",
+  "were",
+  "have",
+  "has",
+  "had",
+  "not",
+  "does",
+  "such",
+  "about",
+  "over",
+  "under",
+  "between",
+  "through",
+  "before",
+  "after",
+  "each",
+  "their",
+  "them",
+  "they",
+  "you",
+  "our",
+  "its",
+  "use",
+  "uses",
+  "used",
+]);
+
+const contentTokens = (text) =>
+  tokenize(text).filter((token) => !STOPWORDS.has(token));
+
+const tokenOverlapSimilarity = (answer, rubricText) => {
+  const answerTokens = new Set(contentTokens(answer));
+  const rubricTokens = contentTokens(rubricText);
+  if (!rubricTokens.length || answerTokens.size === 0) return 0;
+  const hits = rubricTokens.filter((token) => answerTokens.has(token)).length;
+  return clamp01(hits / rubricTokens.length);
+};
+
+const computeRubricPointSimilarity = (answer, point, userEmbedding) => {
+  const rubricText = toSafeString(point?.text);
+  if (!rubricText) return 0;
+  if (userEmbedding && Array.isArray(point?.embedding) && point.embedding.length > 0) {
+    return clamp01((safeCosine(point.embedding, userEmbedding) - 0.38) / 0.42);
+  }
+  return tokenOverlapSimilarity(answer, rubricText);
+};
 
 const detectQuestionType = (question, rubricPoints = []) => {
   const answerModes = new Set(
@@ -347,14 +418,48 @@ const QUESTION_TYPE_WEIGHTS = {
   },
 };
 
-const STRUCTURED_FEEDBACK_MAX_CHARS = Number(process.env.EVAL_FEEDBACK_MAX_CHARS || 900);
+const summarizeRubricLabel = (text, maxWords = 9) => {
+  const words = toSafeString(text).split(/\s+/).filter(Boolean);
+  if (!words.length) return "";
+  if (words.length <= maxWords) return words.join(" ");
+  return words.slice(0, maxWords).join(" ");
+};
 
-const trimFeedbackSection = (value, maxChars = 320) => {
-  const text = toSafeString(value);
+const joinRubricLabels = (items = [], maxItems = 3) =>
+  (Array.isArray(items) ? items : [])
+    .map((item) => summarizeRubricLabel(item))
+    .filter(Boolean)
+    .slice(0, maxItems)
+    .join("; ");
+
+/** Shorten prose to a complete sentence/clause without trailing ellipsis. */
+const compactCompleteText = (value, maxChars = 260) => {
+  const text = toSafeString(value).replace(/\s+/g, " ").trim();
   if (!text) return "";
-  if (!Number.isFinite(maxChars) || maxChars <= 0) return text;
-  if (text.length <= maxChars) return text;
-  return `${text.slice(0, maxChars - 3).trimEnd()}...`;
+  if (!Number.isFinite(maxChars) || maxChars <= 0 || text.length <= maxChars) return text;
+
+  const slice = text.slice(0, maxChars);
+  const sentenceEnd = Math.max(
+    slice.lastIndexOf(". "),
+    slice.lastIndexOf("! "),
+    slice.lastIndexOf("? ")
+  );
+  if (sentenceEnd >= maxChars * 0.45) {
+    return slice.slice(0, sentenceEnd + 1).trim();
+  }
+
+  const clauseEnd = Math.max(slice.lastIndexOf("; "), slice.lastIndexOf(", "));
+  if (clauseEnd >= maxChars * 0.5) {
+    return `${slice.slice(0, clauseEnd).trim()}.`;
+  }
+
+  const words = slice.trim().split(/\s+/);
+  while (words.length > 1 && words.join(" ").length > maxChars - 1) {
+    words.pop();
+  }
+  const compact = words.join(" ").trim();
+  if (!compact) return text.slice(0, maxChars).trim();
+  return compact.endsWith(".") ? compact : `${compact}.`;
 };
 
 /** Precise per-question feedback for non–code_execution rounds (SQL, HR, CS, system design, etc.). */
@@ -375,12 +480,12 @@ const buildStructuredFeedback = ({
 
   const sections = [
     `Score: ${finalScore}/10`,
-    `Expected answer: ${trimFeedbackSection(expectedAnswer, 280)}`,
-    `How close your answer was: ${trimFeedbackSection(closeness, 280)}`,
-    `What to improve: ${trimFeedbackSection(improveText, 220)}`,
-  ];
+    expectedAnswer ? `Expected answer: ${compactCompleteText(expectedAnswer, 240)}` : "",
+    closeness ? `How close your answer was: ${compactCompleteText(closeness, 260)}` : "",
+    improveText ? `What to improve: ${compactCompleteText(improveText, 220)}` : "",
+  ].filter(Boolean);
 
-  return sections.join("\n\n").slice(0, STRUCTURED_FEEDBACK_MAX_CHARS);
+  return sections.join("\n\n");
 };
 
 const buildDeterministicStructuredFeedback = ({
@@ -389,29 +494,39 @@ const buildDeterministicStructuredFeedback = ({
   matchedRubricPoints = [],
   missingRubricPoints = [],
 }) => {
-  const rubricTexts = (Array.isArray(rubricPoints) ? rubricPoints : [])
+  const points = Array.isArray(rubricPoints) ? rubricPoints : [];
+  const mustHave = points
+    .filter((point) => toSafeString(point?.importance, "mustHave") === "mustHave")
     .map((point) => toSafeString(point?.text))
     .filter(Boolean);
+  const rubricTexts = points.map((point) => toSafeString(point?.text)).filter(Boolean);
 
-  const expectedAnswer =
-    rubricTexts.length > 0
-      ? `Interviewers expect you to cover: ${rubricTexts.slice(0, 5).join("; ")}.`
-      : "Interviewers expect a direct, complete answer that addresses the question.";
+  const expectedLabels = joinRubricLabels(mustHave.length > 0 ? mustHave : rubricTexts, 3);
+  const expectedAnswer = expectedLabels
+    ? `A strong answer should cover: ${expectedLabels}.`
+    : "Interviewers expect a direct, complete answer that addresses the question.";
+
+  const matchedLabels = joinRubricLabels(matchedRubricPoints, 3);
+  const missingLabels = joinRubricLabels(missingRubricPoints, 3);
 
   let closeness;
-  if (matchedRubricPoints.length > 0 && missingRubricPoints.length > 0) {
-    closeness = `You hit: ${matchedRubricPoints.slice(0, 3).join("; ")}. You missed: ${missingRubricPoints.slice(0, 3).join("; ")}.`;
-  } else if (matchedRubricPoints.length > 0) {
-    closeness = `You aligned well with what interviewers look for: ${matchedRubricPoints.slice(0, 4).join("; ")}.`;
-  } else if (missingRubricPoints.length > 0) {
-    closeness = `Your answer did not clearly cover: ${missingRubricPoints.slice(0, 4).join("; ")}.`;
+  if (matchedLabels && missingLabels) {
+    closeness = `You covered: ${matchedLabels}. You still missed: ${missingLabels}.`;
+  } else if (matchedLabels) {
+    closeness = `Your answer aligned with the rubric on: ${matchedLabels}.`;
+  } else if (missingLabels) {
+    closeness = `Your answer did not clearly address: ${missingLabels}.`;
   } else {
-    closeness = "Your answer was too brief or off-topic to match the expected bar.";
+    closeness = "Your answer was too brief or off-topic to match the rubric for this question.";
   }
 
   const improvements = missingRubricPoints
     .slice(0, 2)
-    .map((text) => (text.startsWith("Add") ? text : `Add: ${text}`));
+    .map((text) => {
+      const label = summarizeRubricLabel(text, 8);
+      return label ? `Address: ${label}.` : "";
+    })
+    .filter(Boolean);
 
   return buildStructuredFeedback({
     finalScore,
@@ -520,9 +635,9 @@ Return STRICT JSON:
 {
   "verdict": "correct | partial | incorrect",
   "confidence": 0.0,
-  "expectedAnswer": "2-3 short sentences: what a strong candidate would say (what interviewers expect). No bullet lists.",
-  "closeness": "2-3 short sentences: how this answer compares to that bar—what matched and what did not.",
-  "improvements": ["one concrete fix", "optional second fix"],
+  "expectedAnswer": "One or two short complete sentences summarizing what interviewers expect. Max 220 characters. No bullet lists. Never end mid-sentence.",
+  "closeness": "One or two short complete sentences on what matched and what did not. Max 220 characters. Never end mid-sentence.",
+  "improvements": ["one concrete fix under 120 characters", "optional second fix under 120 characters"],
   "matchedRubricPoints": ["string"],
   "missingRubricPoints": ["string"],
   "subscores": {
@@ -593,7 +708,7 @@ const shouldUseLLMGrader = ({
   return true;
 };
 
-export const evaluateRubricLLM = async ({
+const evaluateRubricLLMInner = async ({
   answer,
   question,
   companyContext,
@@ -668,20 +783,18 @@ export const evaluateRubricLLM = async ({
   }
 
   const [userEmbedding, questionEmbedding] = await Promise.all([
-    getEmbedding(safeAnswer),
-    safeQuestion ? getEmbedding(safeQuestion) : Promise.resolve(null),
+    safeGetEmbedding(safeAnswer),
+    safeQuestion ? safeGetEmbedding(safeQuestion) : Promise.resolve(null),
   ]);
 
-  const questionRelevance = questionEmbedding
-    ? clamp01(safeCosine(questionEmbedding, userEmbedding))
-    : 0.45;
+  const questionRelevance =
+    questionEmbedding && userEmbedding
+      ? clamp01(safeCosine(questionEmbedding, userEmbedding))
+      : tokenOverlapSimilarity(safeAnswer, safeQuestion) || 0.45;
 
   const rubricWithSimilarity = rubricPoints.map((point) => ({
     ...point,
-    similarity:
-      Array.isArray(point?.embedding) && point.embedding.length > 0
-        ? clamp01((safeCosine(point.embedding, userEmbedding) - 0.38) / 0.42)
-        : 0,
+    similarity: computeRubricPointSimilarity(safeAnswer, point, userEmbedding),
   }));
 
   const rubricSummary = buildRubricBuckets(rubricWithSimilarity, {
@@ -729,17 +842,21 @@ export const evaluateRubricLLM = async ({
   let llmMissing = [];
   let llmSubscores = {};
 
+  const isRetrievedBankQuestion = toSafeString(questionSource).toLowerCase() === "retrieved";
+
   const useLLMGrader =
     !suppressLlm &&
     (isLlmGenerated && rubricPoints.length > 0
       ? true
-      : shouldUseLLMGrader({
-          rubricPointCount: rubricPoints.length,
-          wordCount,
-          relevance,
-          mustHaveCoverage: rubricSummary.mustHaveCoverage,
-          deterministicScore,
-        }));
+      : isRetrievedBankQuestion && rubricPoints.length > 0
+        ? wordCount > 4
+        : shouldUseLLMGrader({
+            rubricPointCount: rubricPoints.length,
+            wordCount,
+            relevance,
+            mustHaveCoverage: rubricSummary.mustHaveCoverage,
+            deterministicScore,
+          }));
 
   logInterviewDsaLlmDebug("rubric_eval_llm_gate", {
     suppressLlm,
@@ -912,19 +1029,26 @@ export const evaluateRubricLLM = async ({
   );
 
   const feedback =
-    llmExpectedAnswer || llmCloseness || llmImprovements.length > 0
-      ? buildStructuredFeedback({
-          finalScore,
-          expectedAnswer: llmExpectedAnswer,
-          closeness: llmCloseness,
-          improvements: llmImprovements,
-        })
-      : buildDeterministicStructuredFeedback({
+    rubricPoints.length > 0
+      ? buildDeterministicStructuredFeedback({
           finalScore,
           rubricPoints,
           matchedRubricPoints,
           missingRubricPoints,
-        });
+        })
+      : llmExpectedAnswer || llmCloseness || llmImprovements.length > 0
+        ? buildStructuredFeedback({
+            finalScore,
+            expectedAnswer: llmExpectedAnswer,
+            closeness: llmCloseness,
+            improvements: llmImprovements,
+          })
+        : buildDeterministicStructuredFeedback({
+            finalScore,
+            rubricPoints,
+            matchedRubricPoints,
+            missingRubricPoints,
+          });
 
   return {
     score: finalScore,
@@ -954,6 +1078,49 @@ export const evaluateRubricLLM = async ({
         : {}),
     },
   };
+};
+
+export const evaluateRubricLLM = async (payload = {}) => {
+  try {
+    return await evaluateRubricLLMInner(payload);
+  } catch (error) {
+    console.warn(
+      "[evaluateRubricLLM] catastrophic failure, returning rubric fallback:",
+      error?.message || error
+    );
+    const rubricPoints = Array.isArray(payload?.expectedPoints) ? payload.expectedPoints : [];
+    const missingRubricPoints = rubricPoints.map((point) => toSafeString(point?.text)).filter(Boolean);
+    const finalScore = 4;
+    return {
+      score: finalScore,
+      type: "general",
+      feedback: buildDeterministicStructuredFeedback({
+        finalScore,
+        rubricPoints,
+        matchedRubricPoints: [],
+        missingRubricPoints,
+      }),
+      verdict: "partial",
+      evaluationTrace: {
+        scoringVersion: "v3-rubric-fallback",
+        questionType: "general",
+        expectedAnswerMode: "conceptual",
+        verdict: "partial",
+        confidence: 0.4,
+        relevance: 0.4,
+        coverage: 0,
+        correctness: 0.4,
+        communication: 0.4,
+        matchedRubricPoints: [],
+        missingRubricPoints,
+        criticalMisses: rubricPoints
+          .filter((point) => toSafeString(point?.importance, "mustHave") === "mustHave")
+          .map((point) => toSafeString(point?.text))
+          .filter(Boolean),
+        subscores: {},
+      },
+    };
+  }
 };
 
 export default evaluateRubricLLM;

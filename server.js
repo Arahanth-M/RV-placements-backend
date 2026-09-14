@@ -36,6 +36,7 @@ import resumeRouter from "./routes/resumeRoutes.js";
 import prepPathRouter from "./routes/prepPathRoutes.js";
 import dauRouter from "./routes/dauRoutes.js";
 import billingRouter from "./routes/billingRoutes.js";
+import interviewQuestionBankRouter from "./routes/interviewQuestionBankRoutes.js";
 
 import "./services/passport.js";
 
@@ -175,6 +176,7 @@ app.use(routes.RESUME, resumeRouter);
 app.use(routes.PREP_PATH, prepPathRouter);
 app.use(routes.DAU, dauRouter);
 app.use(routes.BILLING, billingRouter);
+app.use(routes.INTERVIEW_QUESTION_BANK, interviewQuestionBankRouter);
 
 /**
  * 6. Server Initialization

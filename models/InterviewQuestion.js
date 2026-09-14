@@ -1,6 +1,10 @@
 import mongoose from "mongoose";
+import {
+  PLATFORM_FRESHER_ROLES,
+  PLATFORM_INTERVIEW_ROUND_TYPES,
+} from "../config/interviewCatalog.js";
 
-const ROUND_TYPES = ["DSA", "SQL", "System Design", "HR", "CS Fundamentals"];
+const ROUND_TYPES = [...PLATFORM_INTERVIEW_ROUND_TYPES];
 const DIFFICULTY_LEVELS = ["easy", "medium", "hard"];
 const EVALUATION_STRATEGIES = [
   "code_execution",
@@ -81,6 +85,29 @@ const hrMetadataSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const mcqOptionSchema = new mongoose.Schema(
+  {
+    id: { type: String, trim: true, uppercase: true },
+    text: { type: String, trim: true },
+    distractorReason: { type: String, trim: true, default: "" },
+  },
+  { _id: false }
+);
+
+const mcqMetadataSchema = new mongoose.Schema(
+  {
+    options: { type: [mcqOptionSchema], default: [] },
+    correctOptionId: { type: String, trim: true, uppercase: true },
+    allowMultiple: { type: Boolean, default: false },
+    shuffleOptions: { type: Boolean, default: true },
+    explanation: { type: String, trim: true, default: "" },
+    explanationRequired: { type: Boolean, default: false },
+    selectionWeight: { type: Number, min: 0, default: 1 },
+    explanationWeight: { type: Number, min: 0, default: 0 },
+  },
+  { _id: false }
+);
+
 const analyticsMetadataSchema = new mongoose.Schema(
   {
     timesUsed: { type: Number, min: 0, default: 0 },
@@ -111,6 +138,10 @@ const interviewQuestionSchema = new mongoose.Schema(
 
     // Classification
     companyTags: { type: [String], default: [] },
+    roleTags: {
+      type: [{ type: String, enum: PLATFORM_FRESHER_ROLES }],
+      default: [],
+    },
     roundType: { type: String, enum: ROUND_TYPES, required: true },
     difficulty: { type: String, enum: DIFFICULTY_LEVELS, required: true },
     topics: { type: [String], default: [] },
@@ -147,6 +178,9 @@ const interviewQuestionSchema = new mongoose.Schema(
     // HR metadata
     hrMetadata: { type: hrMetadataSchema, default: () => ({}) },
 
+    // Multiple-choice metadata
+    mcqMetadata: { type: mcqMetadataSchema, default: () => ({}) },
+
     // Analytics metadata
     analytics: { type: analyticsMetadataSchema, default: () => ({}) },
 
@@ -165,9 +199,14 @@ interviewQuestionSchema.path("testCases").validate(function validateTestCases(va
 }, "code_execution requires testCases: at least two visible (isHidden: false) and two hidden (isHidden: true).");
 
 interviewQuestionSchema.index({ companyTags: 1 });
+interviewQuestionSchema.index({ roleTags: 1 });
 interviewQuestionSchema.index({ roundType: 1 });
 interviewQuestionSchema.index({ difficulty: 1 });
 interviewQuestionSchema.index({ topics: 1 });
+// Keep the two array dimensions in separate indexes: MongoDB cannot create a
+// compound multikey index containing both roleTags[] and companyTags[].
+interviewQuestionSchema.index({ roundType: 1, difficulty: 1, roleTags: 1 });
+interviewQuestionSchema.index({ roundType: 1, difficulty: 1, companyTags: 1 });
 interviewQuestionSchema.index({ questionId: 1 }, { unique: true });
 
 const InterviewQuestion = mongoose.model("InterviewQuestion", interviewQuestionSchema);

@@ -223,6 +223,10 @@ export const createSession = async (userId, companyId, placementSlice = {}) => {
     ...(String(placementSlice.contentScope || "") === "platform"
       ? { contentScope: "platform" }
       : {}),
+    ...(String(placementSlice.contentScope || "") === "platform" &&
+    String(placementSlice.role || "").trim()
+      ? { role: String(placementSlice.role).trim() }
+      : {}),
     state: INTERVIEW_STATES.PREVIEW,
   });
 };
@@ -482,7 +486,7 @@ export const startRound = async (sessionId) => {
 
   // 3) Call MCP generateQuestion with companyContext + round context
   const companyData = (await resolveInterviewMergedCompanyForSession(session)) ?? null;
-  const companyContext = await getCompanyContext(companyData || {});
+  const companyContext = await getCompanyContext(companyData || {}, { role: session.role });
   const sessionExclusions = collectSessionQuestionExclusions(session);
   const gen = await generateQuestion({
     userId: String(session.userId || ""),
@@ -657,7 +661,7 @@ export const generateRoundFeedback = async (sessionId, roundNumber) => {
       : 0;
 
   const companyData = (await resolveInterviewMergedCompanyForSession(session)) ?? null;
-  const companyContext = await getCompanyContext(companyData || {});
+  const companyContext = await getCompanyContext(companyData || {}, { role: session.role });
 
   const roundPayload = {
     ...(typeof round.toObject === "function" ? round.toObject() : round),

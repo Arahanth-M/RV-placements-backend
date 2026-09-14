@@ -29,6 +29,7 @@ const mockCallLLM = jest.fn(async () =>
 
 jest.unstable_mockModule("../../utils/embedding.js", () => ({
   getEmbedding: mockGetEmbedding,
+  safeGetEmbedding: mockGetEmbedding,
   cosineSimilarity: (a = [], b = []) => {
     const length = Math.max(a.length, b.length, 0);
     if (!length) return 0;
@@ -143,6 +144,7 @@ describe("AI interview scoring helpers", () => {
     expect(result.feedback).toContain("Expected answer:");
     expect(result.feedback).toContain("How close your answer was:");
     expect(result.feedback).toContain("What to improve:");
+    expect(result.feedback).not.toContain("...");
     expect(mockCallLLM).toHaveBeenCalled();
   });
 

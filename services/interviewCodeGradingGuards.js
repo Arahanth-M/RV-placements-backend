@@ -17,7 +17,6 @@ export const roundTypeImpliesCodeExecutionInterview = (roundType) => {
     rt.includes("algorithm") ||
     rt.includes("data structure") ||
     rt.includes("programming") ||
-    rt.includes("technical") ||
     rt.includes("software") ||
     rt.includes("developer") ||
     rt.includes("leetcode")

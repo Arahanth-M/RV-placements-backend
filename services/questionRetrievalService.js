@@ -162,18 +162,27 @@ const pickTopQuestions = async (match, limit = 1) => {
  */
 export async function retrieveQuestion({
   company,
+  role,
   roundType,
   difficulty,
   excludedQuestionIds = [],
   questionKind = null,
+  strictTargeting = false,
 }) {
   const companyTag = toSafeString(company);
+  const roleTag = toSafeString(role);
   const normalizedRoundType = toSafeString(roundType);
   const normalizedDifficulty = normalizeDifficulty(difficulty);
   const exclusions = normalizeExclusions(excludedQuestionIds);
-  const roundTypeMatcher = buildRoundTypeMatcher(normalizedRoundType);
+  const roundTypeMatcher = strictTargeting
+    ? { $regex: `^${escapeRegex(normalizedRoundType)}$`, $options: "i" }
+    : buildRoundTypeMatcher(normalizedRoundType);
 
-  if (!normalizedRoundType || !roundTypeMatcher) {
+  if (
+    !normalizedRoundType ||
+    !roundTypeMatcher ||
+    (strictTargeting && (!companyTag || !roleTag))
+  ) {
     return null;
   }
 
@@ -237,6 +246,27 @@ export async function retrieveQuestion({
     if (!normalizedQuestionKind) {
       candidateMatches.push(baseMatch);
       candidateMatches.push({ roundType: roundTypeMatcher });
+    }
+  }
+
+  if (strictTargeting) {
+    const exactTargetMatch = {
+      ...baseMatch,
+      companyTags: { $regex: `^${escapeRegex(companyTag)}$`, $options: "i" },
+      roleTags: roleTag,
+    };
+    if (normalizedQuestionKind === "mcq") {
+      candidateMatches.splice(0, candidateMatches.length, {
+        ...exactTargetMatch,
+        evaluationStrategy: "mcq_exact",
+      });
+    } else if (normalizedQuestionKind === "theory") {
+      candidateMatches.splice(0, candidateMatches.length, {
+        ...exactTargetMatch,
+        evaluationStrategy: "rubric_llm",
+      });
+    } else {
+      candidateMatches.splice(0, candidateMatches.length, exactTargetMatch);
     }
   }
 

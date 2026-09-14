@@ -121,6 +121,7 @@ const normalizePlacementSliceToken = (
 const buildQuestionPoolCacheKey = ({
   companyContext,
   roundType,
+  roundAbout,
   difficulty,
   placementVisitType,
   placementCluster,
@@ -131,6 +132,8 @@ const buildQuestionPoolCacheKey = ({
     companyContext?.name || companyContext?.companyName,
     "unknown_company"
   );
+  const role = normalizeCacheToken(companyContext?.role, "generic_role");
+  const focus = normalizeCacheToken(roundAbout, "general_focus");
   const slice = normalizePlacementSliceToken(
     placementVisitType,
     placementCluster,
@@ -139,7 +142,7 @@ const buildQuestionPoolCacheKey = ({
   );
   const type = normalizeCacheToken(roundType, "general");
   const level = normalizeDifficulty(difficulty);
-  return `${company}:${slice}:${type}:${level}`;
+  return `${company}:${role}:${slice}:${type}:${focus}:${level}`;
 };
 
 const buildSeenQuestionsKey = (userId) => {
@@ -354,6 +357,72 @@ const buildRoundSpecificPromptRules = (roundType, roundAbout, options = {}) => {
     }`;
   }
 
+  if (safeType.includes("aptitude")) {
+    return `Aptitude round rules:
+- Ask a self-contained quantitative, logical-reasoning, verbal, or data-interpretation question suitable for a fresher.
+- Include all data needed to solve it; avoid programming questions.
+- expectedAnswerMode should be "conceptual".
+- Rubric categories: method, correctness, reasoning, communication.`;
+  }
+
+  if (safeType.includes("core technical")) {
+    return `Core engineering technical round rules:
+- Ask a fresher-level engineering fundamentals or application question relevant to the target role and: ${topic}.
+- Test first principles, assumptions, units, practical constraints, and safety where relevant.
+- Do not ask software architecture or web-development questions unless the target role requires them.
+- expectedAnswerMode should be "conceptual".
+- Rubric categories: fundamentals, reasoning, application, assumptions.`;
+  }
+
+  if (safeType.includes("circuit")) {
+    return `Circuit design round rules:
+- Ask a fresher-level analog, digital, CMOS, timing, or circuit-analysis question relevant to: ${topic}.
+- Expect a clear circuit approach, assumptions, calculations, and trade-offs.
+- expectedAnswerMode should be "design".
+- Rubric categories: circuitCorrectness, analysis, tradeoffs, practicalConstraints.`;
+  }
+
+  if (safeType.includes("low-level") || safeType.includes("lld")) {
+    return `Low-level design round rules:
+- Ask an object-oriented or machine-coding design problem focused on: ${topic}.
+- Expect entities, interfaces, relationships, extensibility, and relevant design trade-offs.
+- Keep the scope suitable for a fresher; do not turn it into distributed-system architecture.
+- expectedAnswerMode should be "design".
+- Rubric categories: objectModel, interfaces, extensibility, tradeoffs.`;
+  }
+
+  if (safeType.includes("ml/ai") || safeType.includes("machine learning")) {
+    return `ML / AI technical round rules:
+- Ask a fresher-level machine-learning question relevant to the target role and: ${topic}.
+- Test model choice, metrics, data preparation, overfitting, validation, and practical trade-offs.
+- expectedAnswerMode should be "conceptual".
+- Rubric categories: fundamentals, modelReasoning, evaluation, practicalApplication.`;
+  }
+
+  if (safeType.includes("embedded")) {
+    return `Embedded systems round rules:
+- Ask a fresher-level question about C, microcontrollers, interrupts, memory, peripherals, RTOS, or debugging, focused on: ${topic}.
+- Prefer practical hardware-software scenarios and constraints.
+- expectedAnswerMode should be "conceptual".
+- Rubric categories: fundamentals, hardwareSoftwareReasoning, constraints, debugging.`;
+  }
+
+  if (safeType.includes("case interview")) {
+    return `Case interview rules:
+- Ask one structured fresher-level business case or guesstimate relevant to the target role and company.
+- The candidate should clarify, structure assumptions, calculate where useful, and recommend an action.
+- expectedAnswerMode should be "conceptual".
+- Rubric categories: structure, assumptions, analysis, recommendation.`;
+  }
+
+  if (safeType.includes("project/resume")) {
+    return `Project / resume deep-dive rules:
+- Ask a specific fresher-level deep-dive question about project decisions, contribution, challenges, results, or trade-offs.
+- Do not assume experience not present in the conversation; phrase the question so the candidate can choose a relevant project.
+- expectedAnswerMode should be "story".
+- Rubric categories: ownership, technicalDepth, tradeoffs, outcomes.`;
+  }
+
   if (safeType.includes("system")) {
     return `System design round rules:
 - Ask an open-ended design question focused on: ${topic}.
@@ -458,6 +527,7 @@ const buildQuestionPoolPrompt = ({
 Generate ${requestedCount} different questions you could ASK NEXT to the candidate.
 
 Company context: ${JSON.stringify(companyContext || {})}
+Target candidate: fresher applying for ${toSafeString(companyContext?.role, "the selected role")}
 Round type: ${toSafeString(roundType, "DSA")}
 Round focus/topic: ${toSafeString(roundAbout, "General interview")}
 Base difficulty: ${normalizeDifficulty(difficulty)}
@@ -495,6 +565,7 @@ Rules:
 11) For each question, include 4-6 rubric points a strong answer should cover.
 12) Each rubric point must include: text, category, importance ("mustHave" | "goodToHave" | "redFlag").
 13) Set expectedAnswerMode per the round-specific rules above.
+14) The question must be realistic for the target fresher role; do not test an unrelated professional domain.
 
 Return JSON:
 {
@@ -959,10 +1030,12 @@ export const generateQuestion = async ({
     // Retrieval-first path: if curated question exists, use it.
     const retrieved = await retrieveQuestion({
       company: companyContext?.name || companyContext?.companyName || "",
+      role: companyContext?.role || "",
       roundType,
       difficulty,
       excludedQuestionIds: retrievalExclusions,
       questionKind: csFundamentalsQuestionKind,
+      strictTargeting: Boolean(companyContext?.role),
     });
     if (retrieved?.question) {
       if (isInterviewQuestionExcluded(retrieved, excludedIdSet, excludedTextSet)) {
@@ -1042,6 +1115,7 @@ export const generateQuestion = async ({
     const cacheKey = buildQuestionPoolCacheKey({
       companyContext,
       roundType,
+      roundAbout,
       difficulty,
       placementVisitType,
       placementCluster,

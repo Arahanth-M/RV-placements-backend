@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
+import { PLATFORM_INTERVIEW_ROUND_TYPES } from "../config/interviewCatalog.js";
 
-const ROUND_TYPES = ["DSA", "System Design", "SQL", "CS Fundamentals", "HR"];
+const ROUND_TYPES = [...PLATFORM_INTERVIEW_ROUND_TYPES];
 const ROUND_STATE = ["IN_PROGRESS", "COMPLETED"];
 const INTERVIEW_STATE = ["IN_PROGRESS", "COMPLETED"];
 const INTERVIEW_STATES = [
@@ -260,6 +261,7 @@ const interviewSessionSchema = new mongoose.Schema(
     },
     role: {
       type: String,
+      trim: true,
     },
     history: {
       type: [historyItemSchema],

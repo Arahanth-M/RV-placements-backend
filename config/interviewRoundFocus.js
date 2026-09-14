@@ -46,6 +46,14 @@ const DEFAULT_LABEL_BY_TYPE = Object.freeze({
   SQL: "SQL Round",
   "CS Fundamentals": "CS Fundamentals Round",
   HR: "HR/Behavioral Round",
+  Aptitude: "Aptitude Round",
+  "Core Technical": "Core Technical Round",
+  "Circuit Design": "Circuit Design Round",
+  "Low-Level Design": "Low-Level Design Round",
+  "ML/AI Technical": "ML/AI Technical Round",
+  "Embedded Systems": "Embedded Systems Round",
+  "Case Interview": "Case Interview",
+  "Project/Resume Deep Dive": "Project/Resume Deep Dive",
 });
 
 export const getRoundPreviewLabel = (roundType) =>

@@ -12,6 +12,10 @@ import {
   inferEvaluationStrategyForRound,
 } from "../services/mcp/generateQuestion.js";
 import {
+  BANK_QUESTION_EVAL_SELECT,
+  resolveExpectedPoints,
+} from "../services/interviewRubricResolution.js";
+import {
   logCodeGradingGuard,
   roundTypeImpliesCodeExecutionInterview,
 } from "../services/interviewCodeGradingGuards.js";
@@ -149,22 +153,9 @@ async function processEvaluateAnswerJob(sessionId, answer, options = {}) {
 
   // Company context for MCP tools
   const companyData = (await resolveInterviewMergedCompanyForSession(session)) ?? null;
-  const companyContext = await getCompanyContext(companyData || {});
+  const companyContext = await getCompanyContext(companyData || {}, { role: session.role });
 
   const questionSlot = currentRound.questions[currentQuestionIndex];
-  if (questionSlot && Array.isArray(questionSlot.expectedPoints)) {
-    let didGenerateEmbeddings = false;
-    for (let point of questionSlot.expectedPoints) {
-      if (!point.embedding || point.embedding.length === 0) {
-        point.embedding = await getEmbedding(point.text);
-        didGenerateEmbeddings = true;
-      }
-    }
-    if (didGenerateEmbeddings) {
-      session.markModified("rounds");
-      await session.save();
-    }
-  }
 
   // 3) Pre-evaluation LLM reasoning — skipped for DSA / coding-style rounds and MCQ (deterministic grading).
   const isMcqQuestion =
@@ -235,32 +226,59 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
     };
   }
 
+  const questionIdHint = String(questionObj?.questionId || "").trim();
+  const questionTextHint = String(currentQuestion || "").trim();
+  const resolvedSlotCases = Array.isArray(questionObj?.resolvedCodeTestCases)
+    ? questionObj.resolvedCodeTestCases
+    : [];
+  const resolvedSlotMeta =
+    questionObj?.resolvedDsaMetadata && typeof questionObj.resolvedDsaMetadata === "object"
+      ? questionObj.resolvedDsaMetadata
+      : null;
+
+  let questionMetadataDoc = null;
+  if (questionIdHint) {
+    questionMetadataDoc = await InterviewQuestion.findOne({ questionId: questionIdHint })
+      .select(BANK_QUESTION_EVAL_SELECT)
+      .lean();
+  }
+  if (!questionMetadataDoc && questionTextHint) {
+    questionMetadataDoc = await InterviewQuestion.findOne({ question: questionTextHint })
+      .select(BANK_QUESTION_EVAL_SELECT)
+      .lean();
+  }
+
+  const resolvedExpectedPoints = resolveExpectedPoints({
+    slotPoints: questionObj?.expectedPoints,
+    bankRubric: questionMetadataDoc?.rubric,
+    roundType: questionMetadataDoc?.roundType || currentRound.type,
+    expectedAnswerMode: questionObj?.expectedAnswerMode,
+  });
+  if (resolvedExpectedPoints.length > 0) {
+    questionObj.expectedPoints = resolvedExpectedPoints;
+    try {
+      let didGenerateEmbeddings = false;
+      for (const point of resolvedExpectedPoints) {
+        if (!point.embedding || point.embedding.length === 0) {
+          point.embedding = await getEmbedding(point.text);
+          didGenerateEmbeddings = true;
+        }
+      }
+      if (didGenerateEmbeddings) {
+        session.markModified("rounds");
+        await session.save();
+      }
+    } catch (embedError) {
+      console.warn(
+        "⚠️ rubric embedding precompute failed, continuing with token-overlap grading:",
+        embedError?.message || embedError
+      );
+    }
+  }
+
   // 4) MCP evaluateAnswer
   let evaluation;
   try {
-    const questionIdHint = String(questionObj?.questionId || "").trim();
-    const questionTextHint = String(currentQuestion || "").trim();
-    const resolvedSlotCases = Array.isArray(questionObj?.resolvedCodeTestCases)
-      ? questionObj.resolvedCodeTestCases
-      : [];
-    const resolvedSlotMeta =
-      questionObj?.resolvedDsaMetadata && typeof questionObj.resolvedDsaMetadata === "object"
-        ? questionObj.resolvedDsaMetadata
-        : null;
-
-    let questionMetadataDoc = null;
-    if (resolvedSlotCases.length === 0) {
-      if (questionIdHint) {
-        questionMetadataDoc = await InterviewQuestion.findOne({ questionId: questionIdHint })
-          .select("questionId testCases dsaMetadata sqlMetadata evaluationStrategy roundType")
-          .lean();
-      }
-      if (!questionMetadataDoc && questionTextHint) {
-        questionMetadataDoc = await InterviewQuestion.findOne({ question: questionTextHint })
-          .select("questionId testCases dsaMetadata sqlMetadata evaluationStrategy roundType")
-          .lean();
-      }
-    }
 
     const fromBankCases = Array.isArray(questionMetadataDoc?.testCases)
       ? questionMetadataDoc.testCases
@@ -307,6 +325,13 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       effectiveEvaluationStrategy = "code_execution";
     } else if (bankRoundTypeIsDsa && bankEvalStrategy !== "sql_execution") {
       effectiveEvaluationStrategy = "code_execution";
+    } else if (
+      !effectiveEvaluationStrategy &&
+      (bankEvalStrategy === "rubric_llm" ||
+        bankEvalStrategy === "behavioral_llm" ||
+        resolvedExpectedPoints.length > 0)
+    ) {
+      effectiveEvaluationStrategy = bankEvalStrategy || "rubric_llm";
     }
 
     if (effectiveEvaluationStrategy === "code_execution" && !hasTests) {
@@ -339,7 +364,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       companyContext,
       llmReasoning,
       suppressLlm: suppressInterviewLlm,
-      expectedPoints: questionObj?.expectedPoints,
+      expectedPoints: resolvedExpectedPoints,
       evaluationStrategy: effectiveEvaluationStrategy,
       questionSource,
       language: codingLanguage,
@@ -380,29 +405,86 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       });
     }
   } catch (error) {
-    console.warn("⚠️ evaluateAnswer failed, using fallback evaluation:", error?.message || error);
-    evaluation = {
-      score: 5,
-      type: "general",
-      feedback:
-        "Thanks for the response. I could not evaluate this answer fully right now, so this is a neutral score. Please continue to the next question.",
-      verdict: "partial",
-      evaluationTrace: {
-        scoringVersion: "fallback",
-        questionType: "general",
-        expectedAnswerMode: "conceptual",
+    console.warn("⚠️ evaluateAnswer failed, using rubric-aware fallback:", error?.message || error);
+    try {
+      evaluation = await evaluateAnswer({
+        answer: trimmedAnswer,
+        question: currentQuestion,
+        companyContext,
+        llmReasoning: "",
+        suppressLlm: true,
+        expectedPoints: resolvedExpectedPoints,
+        evaluationStrategy: "rubric_llm",
+        questionSource,
+        metadata: {
+          questionId: questionIdHint || questionMetadataDoc?.questionId || "",
+          questionSource,
+        },
+      });
+    } catch (fallbackError) {
+      console.warn(
+        "⚠️ rubric-aware fallback also failed:",
+        fallbackError?.message || fallbackError
+      );
+      const missingRubricPoints = resolvedExpectedPoints
+        .map((point) => String(point?.text || "").trim())
+        .filter(Boolean);
+      const mustHave = resolvedExpectedPoints
+        .filter((point) => String(point?.importance || "mustHave") === "mustHave")
+        .map((point) => String(point?.text || "").trim())
+        .filter(Boolean);
+      const summarizeLabel = (text, maxWords = 9) => {
+        const words = String(text || "")
+          .trim()
+          .split(/\s+/)
+          .filter(Boolean);
+        if (!words.length) return "";
+        return words.length <= maxWords ? words.join(" ") : words.slice(0, maxWords).join(" ");
+      };
+      const expectedLabels = (mustHave.length ? mustHave : missingRubricPoints)
+        .slice(0, 3)
+        .map((item) => summarizeLabel(item))
+        .filter(Boolean)
+        .join("; ");
+      const missingLabels = missingRubricPoints
+        .slice(0, 3)
+        .map((item) => summarizeLabel(item))
+        .filter(Boolean)
+        .join("; ");
+
+      evaluation = {
+        score: 4,
+        type: "general",
+        feedback: [
+          "Score: 4/10",
+          expectedLabels
+            ? `Expected answer: A strong answer should cover: ${expectedLabels}.`
+            : "Expected answer: Provide a complete answer that directly addresses the question.",
+          missingLabels
+            ? `How close your answer was: These rubric points were not clearly covered: ${missingLabels}.`
+            : "How close your answer was: Automated scoring was unavailable, so this is a conservative score.",
+          missingLabels
+            ? `What to improve: Address: ${summarizeLabel(missingRubricPoints[0], 8)}.`
+            : "What to improve: Retry with a more structured answer tied directly to the question.",
+        ].join("\n\n"),
         verdict: "partial",
-        confidence: 0.3,
-        relevance: 0.5,
-        coverage: 0.5,
-        correctness: 0.5,
-        communication: 0.5,
-        matchedRubricPoints: [],
-        missingRubricPoints: [],
-        criticalMisses: [],
-        subscores: {},
-      },
-    };
+        evaluationTrace: {
+          scoringVersion: "fallback-rubric",
+          questionType: "general",
+          expectedAnswerMode: "conceptual",
+          verdict: "partial",
+          confidence: 0.35,
+          relevance: 0.4,
+          coverage: 0,
+          correctness: 0.4,
+          communication: 0.4,
+          matchedRubricPoints: [],
+          missingRubricPoints,
+          criticalMisses: mustHave,
+          subscores: {},
+        },
+      };
+    }
   }
 
   const evaluationResult = {

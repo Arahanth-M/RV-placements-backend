@@ -712,6 +712,8 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
       placementYear: placementYearRaw,
       mergePlacementByType: mergePlacementByTypeRaw,
       contentScope: rawContentScope,
+      role,
+      interviewDifficulty,
       customRounds = [],
     } = req.body;
     const userId = getAuthenticatedUserId(req);
@@ -730,6 +732,13 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
       String(rawContentScope || "").trim().toLowerCase() === "platform"
         ? "platform"
         : undefined;
+    const roundsForPlan =
+      contentScope === "platform"
+        ? customRounds.map((round) => ({
+            ...round,
+            difficulty: interviewDifficulty,
+          }))
+        : customRounds;
 
     if (contentScope === "platform") {
       const access = await evaluateMockAccess({
@@ -822,11 +831,14 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
       placementYear,
       mergePlacementByType,
       ...(contentScope ? { contentScope } : {}),
+      ...(contentScope === "platform" ? { role } : {}),
     });
 
     let plan;
     try {
-      plan = await generateInterviewPlanFromCustomRounds(customRounds);
+      plan = await generateInterviewPlanFromCustomRounds(roundsForPlan, {
+        platform: contentScope === "platform",
+      });
     } catch (planError) {
       const message = planError?.message || "Invalid interview plan.";
       return res.status(400).json({ error: message });
@@ -836,6 +848,7 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
       roundsPlan: plan.roundsPlan || [],
       roundsDetails: plan.roundsDetails || [],
       totalRounds: plan.totalRounds,
+      ...(contentScope === "platform" ? { difficultyLevel: interviewDifficulty } : {}),
       currentRound: 1,
       currentRoundIndex: 0,
       currentQuestionIndex: 0,

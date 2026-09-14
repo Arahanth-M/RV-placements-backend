@@ -29,6 +29,7 @@ import dauRouter from "./routes/dauRoutes.js";
 import logoRouter from "./routes/logo.js";
 import experienceRouter from "./routes/experienceRoutes.js";
 import billingRouter from "./routes/billingRoutes.js";
+import interviewQuestionBankRouter from "./routes/interviewQuestionBankRoutes.js";
 import { createHealthHandler } from "./server/healthHandler.js";
 
 const app = createExpressApp();
@@ -54,6 +55,7 @@ app.use(routes.RESUME, resumeRouter);
 app.use(routes.PREP_PATH, prepPathRouter);
 app.use(routes.DAU, dauRouter);
 app.use(routes.BILLING, billingRouter);
+app.use(routes.INTERVIEW_QUESTION_BANK, interviewQuestionBankRouter);
 
 if (process.env.NODE_ENV !== "test") {
   connectDB(config.MONGO_URI).then(async () => {

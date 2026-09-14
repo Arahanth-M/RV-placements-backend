@@ -15,6 +15,11 @@ import {
   normalizeCustomRoundFocus,
   resolveRoundAbout,
 } from "../config/interviewRoundFocus.js";
+import {
+  CAMPUS_INTERVIEW_ROUND_TYPES,
+  INTERVIEW_DIFFICULTIES,
+  PLATFORM_INTERVIEW_ROUND_TYPES,
+} from "../config/interviewCatalog.js";
 
 const toSafeString = (value, fallback = "") => {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -25,14 +30,8 @@ export const INTERVIEW_MAX_ROUNDS = 4;
 export const MAX_DSA_QUESTIONS_PER_ROUND = 2;
 /** HR rounds always use exactly one behavioral question. */
 export const MAX_HR_QUESTIONS_PER_ROUND = 1;
-export const INTERVIEW_ALLOWED_ROUND_TYPES = [
-  "DSA",
-  "System Design",
-  "SQL",
-  "CS Fundamentals",
-  "HR",
-];
-const INTERVIEW_ALLOWED_DIFFICULTIES = ["easy", "medium", "hard"];
+export const INTERVIEW_ALLOWED_ROUND_TYPES = [...PLATFORM_INTERVIEW_ROUND_TYPES];
+const INTERVIEW_ALLOWED_DIFFICULTIES = [...INTERVIEW_DIFFICULTIES];
 
 const normalizeStringArray = (value) => {
   if (!Array.isArray(value)) return [];
@@ -82,9 +81,9 @@ export const clampQuestionCountForRound = (roundType, questionCount, slots = 0) 
   return count;
 };
 
-const normalizeCustomRoundType = (value) => {
+const normalizeCustomRoundType = (value, allowedRoundTypes) => {
   const safe = toSafeString(value);
-  return INTERVIEW_ALLOWED_ROUND_TYPES.includes(safe) ? safe : "DSA";
+  return allowedRoundTypes.includes(safe) ? safe : "";
 };
 
 const normalizeCustomRoundDifficulty = (value) => {
@@ -92,7 +91,7 @@ const normalizeCustomRoundDifficulty = (value) => {
   return INTERVIEW_ALLOWED_DIFFICULTIES.includes(safe) ? safe : "medium";
 };
 
-const validateCustomRoundPlan = (rounds) => {
+const validateCustomRoundPlan = (rounds, { platform = false } = {}) => {
   if (!Array.isArray(rounds) || rounds.length === 0) {
     throw new Error("Custom interview plan must include at least one round.");
   }
@@ -100,8 +99,16 @@ const validateCustomRoundPlan = (rounds) => {
     throw new Error(`Custom interview plan cannot exceed ${INTERVIEW_MAX_ROUNDS} rounds.`);
   }
 
+  const allowedRoundTypes = platform
+    ? PLATFORM_INTERVIEW_ROUND_TYPES
+    : CAMPUS_INTERVIEW_ROUND_TYPES;
   const normalized = rounds.map((round, index) => {
-    const type = normalizeCustomRoundType(round?.type);
+    const type = normalizeCustomRoundType(round?.type, allowedRoundTypes);
+    if (!type) {
+      throw new Error(
+        `"${toSafeString(round?.type, "Unknown")}" is not available for this interview.`
+      );
+    }
     const focus =
       type === "DSA"
         ? ""
@@ -120,7 +127,7 @@ const validateCustomRoundPlan = (rounds) => {
   });
 
   const hrCount = normalized.filter((round) => round.type === "HR").length;
-  if (hrCount < 1) {
+  if (!platform && hrCount < 1) {
     throw new Error("At least one HR round is required in the interview plan.");
   }
 
@@ -134,8 +141,11 @@ const validateCustomRoundPlan = (rounds) => {
   return normalized;
 };
 
-export const generateInterviewPlanFromCustomRounds = async (customRounds = []) => {
-  const normalizedRounds = validateCustomRoundPlan(customRounds);
+export const generateInterviewPlanFromCustomRounds = async (
+  customRounds = [],
+  { platform = false } = {}
+) => {
+  const normalizedRounds = validateCustomRoundPlan(customRounds, { platform });
   const rounds = normalizedRounds.map((round, index) => ({
     roundNumber: round.roundNumber,
     type: round.type,
@@ -251,7 +261,7 @@ export const generateFinalReport = async (session) => {
     const cid = session?.companyId;
     if (cid) {
       const companyData = await resolveInterviewMergedCompanyForSession(session);
-      companyContext = await getCompanyContext(companyData || {});
+      companyContext = await getCompanyContext(companyData || {}, { role: session.role });
     }
   } catch (err) {
     console.warn("[generateFinalReport] company context failed:", err?.message || err);
