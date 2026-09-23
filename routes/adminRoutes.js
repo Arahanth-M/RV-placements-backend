@@ -190,6 +190,9 @@ adminRouter.use(authorize(["admin"]));
 adminRouter.use(requireAdmin);
 
 function forbidRvitmAdminCompanyMutations(req, res, next) {
+  if (req.user?.isSuperAdmin === true || String(req.user?.adminScope || "").toLowerCase() === "platform") {
+    return next();
+  }
   if (collegeIdFromUser(req.user) === COLLEGE_ID_RVITM) {
     return res.status(403).json({
       error:

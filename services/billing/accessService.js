@@ -140,8 +140,13 @@ export async function evaluateCompanyCardAccess({ userId, companyId, user, now =
     error: createPaywallError({
       feature: PAYWALL_FEATURES.COMPANY_DETAIL,
       message:
-        "Unlock this company card to view full details. The first card in each category stays free.",
-      suggestedPlans: [PLAN_IDS.CATEGORY, PLAN_IDS.ALL_CARDS, PLAN_IDS.ALL_PREMIUM],
+        "Unlock this category, or a plan that includes all company cards. The first card in each category stays free.",
+      suggestedPlans: [
+        PLAN_IDS.CATEGORY,
+        PLAN_IDS.PREP_PATH,
+        PLAN_IDS.MOCKS,
+        PLAN_IDS.ALL_PREMIUM,
+      ],
       categoryId: company.categoryId,
     }),
   };
@@ -160,7 +165,7 @@ export async function evaluateMockAccess({ userId, companyId, user, now = new Da
       feature: PAYWALL_FEATURES.MOCKS,
       message:
         "Your free AI mock interview has been used. Unlock unlimited mocks to continue.",
-      suggestedPlans: [PLAN_IDS.MOCKS, PLAN_IDS.MOCKS_PREP, PLAN_IDS.ALL_PREMIUM],
+      suggestedPlans: [PLAN_IDS.MOCKS, PLAN_IDS.ALL_PREMIUM],
       categoryId: card.company?.categoryId || "",
     }),
   };
@@ -168,7 +173,21 @@ export async function evaluateMockAccess({ userId, companyId, user, now = new Da
 
 export async function evaluatePrepPathAccess({ userId, companyId, user, now = new Date() }) {
   const card = await evaluateCompanyCardAccess({ userId, companyId, user, now });
-  if (!card.allowed) return { ...card, prepAllowed: false };
+  if (!card.allowed) {
+    const prepOwned = Boolean(card.snapshot?.unlimitedPrepPath);
+    return {
+      ...card,
+      prepAllowed: false,
+      error: createPaywallError({
+        feature: PAYWALL_FEATURES.COMPANY_DETAIL,
+        message: prepOwned
+          ? "Your PrepPath subscription is active. Unlock this company (or its category) to generate a plan for it. The first card in each category stays free."
+          : "Unlock this category, or Unlimited PrepPath (that plan includes all company cards). The first card in each category stays free.",
+        suggestedPlans: [PLAN_IDS.CATEGORY, PLAN_IDS.PREP_PATH, PLAN_IDS.ALL_PREMIUM],
+        categoryId: card.company?.categoryId || card.error?.categoryId || "",
+      }),
+    };
+  }
   if (card.bypass || card.snapshot?.unlimitedPrepPath || card.snapshot?.freePrepRemaining > 0) {
     return { ...card, prepAllowed: true };
   }
@@ -178,7 +197,7 @@ export async function evaluatePrepPathAccess({ userId, companyId, user, now = ne
     error: createPaywallError({
       feature: PAYWALL_FEATURES.PREP_PATH,
       message: "Your free PrepPath plan has been used. Unlock PrepPath to generate more.",
-      suggestedPlans: [PLAN_IDS.PREP_PATH, PLAN_IDS.MOCKS_PREP, PLAN_IDS.ALL_PREMIUM],
+      suggestedPlans: [PLAN_IDS.PREP_PATH, PLAN_IDS.ALL_PREMIUM],
       categoryId: card.company?.categoryId || "",
     }),
   };

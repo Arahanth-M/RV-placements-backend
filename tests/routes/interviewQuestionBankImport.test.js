@@ -10,14 +10,33 @@ const app = express();
 app.use(express.json());
 app.use("/api/interview-question-bank", interviewQuestionBankRouter);
 
-const token = jwt.sign(
-  {
-    userId: "csv-import-test-user",
-    _id: "507f1f77bcf86cd799439011",
-    role: "student",
-  },
-  config.JWT_SECRET
-);
+function signToken(claims) {
+  return jwt.sign(
+    {
+      userId: "csv-import-test-user",
+      _id: "507f1f77bcf86cd799439011",
+      email: "owner@example.com",
+      ...claims,
+    },
+    config.JWT_SECRET
+  );
+}
+
+const token = signToken({
+  role: "admin",
+  isAdminSession: true,
+  isSuperAdmin: true,
+  adminScope: "platform",
+});
+const studentToken = signToken({
+  email: "student@example.com",
+  role: "student",
+});
+const campusAdminToken = signToken({
+  email: "placement@rvce.edu.in",
+  role: "admin",
+  isAdminSession: true,
+});
 
 const rubric = JSON.stringify([
   {
@@ -32,6 +51,28 @@ const csv = [
   "questionId,title,question,companyTags,rubric",
   `csv-import-1,Cache basics,How would you explain caching?,Acme,"${rubric}"`,
 ].join("\n");
+
+describe("interview question-bank access", () => {
+  it("rejects unauthenticated reads", async () => {
+    await request(app).get("/api/interview-question-bank").expect(401);
+  });
+
+  it("rejects signed-in students", async () => {
+    const response = await request(app)
+      .get("/api/interview-question-bank")
+      .set("Authorization", `Bearer ${studentToken}`)
+      .expect(403);
+    expect(response.body.error).toMatch(/platform admin/i);
+  });
+
+  it("rejects campus admins who are not platform owners", async () => {
+    const response = await request(app)
+      .get("/api/interview-question-bank")
+      .set("Authorization", `Bearer ${campusAdminToken}`)
+      .expect(403);
+    expect(response.body.error).toMatch(/platform admin/i);
+  });
+});
 
 describe("interview question-bank CSV import", () => {
   beforeEach(async () => {

@@ -66,6 +66,9 @@ export function adminMayMutateSharedCompanyContent(user) {
   if (user?.isAdminSession !== true && String(user?.role || "").toLowerCase() !== "admin") {
     return false;
   }
+  if (user?.isSuperAdmin === true || String(user?.adminScope || "").toLowerCase() === "platform") {
+    return true;
+  }
   return collegeIdFromUser(user) !== COLLEGE_ID_RVITM;
 }
 
@@ -77,6 +80,25 @@ export function adminMayMutateSharedCompanyContent(user) {
  */
 export function emailBelongsToCollege(email, collegeIdRaw) {
   return collegeIdFromEmail(email) === normalizeCollegeId(collegeIdRaw);
+}
+
+/**
+ * Mongo match for `/general` users: exclude onboarded campus institutional emails.
+ * @param {string} [emailFieldPath="email"]
+ * @returns {Record<string, unknown>}
+ */
+export function mongoMatchPlatformUsers(emailFieldPath = "email") {
+  const field = String(emailFieldPath || "email").trim() || "email";
+  const escapeDots = (value) => String(value).replace(/\./g, "\\.");
+  const clauses = [
+    { [field]: { $regex: `${escapeDots(RVCE_EMAIL_SUFFIX)}$`, $options: "i" } },
+    { [field]: { $regex: `${escapeDots(RVITM_EMAIL_SUFFIX)}$`, $options: "i" } },
+  ];
+  const testEmails = [...TEST_RVITM_EMAILS];
+  if (testEmails.length > 0) {
+    clauses.push({ [field]: { $in: testEmails } });
+  }
+  return { $nor: clauses };
 }
 
 /**

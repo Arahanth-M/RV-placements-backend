@@ -6,8 +6,10 @@ export const CS_FUNDAMENTALS_THEORY_COUNT = 1;
 export const CS_FUNDAMENTALS_TOTAL_QUESTIONS =
   CS_FUNDAMENTALS_MCQ_COUNT + CS_FUNDAMENTALS_THEORY_COUNT;
 
-export const isCsFundamentalsRoundType = (roundType) =>
-  toSafeString(roundType).toLowerCase().includes("cs fundamentals");
+export const isCsFundamentalsRoundType = (roundType) => {
+  const rt = toSafeString(roundType).toLowerCase();
+  return rt.includes("cs fundamentals") || rt === "web dev";
+};
 
 /**
  * Fixed CS Fundamentals layout: slots 0–1 = MCQ (bank only), slot 2 = theory (bank then LLM).

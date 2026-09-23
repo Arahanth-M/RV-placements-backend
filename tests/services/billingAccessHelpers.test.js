@@ -24,6 +24,39 @@ describe("billing access helpers", () => {
     expect(hasCategoryAccess(summary, "product")).toBe(false);
   });
 
+  it("treats an active PrepPath or mocks entitlement as covering all company cards", () => {
+    const now = new Date();
+    const later = new Date(now.getTime() + 86400000);
+    const summary = summarizeEntitlements(
+      [
+        {
+          grants: { allCards: false, mocks: false, prepPath: true },
+          expiresAt: later,
+        },
+      ],
+      now
+    );
+    expect(summary.prepPath).toBe(true);
+    expect(summary.allCards).toBe(true);
+    expect(hasCategoryAccess(summary, "fintech")).toBe(true);
+  });
+
+  it("treats mocks or PrepPath catalog plans as already covering all cards", () => {
+    expect(
+      alreadyOwnsPlan(
+        { allCards: true, mocks: true, prepPath: false, categories: {} },
+        PLAN_IDS.CATEGORY,
+        "fintech"
+      )
+    ).toBe(true);
+    expect(
+      alreadyOwnsPlan(
+        { allCards: true, mocks: false, prepPath: true, categories: {} },
+        PLAN_IDS.ALL_CARDS
+      )
+    ).toBe(true);
+  });
+
   it("detects all-premium ownership only when every grant is active", () => {
     expect(
       alreadyOwnsPlan({ allCards: true, mocks: true, prepPath: false, categories: {} }, PLAN_IDS.ALL_PREMIUM)

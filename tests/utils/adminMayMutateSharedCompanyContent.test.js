@@ -22,6 +22,18 @@ describe("adminMayMutateSharedCompanyContent", () => {
     ).toBe(false);
   });
 
+  it("allows platform admins even when their email maps to RVITM", () => {
+    expect(
+      adminMayMutateSharedCompanyContent({
+        isAdminSession: true,
+        isSuperAdmin: true,
+        adminScope: "platform",
+        email: "owner@gmail.com",
+        collegeId: "rvitm",
+      })
+    ).toBe(true);
+  });
+
   it("blocks non-admins", () => {
     expect(
       adminMayMutateSharedCompanyContent({

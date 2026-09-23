@@ -151,3 +151,65 @@ export async function createCollegeOnboardingRequest(input = {}) {
     approxPriceInr: doc.approxPriceInr,
   };
 }
+
+const ONBOARDING_STATUSES = new Set([
+  "demo_requested",
+  "quotation_requested",
+  "quotation_sent",
+  "mou_pending",
+  "payment_pending",
+  "onboarded",
+]);
+
+export async function listCollegeOnboardingRequests({ status, page = 1, limit = 25 } = {}) {
+  const safePage = Math.max(1, Number(page) || 1);
+  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 25));
+  const query = {};
+  const statusFilter = String(status || "").trim().toLowerCase();
+  if (statusFilter && ONBOARDING_STATUSES.has(statusFilter)) {
+    query.status = statusFilter;
+  }
+
+  const [total, items] = await Promise.all([
+    CollegeOnboardingRequest.countDocuments(query),
+    CollegeOnboardingRequest.find(query)
+      .sort({ createdAt: -1 })
+      .skip((safePage - 1) * safeLimit)
+      .limit(safeLimit)
+      .lean(),
+  ]);
+
+  return {
+    items,
+    total,
+    page: safePage,
+    limit: safeLimit,
+    totalPages: Math.max(1, Math.ceil(total / safeLimit)),
+  };
+}
+
+export async function updateCollegeOnboardingRequest(id, input = {}) {
+  const doc = await CollegeOnboardingRequest.findById(id);
+  if (!doc) {
+    const err = new Error("Onboarding request not found");
+    err.code = "NOT_FOUND";
+    throw err;
+  }
+
+  const status = String(input.status || "").trim().toLowerCase();
+  if (status) {
+    if (!ONBOARDING_STATUSES.has(status)) {
+      const err = new Error("Invalid onboarding status");
+      err.code = "INVALID_STATUS";
+      throw err;
+    }
+    doc.status = status;
+  }
+
+  if (input.notes != null) {
+    doc.notes = normalizeText(input.notes, 2000);
+  }
+
+  await doc.save();
+  return doc.toObject();
+}

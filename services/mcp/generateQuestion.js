@@ -898,6 +898,7 @@ export const generateQuestion = async ({
   excludedQuestionTexts = [],
   roundQuestionCount = null,
   questionSlotIndex = 0,
+  roundFocus = "",
 }) => {
   const { excludedIdSet, excludedTextSet } = mergeInterviewQuestionExclusions(
     {
@@ -1028,15 +1029,26 @@ export const generateQuestion = async ({
     };
 
     // Retrieval-first path: if curated question exists, use it.
-    const retrieved = await retrieveQuestion({
-      company: companyContext?.name || companyContext?.companyName || "",
-      role: companyContext?.role || "",
-      roundType,
-      difficulty,
-      excludedQuestionIds: retrievalExclusions,
-      questionKind: csFundamentalsQuestionKind,
-      strictTargeting: Boolean(companyContext?.role),
-    });
+    const platformMock = companyContext?.platformMock === true;
+    const retrieveBankQuestion = (excludedIds) =>
+      retrieveQuestion({
+        company: companyContext?.name || companyContext?.companyName || "",
+        role: companyContext?.role || "",
+        roundType,
+        difficulty,
+        excludedQuestionIds: excludedIds,
+        questionKind: csFundamentalsQuestionKind,
+        strictTargeting: Boolean(companyContext?.role) && !platformMock,
+        platformMock,
+        companyCategoryId: toSafeString(companyContext?.categoryId),
+        roundFocus: toSafeString(roundFocus),
+      });
+
+    let retrieved = await retrieveBankQuestion(retrievalExclusions);
+    if (!retrieved?.question && retrievalExclusions.length > excludedIdSet.size) {
+      console.warn("[generateQuestion] Bank miss with seen-set; retrying session exclusions only");
+      retrieved = await retrieveBankQuestion(Array.from(excludedIdSet));
+    }
     if (retrieved?.question) {
       if (isInterviewQuestionExcluded(retrieved, excludedIdSet, excludedTextSet)) {
         console.log(

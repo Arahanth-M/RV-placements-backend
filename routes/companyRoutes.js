@@ -7,6 +7,7 @@ import {
 } from "../utils/collegeScope.js";
 import express from "express";
 import authJWT from "../middleware/authJWT.js";
+import requirePlatformAdmin from "../middleware/requirePlatformAdmin.js";
 import validateRequest from "../middleware/validateRequest.js";
 import { companyCreateSchema } from "../validations/company.validation.js";
 import { submissionInputSchema } from "../validations/submission.validation.js";
@@ -27,6 +28,7 @@ import {
 } from "../services/companyListCache.js";
 import { attachTrendingFlagsToCompanyList, attachAdminCompanyCardViews, stripCompanyListViews } from "../services/companyCardTrending.js";
 import { attachCardContentUpdatedAt } from "../services/companyCardContentUpdated.js";
+import { attachPlatformPrepCoverageToCompanyList } from "../services/companyPlatformPrepCoverage.js";
 import {
   getCompanyPlatformDetailById,
   isPlatformCompanyScope,
@@ -82,10 +84,11 @@ async function presentCompanyListForViewer(list, req) {
   const withPinnedFirst = bringAdminPinnedTrendingFirst(withTrending);
   const withContentUpdated = await attachCardContentUpdatedAt(withPinnedFirst);
   const withoutViews = stripCompanyListViews(withContentUpdated);
+  const withPrepCoverage = await attachPlatformPrepCoverageToCompanyList(withoutViews);
   if (req.user?.isAdminSession === true) {
-    return attachAdminCompanyCardViews(withoutViews);
+    return attachAdminCompanyCardViews(withPrepCoverage);
   }
-  return withoutViews;
+  return withPrepCoverage;
 }
 
 function omitViewsUnlessAdmin(payload, req) {
@@ -263,7 +266,7 @@ companyRouter.get("/names", async (_req, res) => {
 });
 
 /** Temporary /general/data-entry editor. GET does not create documents. */
-companyRouter.get("/platform-content/:id", authJWT, async (req, res) => {
+companyRouter.get("/platform-content/:id", authJWT, requirePlatformAdmin, async (req, res) => {
   try {
     const payload = await getPlatformContentForEditor(req.params.id);
     if (!payload) return res.status(404).json({ error: "Company not found" });
@@ -274,7 +277,7 @@ companyRouter.get("/platform-content/:id", authJWT, async (req, res) => {
   }
 });
 
-companyRouter.put("/platform-content/:id", authJWT, async (req, res) => {
+companyRouter.put("/platform-content/:id", authJWT, requirePlatformAdmin, async (req, res) => {
   try {
     const payload = await savePlatformContentFromEditor(req.params.id, req.body);
     await invalidateCompanyDetailCache(req.params.id);

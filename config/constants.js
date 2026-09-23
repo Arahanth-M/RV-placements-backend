@@ -108,38 +108,70 @@ export const messages = {
   },
 };
 
-/** Single canonical allowlist / admin identity for dev defaults (override with env). */
-export const DEFAULT_PLATFORM_OWNER_EMAIL = "arahanthm.cs22@rvce.edu.in";
+export const ADMIN_SCOPE_PLATFORM = "platform";
+export const ADMIN_SCOPE_CAMPUS = "campus";
 
-// Login allowlist: this Google account may sign in (student flow and/or admin flow).
-export const ALLOWED_LOGIN_EMAIL =
-  process.env.ALLOWED_LOGIN_EMAIL || DEFAULT_PLATFORM_OWNER_EMAIL;
+// Optional extra login allowlist entry (not required for platform/campus admins).
+export const ALLOWED_LOGIN_EMAIL = process.env.ALLOWED_LOGIN_EMAIL || "";
 
-/**
- * Admin allowlist for /api/auth/google/admin (JWT gets isAdminSession).
- * Set ADMIN_EMAILS (comma-separated) or legacy ADMIN_EMAIL (single).
- * Example: ADMIN_EMAILS=one@rvce.edu.in,two@rvce.edu.in
- */
-function parseAdminEmailsFromEnv() {
-  const raw =
-    process.env.ADMIN_EMAILS?.trim() ||
-    process.env.ADMIN_EMAIL?.trim() ||
-    DEFAULT_PLATFORM_OWNER_EMAIL;
-  const emails = raw
-    .split(",")
-    .map((entry) => entry.trim().toLowerCase())
-    .filter(Boolean);
-  return [...new Set(emails)];
+function parseEmailList(raw) {
+  return [
+    ...new Set(
+      String(raw || "")
+        .split(",")
+        .map((entry) => entry.trim().toLowerCase())
+        .filter(Boolean)
+    ),
+  ];
 }
 
-export const ADMIN_EMAILS = parseAdminEmailsFromEnv();
+/**
+ * Platform owners (`/general` admin). Separate people from campus admins.
+ * Set PLATFORM_OWNER_EMAILS in .env (comma-separated). Empty if unset.
+ */
+export const PLATFORM_OWNER_EMAILS = parseEmailList(
+  process.env.PLATFORM_OWNER_EMAILS
+);
+
+/**
+ * Campus dashboard admins (`/rvce` and later tenants).
+ * Set ADMIN_EMAILS (comma-separated) or legacy ADMIN_EMAIL (single).
+ * Example: ADMIN_EMAILS=one@example.com,two@example.com
+ */
+export const ADMIN_EMAILS = parseEmailList(
+  process.env.ADMIN_EMAILS?.trim() || process.env.ADMIN_EMAIL?.trim()
+);
 
 /** @deprecated Prefer ADMIN_EMAILS; first entry for backward-compatible imports. */
-export const ADMIN_EMAIL = ADMIN_EMAILS[0] || DEFAULT_PLATFORM_OWNER_EMAIL;
+export const ADMIN_EMAIL = ADMIN_EMAILS[0] || "";
 
-export function isAdminEmail(email) {
+export function isPlatformOwnerEmail(email) {
+  const normalized = String(email || "").trim().toLowerCase();
+  return normalized.length > 0 && PLATFORM_OWNER_EMAILS.includes(normalized);
+}
+
+export function isCampusAdminEmail(email) {
   const normalized = String(email || "").trim().toLowerCase();
   return normalized.length > 0 && ADMIN_EMAILS.includes(normalized);
+}
+
+/** True when the email may complete an admin Google login (platform or campus). */
+export function isAdminEmail(email) {
+  return isPlatformOwnerEmail(email) || isCampusAdminEmail(email);
+}
+
+/**
+ * @param {unknown} email
+ * @returns {{ adminScope: "platform"|"campus", isSuperAdmin: boolean }|null}
+ */
+export function adminIdentityFromEmail(email) {
+  if (isPlatformOwnerEmail(email)) {
+    return { adminScope: ADMIN_SCOPE_PLATFORM, isSuperAdmin: true };
+  }
+  if (isCampusAdminEmail(email)) {
+    return { adminScope: ADMIN_SCOPE_CAMPUS, isSuperAdmin: false };
+  }
+  return null;
 }
 
 // Default values

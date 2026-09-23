@@ -1,6 +1,11 @@
 import { callLLM } from "../llmClient.js";
 import { parseJSONResponse } from "../../utils/parseJSONResponse.js";
 import { GROQ_QUALITY_MODEL } from "../../config/groqModels.js";
+import {
+  attachPrepPathResourceLinks,
+  buildPrepPathResourceCatalogPrompt,
+  normalizeResourceId,
+} from "./resourceCatalog.js";
 
 const PREP_PATH_MODEL =
   process.env.GROQ_PREP_PATH_MODEL ||
@@ -13,82 +18,6 @@ const MOTIVATION_SLOGANS = [
   "A rejection is data, not destiny. Use it to sharpen your next attempt.",
   "Freshers grow fast: clear fundamentals + deliberate practice compound quickly.",
 ];
-
-/** Curated links — attached in code so the LLM never invents URLs. */
-const LINK_CATALOG = [
-  {
-    keys: ["dsa", "array", "tree", "graph", "dp", "dynamic", "leetcode", "coding", "algorithm", "oa"],
-    title: "Take U Forward — DSA sheet",
-    url: "https://takeuforward.org/strivers-a2z-dsa-course/strivers-a2z-dsa-course-sheet-2/",
-    why: "Structured DSA path for campus placements",
-  },
-  {
-    keys: ["os", "operating", "process", "thread", "memory", "deadlock"],
-    title: "GeeksforGeeks — Operating Systems",
-    url: "https://www.geeksforgeeks.org/operating-systems/",
-    why: "Core OS topics for interviews",
-  },
-  {
-    keys: ["dbms", "sql", "database", "normalization", "index", "transaction"],
-    title: "GeeksforGeeks — DBMS",
-    url: "https://www.geeksforgeeks.org/dbms/",
-    why: "DBMS + SQL interview fundamentals",
-  },
-  {
-    keys: ["network", "cn", "tcp", "http", "osi"],
-    title: "GeeksforGeeks — Computer Networks",
-    url: "https://www.geeksforgeeks.org/computer-network-tutorials/",
-    why: "Networking basics for fresher interviews",
-  },
-  {
-    keys: ["oop", "oops", "object", "class", "polymorphism", "inheritance"],
-    title: "GeeksforGeeks — OOPs",
-    url: "https://www.geeksforgeeks.org/object-oriented-programming-oops-concept-in-java/",
-    why: "OOPs concepts asked in campus interviews",
-  },
-  {
-    keys: ["system", "design", "lld", "hld", "architecture"],
-    title: "InterviewBit — System Design",
-    url: "https://www.interviewbit.com/system-design-interview-questions/",
-    why: "Light system-design practice for freshers",
-  },
-  {
-    keys: ["react", "frontend", "javascript", "js", "html", "css", "ui"],
-    title: "MDN — JavaScript",
-    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide",
-    why: "Solid JS fundamentals for frontend roles",
-  },
-  {
-    keys: ["java", "spring", "jvm"],
-    title: "GeeksforGeeks — Java",
-    url: "https://www.geeksforgeeks.org/java/",
-    why: "Java basics for backend / SDE roles",
-  },
-  {
-    keys: ["python", "django", "flask", "ml"],
-    title: "Python docs — Tutorial",
-    url: "https://docs.python.org/3/tutorial/",
-    why: "Official Python tutorial",
-  },
-  {
-    keys: ["behavioral", "hr", "resume", "project", "soft", "communication"],
-    title: "GeeksforGeeks — HR interview",
-    url: "https://www.geeksforgeeks.org/hr-interview-questions/",
-    why: "Common HR / behavioral prep",
-  },
-  {
-    keys: ["aptitude", "puzzle", "quant"],
-    title: "IndiaBIX — Aptitude",
-    url: "https://www.indiabix.com/aptitude/questions-and-answers/",
-    why: "Aptitude practice for OA rounds",
-  },
-];
-
-const DEFAULT_LINK = {
-  title: "LeetCode — Practice problems",
-  url: "https://leetcode.com/problemset/",
-  why: "Timed coding practice for OA / interviews",
-};
 
 function num(v, fallback = 0) {
   const n = Number(v);
@@ -106,18 +35,6 @@ function strArr(v, maxItems = 12, maxLen = 400) {
     .map((x) => str(typeof x === "string" ? x : x?.title || x?.text || "", maxLen))
     .filter(Boolean)
     .slice(0, maxItems);
-}
-
-function pickLinkForText(...parts) {
-  const blob = parts
-    .map((p) => String(p || "").toLowerCase())
-    .join(" ");
-  for (const row of LINK_CATALOG) {
-    if (row.keys.some((k) => blob.includes(k))) {
-      return { title: row.title, url: row.url, why: row.why };
-    }
-  }
-  return { ...DEFAULT_LINK };
 }
 
 function round1(n) {
@@ -157,38 +74,6 @@ function allocateTopicHours(topicSections, totalHours) {
       return { ...s, hours: sh };
     });
     return { ...t, hours, subtopics };
-  });
-}
-
-function attachCatalogLinks(topicSections) {
-  return (Array.isArray(topicSections) ? topicSections : []).map((t) => {
-    const topicLink = pickLinkForText(t.title, t.why);
-    const subtopics = (Array.isArray(t.subtopics) ? t.subtopics : []).map((s) => {
-      const link = pickLinkForText(t.title, s.title, s.notes);
-      return {
-        ...s,
-        linkTitle: link.title,
-        linkUrl: link.url,
-        linkWhy: link.why,
-      };
-    });
-    // Ensure at least one link surface if no subtopics
-    if (!subtopics.length) {
-      return {
-        ...t,
-        subtopics: [
-          {
-            title: "Core practice",
-            hours: t.hours || 1,
-            notes: "",
-            linkTitle: topicLink.title,
-            linkUrl: topicLink.url,
-            linkWhy: topicLink.why,
-          },
-        ],
-      };
-    }
-    return { ...t, subtopics };
   });
 }
 
@@ -244,6 +129,7 @@ export function normalizeRoadmap(raw, { days, hoursPerDay, limitedData = false }
           ) || "Subtopic",
           hours: 0,
           notes: str(typeof s === "object" ? s?.notes || "" : "", 160),
+          resourceId: normalizeResourceId(typeof s === "object" ? s?.resourceId : ""),
           linkTitle: "",
           linkUrl: "",
           linkWhy: "",
@@ -267,8 +153,8 @@ export function normalizeRoadmap(raw, { days, hoursPerDay, limitedData = false }
         why: "Core OA / interview coding practice",
         practiceHints: [],
         subtopics: [
-          { title: "Arrays & hashing", hours: 0, notes: "", linkTitle: "", linkUrl: "", linkWhy: "" },
-          { title: "Trees & graphs basics", hours: 0, notes: "", linkTitle: "", linkUrl: "", linkWhy: "" },
+          { title: "Arrays & hashing", hours: 0, notes: "", resourceId: "", linkTitle: "", linkUrl: "", linkWhy: "" },
+          { title: "Trees & graphs basics", hours: 0, notes: "", resourceId: "", linkTitle: "", linkUrl: "", linkWhy: "" },
         ],
       },
       {
@@ -277,14 +163,14 @@ export function normalizeRoadmap(raw, { days, hoursPerDay, limitedData = false }
         why: "OS / DBMS / OOPs for interviews",
         practiceHints: [],
         subtopics: [
-          { title: "OOPs + DBMS", hours: 0, notes: "", linkTitle: "", linkUrl: "", linkWhy: "" },
+          { title: "OOPs + DBMS", hours: 0, notes: "", resourceId: "", linkTitle: "", linkUrl: "", linkWhy: "" },
         ],
       },
     ];
   }
 
   topicSections = allocateTopicHours(topicSections, expectedTotal);
-  topicSections = attachCatalogLinks(topicSections);
+  topicSections = attachPrepPathResourceLinks(topicSections);
 
   let dayRows = (Array.isArray(src.days) ? src.days : [])
     .slice(0, dayCount)
@@ -387,6 +273,7 @@ export async function generatePrepPathRoadmapWithLLM({
   days,
   hoursPerDay,
   resumeDigest,
+  jdDigest = "",
   companyPromptBlock,
   webSnippets,
   limitedData,
@@ -408,17 +295,28 @@ export async function generatePrepPathRoadmapWithLLM({
     (!limitedData &&
       (contextFlags.usedMustDo ||
         contextFlags.usedOA ||
+        contextFlags.usedCoding ||
         contextFlags.usedInterview ||
         contextFlags.usedExperiences));
+
+  const hasJd = Boolean(String(jdDigest || "").trim());
+  const resourceCatalogBlock = buildPrepPathResourceCatalogPrompt();
 
   const system = `You are PrepPath, a campus placement coach for Indian engineering FRESHERS.
 Return STRICT compact JSON only (no markdown, no URLs, no hour numbers).
 
 Track: ${trackLabel}. Shape the whole plan for this track.
-Prefer platform roles (skills/JD/work description), must-do, OA, interview Qs/experiences when present.
+Align the plan to BOTH sources when available: (1) uploaded job description and (2) company platform/campus data.
+When an uploaded JD is present, treat it as the primary source for companyExpectations, skillGaps, topics, and day tasks.
+Reconcile JD requirements with platform must-do, OA, coding questions, interview Qs/experiences, and platform roles — prioritize overlap, but keep distinct JD-only asks.
+Prefer platform roles (skills/JD/work description), must-do, OA, coding questions, interview Qs/experiences when present.
 When using role fields, say "mentioned in the platform roles".
-Fresher lens only — no senior system-design depth unless campus data requires it.
-Keep every string short (≤20 words). No learning links (server adds them). No hour/minute numbers (server allocates).`;
+Fresher lens only — no senior system-design depth unless JD or campus data requires it.
+Keep every string short (≤20 words). No hour/minute numbers (server allocates).
+
+For each subtopic, pick ONE resourceId from the approved catalog below (or omit resourceId if none fit).
+Never invent resourceId values or URLs — only use ids from this list:
+${resourceCatalogBlock}`;
 
   const user = `Create a lean PrepPath plan.
 
@@ -427,14 +325,19 @@ Window: ${dayCount} days × ${hpd} h/day ≈ ${totalHours} h total
 Limited data: ${limitedData ? "YES" : "NO"}
 Flags: mustDo=${Boolean(contextFlags.usedMustDo)} OA=${Boolean(
     contextFlags.usedOA
-  )} interviewQs=${Boolean(contextFlags.usedInterview)} experiences=${Boolean(
-    contextFlags.usedExperiences
-  )} platformRoles=${Boolean(contextFlags.usedPlatformRoles)}
+  )} coding=${Boolean(contextFlags.usedCoding)} interviewQs=${Boolean(
+    contextFlags.usedInterview
+  )} experiences=${Boolean(contextFlags.usedExperiences)} platformRoles=${Boolean(
+    contextFlags.usedPlatformRoles
+  )} uploadedJd=${hasJd}
 
 === Resume ===
 ${resumeDigest || "(empty)"}
 
-=== Company ===
+=== Uploaded job description ===
+${hasJd ? jdDigest : "(none — use platform/campus data only)"}
+
+=== Company platform / campus data ===
 ${companyPromptBlock}
 
 === Web (optional) ===
@@ -448,16 +351,16 @@ Return ONLY this JSON shape:
   "resumeMissing": ["string"],
   "companyExpectations": ["string"],
   "skillGaps": ["string"],
-  "companySignals": [{"point":"string","sourceType":"platform_role|must_do|oa|interview_question|interview_experience"}],
+  "companySignals": [{"point":"string","sourceType":"platform_role|must_do|oa|coding|interview_question|interview_experience"}],
   "dataQualityNote": "",
-  "topicSections": [{"title":"string","why":"short","subtopics":[{"title":"string"}]}],
+  "topicSections": [{"title":"string","why":"short","subtopics":[{"title":"string","resourceId":"catalog-id-or-omit"}]}],
   "days": [{"day":1,"focus":"string","tasks":[{"title":"string"}]}]
 }
 
 Limits: assumptions≤3, strengths/missing/expectations≤4 each, skillGaps≤5,
 topics 4–6 with ≤3 subtopics each, exactly ${dayCount} days with ≤4 tasks each,
 companySignals ${hasCampusSignals ? "2–3" : "must be []"}.
-No urls, no hours, no motivationSlogans.`;
+No urls, no hours, no motivationSlogans. resourceId must be from the approved catalog only.`;
 
   const content = await callLLM(
     [

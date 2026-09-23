@@ -2,7 +2,7 @@ import crypto from "crypto";
 import PaymentOrder from "../../models/PaymentOrder.js";
 import Entitlement from "../../models/Entitlement.js";
 import { parseGeneralCompanyCategoryParam } from "../../utils/generalCompanyCategory.js";
-import { getBillingPlan } from "../../config/billingPlans.js";
+import { getBillingPlan, isCatalogBillingPlan } from "../../config/billingPlans.js";
 import {
   getRazorpayInstance,
   getRazorpayKeyId,
@@ -82,6 +82,22 @@ async function grantIfNeeded(order, paymentId) {
   });
 }
 
+function assertPurchasablePlan(plan) {
+  if (!plan) {
+    const err = new Error("Unknown plan");
+    err.code = "UNKNOWN_PLAN";
+    err.status = 400;
+    throw err;
+  }
+  if (!isCatalogBillingPlan(plan.id)) {
+    const err = new Error("This plan is no longer available.");
+    err.code = "PLAN_RETIRED";
+    err.status = 400;
+    throw err;
+  }
+  return plan;
+}
+
 export async function createBillingOrder({ userId, email, planId, categoryId }) {
   if (!isRazorpayConfigured()) {
     const err = new Error("Payment gateway is not configured.");
@@ -89,13 +105,7 @@ export async function createBillingOrder({ userId, email, planId, categoryId }) 
     err.status = 503;
     throw err;
   }
-  const plan = getBillingPlan(planId);
-  if (!plan) {
-    const err = new Error("Unknown plan");
-    err.code = "UNKNOWN_PLAN";
-    err.status = 400;
-    throw err;
-  }
+  const plan = assertPurchasablePlan(getBillingPlan(planId));
   const category = plan.requiresCategory
     ? parseGeneralCompanyCategoryParam(categoryId)
     : "";
@@ -238,13 +248,7 @@ export async function handleRazorpayWebhook(rawBody, signature) {
 }
 
 export async function quoteForUser({ userId, planId, categoryId }) {
-  const plan = getBillingPlan(planId);
-  if (!plan) {
-    const err = new Error("Unknown plan");
-    err.code = "UNKNOWN_PLAN";
-    err.status = 400;
-    throw err;
-  }
+  const plan = assertPurchasablePlan(getBillingPlan(planId));
   const category = plan.requiresCategory
     ? parseGeneralCompanyCategoryParam(categoryId)
     : "";

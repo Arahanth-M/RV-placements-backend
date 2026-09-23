@@ -8,8 +8,8 @@ export const CAMPUS_INTERVIEW_ROUND_TYPES = Object.freeze([
   "HR",
 ]);
 
-export const PLATFORM_INTERVIEW_ROUND_TYPES = Object.freeze([
-  ...CAMPUS_INTERVIEW_ROUND_TYPES,
+/** Platform-only round types (excludes campus list + Web Dev). */
+export const PLATFORM_EXCLUSIVE_INTERVIEW_ROUND_TYPES = Object.freeze([
   "Aptitude",
   "Core Technical",
   "Circuit Design",
@@ -18,6 +18,16 @@ export const PLATFORM_INTERVIEW_ROUND_TYPES = Object.freeze([
   "Embedded Systems",
   "Case Interview",
   "Project/Resume Deep Dive",
+]);
+
+export const PLATFORM_INTERVIEW_ROUND_TYPES = Object.freeze([
+  "DSA",
+  "System Design",
+  "Web Dev",
+  "SQL",
+  "CS Fundamentals",
+  "HR",
+  ...PLATFORM_EXCLUSIVE_INTERVIEW_ROUND_TYPES,
 ]);
 
 export const PLATFORM_FRESHER_ROLES = Object.freeze([

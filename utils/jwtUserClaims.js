@@ -1,4 +1,14 @@
+import { ADMIN_SCOPE_CAMPUS, ADMIN_SCOPE_PLATFORM } from "../config/constants.js";
 import { collegeIdFromEmail } from "./collegeScope.js";
+
+function normalizeAdminScope(raw) {
+  const value = String(raw || "")
+    .trim()
+    .toLowerCase();
+  if (value === ADMIN_SCOPE_PLATFORM) return ADMIN_SCOPE_PLATFORM;
+  if (value === ADMIN_SCOPE_CAMPUS) return ADMIN_SCOPE_CAMPUS;
+  return "";
+}
 
 /**
  * Claims embedded in the access JWT at login. authJWT verifies the signature only
@@ -7,6 +17,8 @@ import { collegeIdFromEmail } from "./collegeScope.js";
 export function buildJwtPayloadFromUser(user, options = {}) {
   const doc = user.toObject ? user.toObject() : user;
   const isAdminSession = options?.isAdminSession === true;
+  const adminScope = isAdminSession ? normalizeAdminScope(options.adminScope) : "";
+  const isSuperAdmin = isAdminSession && (options.isSuperAdmin === true || adminScope === ADMIN_SCOPE_PLATFORM);
   const email = doc.email || doc.emailId || "";
   const userId = doc.userId || doc.googleId || "";
   const username =
@@ -33,6 +45,9 @@ export function buildJwtPayloadFromUser(user, options = {}) {
     membershipType: doc.membershipType,
     companyId: doc.companyId,
     isAdminSession,
+    ...(isAdminSession
+      ? { isSuperAdmin, ...(adminScope ? { adminScope } : {}) }
+      : { isSuperAdmin: false }),
     role,
     createdAt: doc.createdAt
       ? new Date(doc.createdAt).toISOString()

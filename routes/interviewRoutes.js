@@ -45,6 +45,13 @@ import {
   clampQuestionCountForRound,
   generateInterviewPlanFromCustomRounds,
 } from "../services/interviewEngine.js";
+import { listFocusOptionsForMock } from "../services/interviewRoundSubtopicsService.js";
+import {
+  INTERVIEW_DIFFICULTIES,
+  PLATFORM_FRESHER_ROLES,
+  PLATFORM_INTERVIEW_ROUND_TYPES,
+} from "../config/interviewCatalog.js";
+import { classifyGeneralCompanyCategory } from "../utils/generalCompanyCategory.js";
 import { interviewQueue } from "../services/queues/interviewQueue.js";
 import { EVALUATE_ANSWER } from "../services/queues/jobTypes.js";
 import { buildInterviewTips } from "../utils/interviewTips.js";
@@ -703,6 +710,51 @@ router.post("/limit-request", async (req, res) => {
   }
 });
 
+router.get("/focus-options", async (req, res) => {
+  try {
+    const roundType = String(req.query?.roundType || "").trim();
+    if (!roundType || !PLATFORM_INTERVIEW_ROUND_TYPES.includes(roundType)) {
+      return res.status(400).json({ error: "Select a valid round type." });
+    }
+
+    const difficultyRaw = String(req.query?.difficulty || "medium").trim().toLowerCase();
+    const difficulty = INTERVIEW_DIFFICULTIES.includes(difficultyRaw) ? difficultyRaw : "medium";
+    const platform =
+      String(req.query?.contentScope || req.query?.scope || "")
+        .trim()
+        .toLowerCase() === "platform";
+    const role = String(req.query?.role || "").trim();
+    if (platform && role && !PLATFORM_FRESHER_ROLES.includes(role)) {
+      return res.status(400).json({ error: "Select a valid fresher role." });
+    }
+
+    let companyName = String(req.query?.companyName || "").trim();
+    let companyCategoryId = "";
+    const companyId = String(req.query?.companyId || "").trim();
+    if (companyId && mongoose.isValidObjectId(companyId)) {
+      const row = await CompanyStatic.findById(companyId).select("name business_model").lean();
+      if (!companyName) companyName = String(row?.name || "").trim();
+      if (platform) {
+        companyCategoryId = classifyGeneralCompanyCategory(row?.business_model);
+      }
+    }
+
+    const payload = await listFocusOptionsForMock({
+      roundType,
+      role: platform ? role : "",
+      company: companyName,
+      companyCategoryId: platform ? companyCategoryId : "",
+      difficulty,
+      platform,
+    });
+
+    return res.json(payload);
+  } catch (error) {
+    console.error("[interview] focus-options:", error?.message || error);
+    return res.status(500).json({ error: "Could not load subtopic options." });
+  }
+});
+
 router.post("/start-interview", validateRequest(interviewStartSchema), async (req, res) => {
   try {
     const {
@@ -902,6 +954,10 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
       return res.status(400).json({
         error: error.message || "Invalid interview session data.",
       });
+    }
+    const message = String(error?.message || "").trim();
+    if (message) {
+      return res.status(400).json({ error: message });
     }
     return res.status(500).json({ error: "Failed to start interview" });
   }

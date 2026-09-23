@@ -204,6 +204,7 @@ const roundSchema = new mongoose.Schema(
   {
     roundNumber: { type: Number, required: true, min: 1 },
     type: { type: String, enum: ROUND_TYPES, required: true },
+    focus: { type: String, trim: true, default: "" },
     about: { type: String, trim: true },
     difficulty: { type: String, trim: true },
   /** Per-round cap from {@link inferQuestionCount}; HR allows 1, DSA up to 2, SQL up to 4, others up to 5. */

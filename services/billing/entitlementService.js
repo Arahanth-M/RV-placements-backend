@@ -37,7 +37,9 @@ export function summarizeEntitlements(rows, now = new Date()) {
       row.expiresAt = new Date(row.expiresAt);
     }
     if (!row.expiresAt || row.expiresAt <= now) continue;
-    if (row.grants?.allCards) allCardsUntil = later(allCardsUntil, row.expiresAt);
+    if (row.grants?.allCards || row.grants?.mocks || row.grants?.prepPath) {
+      allCardsUntil = later(allCardsUntil, row.expiresAt);
+    }
     if (row.grants?.mocks) mocksUntil = later(mocksUntil, row.expiresAt);
     if (row.grants?.prepPath) prepPathUntil = later(prepPathUntil, row.expiresAt);
     const categoryId = String(row.categoryId || "").trim();

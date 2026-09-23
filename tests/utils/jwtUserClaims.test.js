@@ -29,9 +29,21 @@ describe("buildJwtPayloadFromUser previousLastLoginAt", () => {
   it("does not add previousLastLoginAt on admin sessions", () => {
     const payload = buildJwtPayloadFromUser(user, {
       isAdminSession: true,
+      adminScope: "campus",
       previousLastLoginAt: "2026-08-20T10:15:00.000Z",
     });
     expect(payload.isAdminSession).toBe(true);
+    expect(payload.isSuperAdmin).toBe(false);
+    expect(payload.adminScope).toBe("campus");
     expect(payload.previousLastLoginAt).toBeUndefined();
+  });
+
+  it("marks platform owners as super admins", () => {
+    const payload = buildJwtPayloadFromUser(user, {
+      isAdminSession: true,
+      adminScope: "platform",
+    });
+    expect(payload.isSuperAdmin).toBe(true);
+    expect(payload.adminScope).toBe("platform");
   });
 });

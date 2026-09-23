@@ -24,6 +24,7 @@ import {
   getSession,
   generateRoundFeedback as generateRoundFeedbackForRound,
   resolveInterviewMergedCompanyForSession,
+  enrichCompanyContextForInterviewSession,
 } from "../services/interviewSessionService.js";
 import { collectSessionQuestionExclusions } from "../services/interviewQuestionExclusions.js";
 import { buildResolvedFieldsForQuestionSlot } from "../utils/interviewQuestionSlotSnapshot.js";
@@ -153,7 +154,11 @@ async function processEvaluateAnswerJob(sessionId, answer, options = {}) {
 
   // Company context for MCP tools
   const companyData = (await resolveInterviewMergedCompanyForSession(session)) ?? null;
-  const companyContext = await getCompanyContext(companyData || {}, { role: session.role });
+  const companyContext = enrichCompanyContextForInterviewSession(
+    session,
+    await getCompanyContext(companyData || {}, { role: session.role }),
+    companyData
+  );
 
   const questionSlot = currentRound.questions[currentQuestionIndex];
 
@@ -538,6 +543,7 @@ Give brief reasoning on answer quality, technical correctness, clarity, and gaps
       companyContext,
       roundType: currentRound.type,
       roundAbout: currentRound.about,
+      roundFocus: String(currentRound.focus || "").trim(),
       difficulty: currentRound.difficulty,
       roundQuestionCount: currentRound.questionCount,
       previousQuestion: currentQuestion,

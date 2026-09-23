@@ -3,6 +3,7 @@ import {
   PLATFORM_FRESHER_ROLES,
   PLATFORM_INTERVIEW_ROUND_TYPES,
 } from "../config/interviewCatalog.js";
+import { GENERAL_COMPANY_CATEGORY_IDS } from "../utils/interviewQuestionCategoryFromCompanyTags.js";
 
 const ROUND_TYPES = [...PLATFORM_INTERVIEW_ROUND_TYPES];
 const DIFFICULTY_LEVELS = ["easy", "medium", "hard"];
@@ -138,6 +139,11 @@ const interviewQuestionSchema = new mongoose.Schema(
 
     // Classification
     companyTags: { type: [String], default: [] },
+    /** /general hub business-model categories (fintech, product, service, …). */
+    category: {
+      type: [{ type: String, enum: GENERAL_COMPANY_CATEGORY_IDS }],
+      default: [],
+    },
     roleTags: {
       type: [{ type: String, enum: PLATFORM_FRESHER_ROLES }],
       default: [],
@@ -199,6 +205,7 @@ interviewQuestionSchema.path("testCases").validate(function validateTestCases(va
 }, "code_execution requires testCases: at least two visible (isHidden: false) and two hidden (isHidden: true).");
 
 interviewQuestionSchema.index({ companyTags: 1 });
+interviewQuestionSchema.index({ category: 1 });
 interviewQuestionSchema.index({ roleTags: 1 });
 interviewQuestionSchema.index({ roundType: 1 });
 interviewQuestionSchema.index({ difficulty: 1 });

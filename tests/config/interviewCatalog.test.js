@@ -8,12 +8,15 @@ import { generateInterviewPlanFromCustomRounds } from "../../services/interviewE
 import { roundTypeImpliesCodeExecutionInterview } from "../../services/interviewCodeGradingGuards.js";
 
 describe("general interview catalog", () => {
-  it("keeps the platform catalog bounded to 15 fresher roles and 13 round types", () => {
+  it("keeps the platform catalog bounded to 15 fresher roles and 14 round types", () => {
     expect(PLATFORM_FRESHER_ROLES).toHaveLength(15);
-    expect(PLATFORM_INTERVIEW_ROUND_TYPES).toHaveLength(13);
+    expect(PLATFORM_INTERVIEW_ROUND_TYPES).toHaveLength(14);
     expect(PLATFORM_INTERVIEW_ROUND_TYPES).toEqual(
       expect.arrayContaining(CAMPUS_INTERVIEW_ROUND_TYPES)
     );
+    const sdIdx = PLATFORM_INTERVIEW_ROUND_TYPES.indexOf("System Design");
+    expect(PLATFORM_INTERVIEW_ROUND_TYPES[sdIdx + 1]).toBe("Web Dev");
+    expect(PLATFORM_INTERVIEW_ROUND_TYPES[sdIdx + 2]).toBe("SQL");
   });
 
   it("requires a fixed role and global difficulty for platform starts", () => {

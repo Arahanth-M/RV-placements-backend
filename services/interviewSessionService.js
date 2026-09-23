@@ -11,6 +11,7 @@ import {
 } from "./companyService.js";
 import { getCompanyPlatformDetailById } from "./companyPlatformDetailService.js";
 import { getCompanyContext } from "./mcp/getCompanyContext.js";
+import { classifyGeneralCompanyCategory } from "../utils/generalCompanyCategory.js";
 import { generateQuestion, normalizeExpectedPoints } from "./mcp/generateQuestion.js";
 import { collectSessionQuestionExclusions } from "./interviewQuestionExclusions.js";
 import { generateRoundFeedback as generateRoundFeedbackMCP } from "./mcp/generateRoundFeedback.js";
@@ -150,6 +151,14 @@ const resolveCompanyNamesForAnalytics = async (companyIds) => {
     if (!map.has(id)) map.set(id, UNKNOWN_COMPANY_NAME);
   }
   return map;
+};
+
+export const enrichCompanyContextForInterviewSession = (session, companyContext, companyData) => {
+  if (String(session?.contentScope || "") === "platform") {
+    companyContext.platformMock = true;
+    companyContext.categoryId = classifyGeneralCompanyCategory(companyData?.business_model);
+  }
+  return companyContext;
 };
 
 export const resolveInterviewMergedCompanyForSession = async (session) => {
@@ -486,13 +495,18 @@ export const startRound = async (sessionId) => {
 
   // 3) Call MCP generateQuestion with companyContext + round context
   const companyData = (await resolveInterviewMergedCompanyForSession(session)) ?? null;
-  const companyContext = await getCompanyContext(companyData || {}, { role: session.role });
+  const companyContext = enrichCompanyContextForInterviewSession(
+    session,
+    await getCompanyContext(companyData || {}, { role: session.role }),
+    companyData
+  );
   const sessionExclusions = collectSessionQuestionExclusions(session);
   const gen = await generateQuestion({
     userId: String(session.userId || ""),
     companyContext,
     roundType: currentRound.type,
     roundAbout: currentRound.about,
+    roundFocus: toSafeString(currentRound.focus),
     difficulty: currentRound.difficulty,
     roundQuestionCount: currentRound.questionCount,
     previousQuestion: "",

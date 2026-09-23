@@ -1,7 +1,7 @@
 import express from "express";
 import jwt from "jsonwebtoken";
 import passport from "passport";
-import { config, urls, messages, isAdminEmail } from "../config/constants.js";
+import { config, urls, messages, adminIdentityFromEmail } from "../config/constants.js";
 import authJWT from "../middleware/authJWT.js";
 import validateRequest from "../middleware/validateRequest.js";
 import { buildJwtPayloadFromUser } from "../utils/jwtUserClaims.js";
@@ -134,15 +134,17 @@ router.get("/google", captureOAuthClientOrigin, (req, res, next) => {
   return passport.authenticate("google", googleOpts)(req, res, next);
 });
 
-router.get(
-  "/google/admin",
-  captureOAuthClientOrigin,
-  setOAuthFlowCookie("admin"),
-  passport.authenticate("google", {
+router.get("/google/admin", captureOAuthClientOrigin, (req, res, next) => {
+  const intent = String(req.query?.intent || "")
+    .trim()
+    .toLowerCase();
+  const flow = intent === "platform" ? "platform_admin" : "admin";
+  res.cookie("oauth_flow", flow, oauthCookieOptions());
+  return passport.authenticate("google", {
     session: false,
     scope: ["profile", "email"],
-  })
-);
+  })(req, res, next);
+});
 
 router.get(
   "/google/signup",
@@ -190,20 +192,34 @@ router.get(
       }
 
       const flow = req.cookies?.oauth_flow || "";
-      const isAdminLogin = flow === "admin";
+      const isPlatformAdminLogin = flow === "platform_admin";
+      const isAdminLogin = flow === "admin" || isPlatformAdminLogin;
       const isSignup = flow === "signup";
 
       if (isAdminLogin) {
-        if (!isAdminEmail(user.email)) {
+        const identity = adminIdentityFromEmail(user.email);
+        if (!identity) {
           return redirectToAuthCallback(req, res, "login=failed&reason=not_admin");
         }
+        if (isPlatformAdminLogin && !identity.isSuperAdmin) {
+          return redirectToAuthCallback(req, res, "login=failed&reason=not_admin");
+        }
+        setTokenCookie(res, user, {
+          isAdminSession: true,
+          adminScope: identity.adminScope,
+          isSuperAdmin: identity.isSuperAdmin,
+        });
+        return redirectToAuthCallback(
+          req,
+          res,
+          identity.isSuperAdmin
+            ? "login=success&admin=true&scope=platform"
+            : "login=success&admin=true"
+        );
       }
 
-      setTokenCookie(res, user, { isAdminSession: isAdminLogin });
+      setTokenCookie(res, user, { isAdminSession: false });
 
-      if (isAdminLogin) {
-        return redirectToAuthCallback(req, res, "login=success&admin=true");
-      }
       if (isSignup) {
         return redirectToAuthCallback(req, res, "signup=success");
       }
@@ -322,10 +338,18 @@ router.get("/current_user", authJWT, async (req, res) => {
 router.get("/is_admin", authJWT, (req, res) => {
   try {
     const isAdmin = req.user?.isAdminSession === true;
-    res.json({ isAdmin });
+    const isSuperAdmin =
+      isAdmin &&
+      (req.user?.isSuperAdmin === true ||
+        String(req.user?.adminScope || "").toLowerCase() === "platform");
+    res.json({
+      isAdmin,
+      isSuperAdmin,
+      adminScope: isSuperAdmin ? "platform" : isAdmin ? "campus" : null,
+    });
   } catch (error) {
     console.error("❌ Error checking admin status:", error);
-    res.status(500).json({ error: "Server error", isAdmin: false });
+    res.status(500).json({ error: "Server error", isAdmin: false, isSuperAdmin: false });
   }
 });
 

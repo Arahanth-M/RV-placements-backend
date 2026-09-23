@@ -1,20 +1,32 @@
 import PrepPathPlan from "../../models/PrepPathPlan.js";
-import { extractResumeText, buildResumeDigest } from "./resumeTextExtract.js";
+import {
+  extractResumeText,
+  extractJdText,
+  buildResumeDigest,
+  buildJdDigest,
+} from "./resumeTextExtract.js";
 import {
   loadCompanyPrepContext,
   formatCompanyContextForPrompt,
+  isPlatformPrepScope,
   normalizePrepPathTrack,
   PREP_PATH_TRACKS,
 } from "./companyContext.js";
 import { fetchPrepWebSnippets } from "./webEnrichment.js";
 import { generatePrepPathRoadmapWithLLM } from "./generateRoadmap.js";
 import { attachCampusEvidenceToRoadmap } from "./campusEvidence.js";
+import { suggestGeneralMockInterview } from "./suggestGeneralMock.js";
+import {
+  applyStudyScheduleToDays,
+  normalizeStudyScheduleChoice,
+} from "./studySchedule.js";
 import { getCompanyPrepPathPeerDemand } from "./peerDemand.js";
 import {
   consumePrepPathQuota,
   getPrepPathQuota,
   refundPrepPathQuota,
 } from "./quota.js";
+import { isPlatformFresherRole } from "../../config/interviewCatalog.js";
 
 export const PREP_PATH_HISTORY_LIMIT = 10;
 
@@ -44,7 +56,8 @@ export async function getPrepPathPlanForUser(userId, planId) {
 /**
  * Generate + persist a PrepPath plan.
  * Writes ONLY to prep_path_plans and prep_path_usage.
- * Reads company collections; never updates/deletes them. Resume file is not stored.
+ * Reads /general platform content when `scope=platform`; otherwise campus visits.
+ * Resume file is not stored. Optional JD is parsed for the LLM only — not stored.
  */
 export async function generateAndSavePrepPathPlan({
   userId,
@@ -56,7 +69,11 @@ export async function generateAndSavePrepPathPlan({
   resumeBuffer,
   resumeMime,
   resumeOriginalName,
+  jdBuffer,
+  jdMime,
+  jdOriginalName,
   collegeId,
+  scope,
   skipDailyQuota = false,
 }) {
   const uid = String(userId || "").trim();
@@ -66,9 +83,20 @@ export async function generateAndSavePrepPathPlan({
     throw err;
   }
 
+  const platformScope = isPlatformPrepScope(scope);
+
   const roleClean = String(role || "").trim().slice(0, 120);
   if (roleClean.length < 2) {
-    const err = new Error("Enter a target role (e.g. SDE Intern, Backend Engineer).");
+    const err = new Error(
+      platformScope
+        ? "Select a fresher role from the list."
+        : "Enter a target role (e.g. SDE Intern, Backend Engineer)."
+    );
+    err.code = "INVALID_ROLE";
+    throw err;
+  }
+  if (platformScope && !isPlatformFresherRole(roleClean)) {
+    const err = new Error("Select a fresher role from the list.");
     err.code = "INVALID_ROLE";
     throw err;
   }
@@ -100,9 +128,20 @@ export async function generateAndSavePrepPathPlan({
     originalName: resumeOriginalName,
   });
   const resumeDigest = buildResumeDigest(resumeText, 1500);
+
+  let jdDigest = "";
+  if (jdBuffer && Buffer.isBuffer(jdBuffer) && jdBuffer.length > 0) {
+    const jdText = await extractJdText({
+      buffer: jdBuffer,
+      mime: jdMime,
+      originalName: jdOriginalName,
+    });
+    jdDigest = buildJdDigest(jdText, 2000);
+  }
   const companyCtx = await loadCompanyPrepContext(companyId, {
     track: trackNorm,
-    collegeId,
+    scope: platformScope ? "platform" : undefined,
+    collegeId: platformScope ? undefined : collegeId,
   });
 
   const quota = skipDailyQuota
@@ -125,6 +164,7 @@ export async function generateAndSavePrepPathPlan({
       days: dayCount,
       hoursPerDay: hpd,
       resumeDigest,
+      jdDigest,
       companyPromptBlock: formatCompanyContextForPrompt(companyCtx, {
         targetRole: roleClean,
       }),
@@ -133,15 +173,31 @@ export async function generateAndSavePrepPathPlan({
       contextFlags: companyCtx.flags || {},
     });
 
-    roadmap = attachCampusEvidenceToRoadmap(roadmap, companyCtx.evidenceBank || []);
+    roadmap = attachCampusEvidenceToRoadmap(roadmap, companyCtx.evidenceBank || [], {
+      contentSource: companyCtx.contentSource,
+    });
 
     if (companyCtx.limitedData && !roadmap.dataQualityNote) {
       roadmap.dataQualityNote =
-        "Campus data for this company was limited. Plan uses careful general guidance" +
+        (companyCtx.contentSource === "platform"
+          ? "Company prep data on /general was limited. Plan uses careful general guidance"
+          : "Campus data for this company was limited. Plan uses careful general guidance") +
         (web.webAugmented ? " plus allowlisted web snippets." : ".");
     }
 
     const sources = [...(companyCtx.sources || []), ...(web.sources || [])];
+
+    const mockSuggestion = platformScope
+      ? suggestGeneralMockInterview({
+          role: roleClean,
+          track: trackNorm,
+          days: dayCount,
+          flags: companyCtx.flags || {},
+          limitedData: Boolean(companyCtx.limitedData),
+          skillGaps: roadmap.skillGaps,
+          topicTitles: (roadmap.topicSections || []).map((t) => t.title).filter(Boolean),
+        })
+      : undefined;
 
     const plan = await PrepPathPlan.create({
       userId: uid,
@@ -161,9 +217,11 @@ export async function generateAndSavePrepPathPlan({
         ...companyCtx.flags,
         webAugmented: Boolean(web.webAugmented),
         limitedData: Boolean(companyCtx.limitedData),
+        jdProvided: Boolean(jdDigest),
       },
       roadmap,
       sources,
+      ...(mockSuggestion ? { mockSuggestion } : {}),
     });
 
     const peerDemand = await getCompanyPrepPathPeerDemand(companyCtx.companyId, {
@@ -182,6 +240,54 @@ export async function generateAndSavePrepPathPlan({
     }
     throw err;
   }
+}
+
+/**
+ * Cut an existing plan's day tasks into the student's stretch/batch slots.
+ * Does not consume quota or call the LLM.
+ */
+export async function applyPrepPathStudySchedule({
+  userId,
+  planId,
+  style,
+  slotMinutes,
+  slotsPerDay,
+}) {
+  const uid = String(userId || "").trim();
+  const id = String(planId || "").trim();
+  if (!uid || !id) return null;
+
+  const plan = await PrepPathPlan.findOne({ _id: id, userId: uid }).lean().catch(() => null);
+  if (!plan) return null;
+
+  const choice = normalizeStudyScheduleChoice({
+    hoursPerDay: plan.hoursPerDay,
+    style,
+    slotMinutes,
+    slotsPerDay,
+  });
+  const days = applyStudyScheduleToDays(
+    plan.roadmap?.days,
+    choice,
+    plan.hoursPerDay
+  );
+
+  await PrepPathPlan.updateOne(
+    { _id: plan._id, userId: uid },
+    {
+      $set: {
+        studySchedule: {
+          style: choice.style,
+          slotMinutes: choice.slotMinutes,
+          slotsPerDay: choice.slotsPerDay,
+          label: choice.label,
+        },
+        "roadmap.days": days,
+      },
+    }
+  );
+
+  return getPrepPathPlanForUser(uid, id);
 }
 
 export { getPrepPathQuota, getCompanyPrepPathPeerDemand };

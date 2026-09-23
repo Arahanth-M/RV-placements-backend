@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import multer from "multer";
 import XLSX from "xlsx";
 import authJWT from "../middleware/authJWT.js";
+import requirePlatformAdmin from "../middleware/requirePlatformAdmin.js";
 import CompanyStatic from "../models/CompanyStatic.js";
 import InterviewQuestion from "../models/InterviewQuestion.js";
 import { PLATFORM_FRESHER_ROLES, PLATFORM_INTERVIEW_ROUND_TYPES } from "../config/interviewCatalog.js";
@@ -11,9 +12,15 @@ import {
   interviewQuestionBankWriteSchema,
   validateQuestionStrategy,
 } from "../validations/interviewQuestionBank.validation.js";
+import {
+  buildCompanyNameToCategoryMap,
+  categoriesFromCompanyTags,
+  normalizeQuestionCategoryList,
+} from "../utils/interviewQuestionCategoryFromCompanyTags.js";
 
 const router = express.Router();
 router.use(authJWT);
+router.use(requirePlatformAdmin);
 
 const csvUpload = multer({
   storage: multer.memoryStorage(),
@@ -45,10 +52,14 @@ async function validateCompanyTags(companyTags) {
     : { tags, error: "" };
 }
 
-function normalizeWritePayload(value, companyTags) {
+function normalizeWritePayload(value, companyTags, category = []) {
+  const resolvedCategory = normalizeQuestionCategoryList(
+    category.length ? category : value.category
+  );
   return {
     ...value,
     companyTags,
+    category: resolvedCategory,
     roleTags: uniqueStrings(value.roleTags),
     topics: uniqueStrings(value.topics),
     subtopics: uniqueStrings(value.subtopics),
@@ -289,6 +300,7 @@ router.post(
       const knownCompanies = new Set(
         companyRows.map((company) => String(company.name || "").trim()).filter(Boolean)
       );
+      const nameToCategory = await buildCompanyNameToCategoryMap();
       const validRows = [];
       const errors = [];
 
@@ -314,7 +326,11 @@ router.post(
           if (error) throw new Error(serializeValidationError(error));
           const strategyError = validateQuestionStrategy(value);
           if (strategyError) throw new Error(strategyError);
-          validRows.push({ rowNumber, payload: normalizeWritePayload(value, value.companyTags) });
+          const category = categoriesFromCompanyTags(value.companyTags, nameToCategory);
+          validRows.push({
+            rowNumber,
+            payload: normalizeWritePayload(value, value.companyTags, category),
+          });
         } catch (error) {
           errors.push({
             row: rowNumber,

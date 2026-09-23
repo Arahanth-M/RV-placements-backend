@@ -57,7 +57,9 @@ export const inferQuestionCount = (roundType) => {
   if (roundType === "SQL") return 4;
   if (roundType === "System Design") return 3;
   if (roundType === "HR") return MAX_HR_QUESTIONS_PER_ROUND;
-  if (roundType === "CS Fundamentals") return 3; // 2 MCQ (bank) + 1 theory (bank, then LLM)
+  if (roundType === "CS Fundamentals" || roundType === "Web Dev") {
+    return 3; // 2 MCQ (bank) + 1 theory (bank, then LLM)
+  }
   return 3;
 };
 
@@ -110,18 +112,16 @@ const validateCustomRoundPlan = (rounds, { platform = false } = {}) => {
       );
     }
     const focus =
-      type === "DSA"
-        ? ""
-        : round?.focus != null
-          ? normalizeCustomRoundFocus(type, round.focus)
-          : round?.about != null
-            ? normalizeCustomRoundFocus(type, round.about)
-            : normalizeCustomRoundFocus(type, "");
+      round?.focus != null
+        ? normalizeCustomRoundFocus(type, round.focus)
+        : round?.about != null
+          ? normalizeCustomRoundFocus(type, round.about)
+          : normalizeCustomRoundFocus(type, "");
     return {
       roundNumber: index + 1,
       type,
       difficulty: normalizeCustomRoundDifficulty(round?.difficulty),
-      ...(focus ? { focus } : {}),
+      focus,
       about: resolveRoundAbout(type, focus),
     };
   });
@@ -149,6 +149,7 @@ export const generateInterviewPlanFromCustomRounds = async (
   const rounds = normalizedRounds.map((round, index) => ({
     roundNumber: round.roundNumber,
     type: round.type,
+    focus: round.focus,
     about: round.about,
     difficulty: round.difficulty,
     questionCount: inferQuestionCount(round.type),

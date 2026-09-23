@@ -4,6 +4,7 @@ import {
   PLATFORM_FRESHER_ROLES,
   PLATFORM_INTERVIEW_ROUND_TYPES,
 } from "../config/interviewCatalog.js";
+import { GENERAL_COMPANY_CATEGORY_IDS } from "../utils/interviewQuestionCategoryFromCompanyTags.js";
 
 const stringList = Joi.array().items(Joi.string().trim().min(1).max(160)).max(100);
 
@@ -35,6 +36,11 @@ export const interviewQuestionBankWriteSchema = Joi.object({
   question: Joi.string().trim().min(5).max(20000).required(),
   url: Joi.string().trim().allow("").uri({ allowRelative: false }).max(2000).default(""),
   companyTags: stringList.required(),
+  category: Joi.array()
+    .items(Joi.string().valid(...GENERAL_COMPANY_CATEGORY_IDS))
+    .max(GENERAL_COMPANY_CATEGORY_IDS.length)
+    .unique()
+    .default([]),
   roleTags: Joi.array()
     .items(Joi.string().valid(...PLATFORM_FRESHER_ROLES))
     .min(1)

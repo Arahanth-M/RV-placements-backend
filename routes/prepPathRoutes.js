@@ -10,6 +10,7 @@ import {
   getPrepPathQuota,
   getCompanyPrepPathPeerDemand,
   listRecentPrepPathPlans,
+  applyPrepPathStudySchedule,
   PREP_PATH_HISTORY_LIMIT,
 } from "../services/prepPath/prepPathService.js";
 import { recordDauActivitySafe } from "../services/dau/recordDauActivity.js";
@@ -36,8 +37,11 @@ const upload = multer({
       name.endsWith(".pdf") ||
       name.endsWith(".docx");
     if (!ok) {
-      const err = new Error("Upload a PDF or DOCX resume.");
-      err.code = "RESUME_TYPE";
+      const isJd = String(file?.fieldname || "") === "jd";
+      const err = new Error(
+        isJd ? "Upload a PDF or DOCX job description." : "Upload a PDF or DOCX resume."
+      );
+      err.code = isJd ? "JD_TYPE" : "RESUME_TYPE";
       return cb(err);
     }
     return cb(null, true);
@@ -121,15 +125,41 @@ router.get("/plans/:id", async (req, res) => {
   }
 });
 
+router.post("/plans/:id/schedule", async (req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const plan = await applyPrepPathStudySchedule({
+      userId,
+      planId: req.params.id,
+      style: req.body?.style,
+      slotMinutes: req.body?.slotMinutes,
+      slotsPerDay: req.body?.slotsPerDay,
+    });
+    if (!plan) return res.status(404).json({ error: "Plan not found" });
+    return res.json({ success: true, plan });
+  } catch (err) {
+    const code = err?.code || "";
+    if (code === "INVALID_SCHEDULE") {
+      return res.status(400).json({ error: err.message, code });
+    }
+    console.error("[prepPath] schedule failed", err?.message || err);
+    return res.status(500).json({ error: "Failed to save study schedule" });
+  }
+});
+
 router.post("/generate", (req, res) => {
-  upload.single("resume")(req, res, async (uploadErr) => {
+  upload.fields([
+    { name: "resume", maxCount: 1 },
+    { name: "jd", maxCount: 1 },
+  ])(req, res, async (uploadErr) => {
     if (uploadErr) {
       const code = uploadErr.code || "";
       if (code === "LIMIT_FILE_SIZE") {
-        return res.status(400).json({ error: "Resume must be 5MB or smaller." });
+        return res.status(400).json({ error: "Each upload must be 5MB or smaller." });
       }
       return res.status(400).json({
-        error: uploadErr.message || "Invalid resume upload.",
+        error: uploadErr.message || "Invalid file upload.",
         code: uploadErr.code || "UPLOAD_ERROR",
       });
     }
@@ -139,7 +169,10 @@ router.post("/generate", (req, res) => {
       const userId = getAuthenticatedUserId(req);
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
-      if (!req.file?.buffer) {
+      const resumeUpload = req.files?.resume?.[0];
+      const jdUpload = req.files?.jd?.[0];
+
+      if (!resumeUpload?.buffer) {
         return res.status(400).json({
           error: "Attach a resume (PDF or DOCX).",
           code: "RESUME_REQUIRED",
@@ -169,10 +202,14 @@ router.post("/generate", (req, res) => {
         track: req.body?.track,
         days: req.body?.days,
         hoursPerDay: req.body?.hoursPerDay,
-        resumeBuffer: req.file.buffer,
-        resumeMime: req.file.mimetype,
-        resumeOriginalName: req.file.originalname,
-        collegeId: collegeIdFromUser(req.user),
+        resumeBuffer: resumeUpload.buffer,
+        resumeMime: resumeUpload.mimetype,
+        resumeOriginalName: resumeUpload.originalname,
+        jdBuffer: jdUpload?.buffer,
+        jdMime: jdUpload?.mimetype,
+        jdOriginalName: jdUpload?.originalname,
+        collegeId: platformScope ? undefined : collegeIdFromUser(req.user),
+        scope: platformScope ? "platform" : undefined,
         skipDailyQuota: platformScope,
       });
 
@@ -223,6 +260,9 @@ router.post("/generate", (req, res) => {
           "RESUME_EMPTY",
           "RESUME_TYPE",
           "RESUME_PARSE",
+          "JD_EMPTY",
+          "JD_TYPE",
+          "JD_PARSE",
         ].includes(code)
       ) {
         return res.status(400).json({ error: message, code });

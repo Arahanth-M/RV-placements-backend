@@ -6,6 +6,7 @@ import User1 from "../models/User1.js";
 import { urls } from "../config/constants.js";
 import { sendWelcomeEmailWebhook } from "./webhookService.js";
 import { isAllowedCollegeEmail, isRvceCollegeEmail } from "../utils/collegeScope.js";
+import { isPlatformOwnerEmail } from "../config/constants.js";
 import { recordDauActivitySafe } from "./dau/recordDauActivity.js";
 import { recordBlockedLoginAttempt } from "./blockedLoginAttempts.js";
 
@@ -38,7 +39,8 @@ passport.use(
         const picture = pictureFromGoogleProfile(profile);
         const displayName = profile.displayName?.trim() || "";
         const flow = req?.cookies?.oauth_flow || "";
-        const isAdminLogin = flow === "admin";
+        const isPlatformAdminLogin = flow === "platform_admin";
+        const isAdminLogin = flow === "admin" || isPlatformAdminLogin;
 
         // 1. Basic Email Validation
         if (!normalizedEmail) {
@@ -47,8 +49,14 @@ passport.use(
 
         const isCampusLogin = flow === "campus" || flow === "spc";
 
-        // Admin + campus/SPC logins stay restricted. /general Google login has no domain gate.
-        if (isAdminLogin && !isAllowedCollegeEmail(normalizedEmail)) {
+        // Campus admin stays college-email gated. Platform owners may use any Google account
+        // on the owner allowlist. /general student Google login has no domain gate.
+        if (
+          isAdminLogin &&
+          !isPlatformAdminLogin &&
+          !isAllowedCollegeEmail(normalizedEmail) &&
+          !isPlatformOwnerEmail(normalizedEmail)
+        ) {
           let attemptId = "";
           try {
             attemptId = await recordBlockedLoginAttempt({

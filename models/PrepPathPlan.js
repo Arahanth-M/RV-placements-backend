@@ -7,6 +7,7 @@ const campusEvidenceSchema = new mongoose.Schema(
       enum: [
         "must_do",
         "oa",
+        "coding",
         "interview_question",
         "interview_experience",
         "platform_role",
@@ -32,12 +33,23 @@ const roadmapTaskSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const roadmapSlotSchema = new mongoose.Schema(
+  {
+    index: { type: Number, min: 1 },
+    minutes: { type: Number, min: 0 },
+    tasks: [roadmapTaskSchema],
+  },
+  { _id: false }
+);
+
 const roadmapDaySchema = new mongoose.Schema(
   {
     day: { type: Number, min: 1 },
     hours: { type: Number, min: 0 },
     focus: { type: String, trim: true },
     tasks: [roadmapTaskSchema],
+    /** Filled after the student picks stretch vs batched slots. */
+    slots: [roadmapSlotSchema],
     campusEvidence: [campusEvidenceSchema],
   },
   { _id: false }
@@ -76,6 +88,7 @@ const companySignalSchema = new mongoose.Schema(
       enum: [
         "must_do",
         "oa",
+        "coding",
         "interview_question",
         "interview_experience",
         "platform_role",
@@ -142,11 +155,14 @@ const prepPathPlanSchema = new mongoose.Schema(
     contextFlags: {
       usedMustDo: { type: Boolean, default: false },
       usedOA: { type: Boolean, default: false },
+      usedCoding: { type: Boolean, default: false },
       usedInterview: { type: Boolean, default: false },
       usedExperiences: { type: Boolean, default: false },
       usedPlatformRoles: { type: Boolean, default: false },
       webAugmented: { type: Boolean, default: false },
       limitedData: { type: Boolean, default: false },
+      /** True when generation used an uploaded JD (JD text is not stored). */
+      jdProvided: { type: Boolean, default: false },
     },
     /** Snapshot of peer PrepPath demand for this company (last 7 IST days). */
     peerDemand: {
@@ -177,6 +193,23 @@ const prepPathPlanSchema = new mongoose.Schema(
       dataQualityNote: { type: String, trim: true, default: "" },
     },
     sources: [sourceSchema],
+    /**
+     * /general only. Catalog mapping onto the interviews hub — never LLM-invented rounds.
+     * Absent on campus (RVCE/RVITM) plans.
+     */
+    mockSuggestion: {
+      role: { type: String, trim: true },
+      difficulty: { type: String, enum: ["easy", "medium", "hard"] },
+      rounds: { type: [String], default: undefined },
+      why: { type: String, trim: true },
+    },
+    /** How the student wants each day's hours split. Applied after generate. */
+    studySchedule: {
+      style: { type: String, enum: ["stretch", "batches"] },
+      slotMinutes: { type: Number, min: 1 },
+      slotsPerDay: { type: Number, min: 1, max: 6 },
+      label: { type: String, trim: true },
+    },
   },
   { timestamps: true }
 );

@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import CompanyStatic from "../../models/CompanyStatic.js";
 import CompanyVisit from "../../models/CompanyVisit.js";
+import { getCompanyPlatformDetailById } from "../companyPlatformDetailService.js";
 import { filterRolesForCollege, normalizeCollegeId } from "../../utils/collegeScope.js";
 import { listRolePointSections } from "../../utils/normalizeAdminRole.js";
 
@@ -119,7 +120,9 @@ const asTextList = (arr, maxItems, maxItemLen = 220) =>
     .map((x) =>
       typeof x === "string"
         ? x.trim()
-        : String(x?.text || x?.question || x?.title || "").trim()
+        : String(
+            x?.text || x?.question || x?.content || x?.title || x?.Title || ""
+          ).trim()
     )
     .filter(Boolean)
     .slice(0, maxItems)
@@ -182,13 +185,226 @@ function selectVisitsForTrack(allVisits, track) {
   return preferred.slice(0, 8);
 }
 
+export function isPlatformPrepScope(raw) {
+  return String(raw || "").trim().toLowerCase() === "platform";
+}
+
+function assemblePrepContextResult({
+  companyId,
+  companyName,
+  about,
+  track,
+  trackMatched,
+  roles,
+  roleDetails,
+  evidenceBank,
+  visitYears,
+  sourceTitle,
+  contentSource = "campus",
+}) {
+  const evidenceCapped = (Array.isArray(evidenceBank) ? evidenceBank : []).slice(0, 60);
+
+  const mustDoUnique = [
+    ...new Set(evidenceCapped.filter((e) => e.sourceType === "must_do").map((e) => e.text)),
+  ].slice(0, 50);
+  const onlineQuestions = [
+    ...new Set(evidenceCapped.filter((e) => e.sourceType === "oa").map((e) => e.text)),
+  ].slice(0, 25);
+  const prevCodingQuestions = [
+    ...new Set(evidenceCapped.filter((e) => e.sourceType === "coding").map((e) => e.text)),
+  ].slice(0, 25);
+  const interviewQuestions = [
+    ...new Set(
+      evidenceCapped.filter((e) => e.sourceType === "interview_question").map((e) => e.text)
+    ),
+  ].slice(0, 30);
+  const interviewProcess = [
+    ...new Set(
+      evidenceCapped
+        .filter((e) => e.sourceType === "interview_experience")
+        .map((e) => e.text)
+    ),
+  ].slice(0, 25);
+  const platformRoleSignals = [
+    ...new Set(
+      evidenceCapped.filter((e) => e.sourceType === "platform_role").map((e) => e.text)
+    ),
+  ].slice(0, 40);
+  const signal = countSignal([
+    mustDoUnique,
+    onlineQuestions,
+    prevCodingQuestions,
+    interviewQuestions,
+    interviewProcess,
+  ]);
+  const needsWebEnrichment =
+    interviewProcess.length === 0 && mustDoUnique.length <= 10;
+  const limitedData =
+    needsWebEnrichment && platformRoleSignals.length === 0;
+
+  return {
+    companyId: String(companyId),
+    companyName: String(companyName || "").trim() || "Company",
+    about: String(about || "").trim().slice(0, 400),
+    contentSource,
+    track,
+    trackLabel: prepPathTrackLabel(track),
+    trackMatched: Boolean(trackMatched),
+    roles: [...new Set(Array.isArray(roles) ? roles : [])].slice(0, 12),
+    roleDetails: (Array.isArray(roleDetails) ? roleDetails : []).slice(0, 8),
+    mustDoTopics: mustDoUnique,
+    onlineQuestions,
+    interviewQuestions,
+    interviewProcess,
+    platformRoleSignals,
+    internshipExperience: interviewProcess.slice(0, 15),
+    prevCodingQuestions: prevCodingQuestions.slice(0, 15),
+    visitYears: Array.isArray(visitYears) ? visitYears.filter(Boolean) : [],
+    evidenceBank: evidenceCapped,
+    limitedData,
+    needsWebEnrichment,
+    signalCount: signal,
+    sources: [
+      {
+        title: sourceTitle,
+        url: "",
+        kind: "platform",
+      },
+    ],
+    flags: {
+      usedMustDo: mustDoUnique.length > 0,
+      usedOA: onlineQuestions.length > 0,
+      usedCoding: prevCodingQuestions.length > 0,
+      usedInterview: interviewQuestions.length > 0,
+      usedExperiences: interviewProcess.length > 0,
+      usedPlatformRoles: platformRoleSignals.length > 0,
+      trackMatched: Boolean(trackMatched),
+    },
+  };
+}
+
+/**
+ * /general PrepPath: CompanyStatic + company_platform_content only.
+ * Never reads CompanyVisit (college-customized campus data).
+ * @param {string} companyId
+ * @param {{ track?: string }} [options]
+ */
+export async function loadPlatformCompanyPrepContext(companyId, options = {}) {
+  const id = String(companyId || "").trim();
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    const err = new Error("Invalid company.");
+    err.code = "INVALID_COMPANY";
+    throw err;
+  }
+
+  const track =
+    normalizePrepPathTrack(options.track) || PREP_PATH_TRACKS.FULL_TIME;
+  const payload = await getCompanyPlatformDetailById(id);
+  if (!payload) {
+    const err = new Error("Company not found.");
+    err.code = "COMPANY_NOT_FOUND";
+    throw err;
+  }
+
+  const evidenceBank = [];
+  for (const topic of asTextList(payload.must_do_topics, 30)) {
+    pushEvidence(evidenceBank, {
+      sourceType: "must_do",
+      text: topic,
+      year: null,
+      cluster: "",
+      branch: "",
+    });
+  }
+  for (const q of asTextList(payload.onlineQuestions, 12)) {
+    pushEvidence(evidenceBank, {
+      sourceType: "oa",
+      text: q,
+      year: null,
+      cluster: "",
+      branch: "",
+    });
+  }
+  for (const q of asTextList(payload.prev_coding_ques, 12)) {
+    pushEvidence(evidenceBank, {
+      sourceType: "coding",
+      text: q,
+      year: null,
+      cluster: "",
+      branch: "",
+    });
+  }
+  for (const q of asTextList(payload.interviewQuestions, 14)) {
+    pushEvidence(evidenceBank, {
+      sourceType: "interview_question",
+      text: q,
+      year: null,
+      cluster: "",
+      branch: "",
+    });
+  }
+  for (const q of asTextList(payload.interviewProcess, 10)) {
+    pushEvidence(evidenceBank, {
+      sourceType: "interview_experience",
+      text: q,
+      year: null,
+      cluster: "",
+      branch: "",
+    });
+  }
+  if (track === PREP_PATH_TRACKS.SUMMER_INTERNSHIP) {
+    for (const q of asTextList(payload.internshipExperience, 10)) {
+      pushEvidence(evidenceBank, {
+        sourceType: "interview_experience",
+        text: q,
+        year: null,
+        cluster: "",
+        branch: "",
+      });
+    }
+  } else {
+    for (const q of asTextList(payload.internshipExperience, 3)) {
+      pushEvidence(evidenceBank, {
+        sourceType: "interview_experience",
+        text: q,
+        year: null,
+        cluster: "",
+        branch: "",
+      });
+    }
+  }
+
+  const trackMatched =
+    track === PREP_PATH_TRACKS.SUMMER_INTERNSHIP
+      ? asTextList(payload.internshipExperience, 1).length > 0
+      : asTextList(payload.interviewProcess, 1).length > 0;
+
+  return assemblePrepContextResult({
+    companyId: String(payload._id),
+    companyName: payload.name,
+    about: payload.about,
+    track,
+    trackMatched,
+    roles: [],
+    roleDetails: [],
+    evidenceBank,
+    visitYears: [],
+    sourceTitle: `${payload.name || "Company"} — /general prep data (${prepPathTrackLabel(track)})`,
+    contentSource: "platform",
+  });
+}
+
 /**
  * Load company prep context from existing read-only company collections.
  * Never writes to CompanyStatic / CompanyVisit.
  * @param {string} companyId
- * @param {{ track?: string, collegeId?: string }} [options]
+ * @param {{ track?: string, collegeId?: string, scope?: string }} [options]
  */
 export async function loadCompanyPrepContext(companyId, options = {}) {
+  if (isPlatformPrepScope(options.scope)) {
+    return loadPlatformCompanyPrepContext(companyId, options);
+  }
+
   const id = String(companyId || "").trim();
   if (!mongoose.Types.ObjectId.isValid(id)) {
     const err = new Error("Invalid company.");
@@ -242,7 +458,7 @@ export async function loadCompanyPrepContext(companyId, options = {}) {
     12
   )) {
     pushEvidence(evidenceBank, {
-      sourceType: "oa",
+      sourceType: "coding",
       text: q,
       year: null,
       cluster: "",
@@ -337,87 +553,19 @@ export async function loadCompanyPrepContext(companyId, options = {}) {
     }
   }
 
-  const evidenceCapped = evidenceBank.slice(0, 60);
-
-  const mustDoUnique = [
-    ...new Set(evidenceCapped.filter((e) => e.sourceType === "must_do").map((e) => e.text)),
-  ].slice(0, 50);
-  const onlineQuestions = [
-    ...new Set(evidenceCapped.filter((e) => e.sourceType === "oa").map((e) => e.text)),
-  ].slice(0, 25);
-  const interviewQuestions = [
-    ...new Set(
-      evidenceCapped.filter((e) => e.sourceType === "interview_question").map((e) => e.text)
-    ),
-  ].slice(0, 30);
-  const interviewProcess = [
-    ...new Set(
-      evidenceCapped
-        .filter((e) => e.sourceType === "interview_experience")
-        .map((e) => e.text)
-    ),
-  ].slice(0, 25);
-  const platformRoleSignals = [
-    ...new Set(
-      evidenceCapped.filter((e) => e.sourceType === "platform_role").map((e) => e.text)
-    ),
-  ].slice(0, 40);
-  const signal = countSignal([
-    mustDoUnique,
-    onlineQuestions,
-    interviewQuestions,
-    interviewProcess,
-  ]);
-  /**
-   * Web (Tavily) fallback:
-   * - Use when there are no interview experiences for this company, AND
-   * - Skip when must-do topics alone are rich (> 10), even with no experiences.
-   */
-  const needsWebEnrichment =
-    interviewProcess.length === 0 && mustDoUnique.length <= 10;
-  // Role JD/skills count as usable campus signal for the LLM even when Tavily still runs.
-  const limitedData =
-    needsWebEnrichment && platformRoleSignals.length === 0;
-
-  const sources = [
-    {
-      title: `${staticRow.name || "Company"} — campus prep data (${prepPathTrackLabel(track)})`,
-      url: "",
-      kind: "platform",
-    },
-  ];
-
-  return {
+  return assemblePrepContextResult({
     companyId: String(staticRow._id),
-    companyName: String(staticRow.name || "").trim() || "Company",
-    about: String(staticRow.about || "").trim().slice(0, 400),
+    companyName: staticRow.name,
+    about: staticRow.about,
     track,
-    trackLabel: prepPathTrackLabel(track),
     trackMatched,
-    roles: [...new Set(roles)].slice(0, 12),
-    roleDetails: roleDetails.slice(0, 8),
-    mustDoTopics: mustDoUnique,
-    onlineQuestions,
-    interviewQuestions,
-    interviewProcess,
-    platformRoleSignals,
-    internshipExperience: interviewProcess.slice(0, 15),
-    prevCodingQuestions: onlineQuestions.slice(0, 15),
+    roles,
+    roleDetails,
+    evidenceBank,
     visitYears: visits.map((v) => v.year).filter(Boolean),
-    evidenceBank: evidenceCapped,
-    limitedData,
-    needsWebEnrichment,
-    signalCount: signal,
-    sources,
-    flags: {
-      usedMustDo: mustDoUnique.length > 0,
-      usedOA: onlineQuestions.length > 0,
-      usedInterview: interviewQuestions.length > 0,
-      usedExperiences: interviewProcess.length > 0,
-      usedPlatformRoles: platformRoleSignals.length > 0,
-      trackMatched,
-    },
-  };
+    sourceTitle: `${staticRow.name || "Company"} — campus prep data (${prepPathTrackLabel(track)})`,
+    contentSource: "campus",
+  });
 }
 
 function scoreRoleNameMatch(roleName, targetRole) {
@@ -494,7 +642,9 @@ export function formatCompanyContextForPrompt(ctx, options = {}) {
     "=== Platform roles (HIGH PRIORITY; cite as \"mentioned in the platform roles\") ===",
     roleDetailLines.length ? roleDetailLines.join("\n") : "(none)",
     "",
-    "=== Campus evidence (cite only these) ===",
+    ctx.contentSource === "platform"
+      ? "=== /general platform evidence (cite only these) ==="
+      : "=== Campus evidence (cite only these) ===",
     evidenceLines.length ? evidenceLines.join("\n") : "(none)",
   ];
   return lines.filter((l) => l !== null && l !== undefined && l !== "").join("\n");

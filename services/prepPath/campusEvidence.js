@@ -46,6 +46,7 @@ const STOP = new Set([
 const SOURCE_LABEL = {
   must_do: "Must-do",
   oa: "OA",
+  coding: "Coding",
   interview_question: "Interview",
   interview_experience: "Experience",
   platform_role: "Platform roles",
@@ -82,7 +83,7 @@ function clusterShort(cluster) {
   return c.length > 28 ? `${c.slice(0, 28)}…` : c;
 }
 
-export function formatEvidenceLabel(ev) {
+export function formatEvidenceLabel(ev, { contentSource } = {}) {
   if (String(ev?.sourceType || "") === "platform_role") {
     const parts = ["Mentioned in the platform roles"];
     if (ev.year) parts.push(String(ev.year));
@@ -90,8 +91,12 @@ export function formatEvidenceLabel(ev) {
     if (branchOrCluster) parts.push(branchOrCluster);
     return parts.join(" · ");
   }
-  const type = SOURCE_LABEL[ev.sourceType] || "Campus";
-  const parts = [`Seen in RVCE visit data: ${type}`];
+  const type = SOURCE_LABEL[ev.sourceType] || "Source";
+  const prefix =
+    contentSource === "platform"
+      ? `Seen on the platform: ${type}`
+      : `Seen in RVCE visit data: ${type}`;
+  const parts = [prefix];
   if (ev.year) parts.push(String(ev.year));
   const branchOrCluster = clusterShort(ev.cluster) || String(ev.branch || "").trim();
   if (branchOrCluster) parts.push(branchOrCluster);
@@ -101,7 +106,11 @@ export function formatEvidenceLabel(ev) {
 /**
  * Pick top evidence items that overlap a query string.
  */
-export function matchCampusEvidence(queryText, evidenceBank, { limit = 2, minScore = 1 } = {}) {
+export function matchCampusEvidence(
+  queryText,
+  evidenceBank,
+  { limit = 2, minScore = 1, contentSource } = {}
+) {
   const bank = Array.isArray(evidenceBank) ? evidenceBank : [];
   if (!bank.length) return [];
   const qTokens = tokens(queryText);
@@ -127,7 +136,7 @@ export function matchCampusEvidence(queryText, evidenceBank, { limit = 2, minSco
       year: row.ev.year || null,
       cluster: row.ev.cluster || "",
       branch: row.ev.branch || "",
-      label: formatEvidenceLabel(row.ev),
+      label: formatEvidenceLabel(row.ev, { contentSource }),
     });
     if (out.length >= limit) break;
   }
@@ -138,7 +147,11 @@ export function matchCampusEvidence(queryText, evidenceBank, { limit = 2, minSco
  * Attach campusEvidence tags onto topicSections and days using visit evidence bank.
  * Deterministic — does not invent citations.
  */
-export function attachCampusEvidenceToRoadmap(roadmap, evidenceBank) {
+export function attachCampusEvidenceToRoadmap(
+  roadmap,
+  evidenceBank,
+  { contentSource } = {}
+) {
   const bank = (Array.isArray(evidenceBank) ? evidenceBank : []).map((ev) => ({
     ...ev,
     _tokens: tokens(ev.text),
@@ -146,6 +159,8 @@ export function attachCampusEvidenceToRoadmap(roadmap, evidenceBank) {
   if (!roadmap || typeof roadmap !== "object" || !bank.length) {
     return roadmap;
   }
+
+  const matchOpts = { limit: 2, minScore: 1, contentSource };
 
   const topics = Array.isArray(roadmap.topicSections) ? roadmap.topicSections : [];
   roadmap.topicSections = topics.map((t) => {
@@ -159,7 +174,7 @@ export function attachCampusEvidenceToRoadmap(roadmap, evidenceBank) {
       .join(" ");
     return {
       ...t,
-      campusEvidence: matchCampusEvidence(query, bank, { limit: 2, minScore: 1 }),
+      campusEvidence: matchCampusEvidence(query, bank, matchOpts),
     };
   });
 
@@ -173,7 +188,7 @@ export function attachCampusEvidenceToRoadmap(roadmap, evidenceBank) {
       .join(" ");
     return {
       ...d,
-      campusEvidence: matchCampusEvidence(query, bank, { limit: 2, minScore: 1 }),
+      campusEvidence: matchCampusEvidence(query, bank, matchOpts),
     };
   });
 
@@ -183,6 +198,7 @@ export function attachCampusEvidenceToRoadmap(roadmap, evidenceBank) {
       const matches = matchCampusEvidence(sig?.point || "", bank, {
         limit: 1,
         minScore: 1,
+        contentSource,
       });
       const m = matches[0];
       if (!m) return sig;

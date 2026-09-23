@@ -4,6 +4,8 @@ import { bankDocSatisfiesCodeGrading, cloneSerializable } from "./interviewCodeG
 import { dedupeTestCases } from "../utils/dedupeTestCases.js";
 import { normalizeMcqBankDoc } from "../utils/normalizeMcqBankDoc.js";
 import { isCsFundamentalsRoundType } from "../utils/csFundamentalsRoundPlan.js";
+import { buildSubtopicMongoClause } from "./interviewRoundSubtopicsService.js";
+import { retrievePlatformQuestion } from "./platformQuestionRetrieval.js";
 
 const toSafeString = (value, fallback = "") =>
   typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -160,6 +162,87 @@ const pickTopQuestions = async (match, limit = 1) => {
  * Retrieval-first question selector.
  * Returns one question normalized to the generateQuestion contract + retrieval metadata.
  */
+const mergeMatchClause = (match, clause) => {
+  if (!clause) return match;
+  if (match.$and) {
+    return { ...match, $and: [...match.$and, clause] };
+  }
+  return { ...match, $and: [clause] };
+};
+
+const selectFromCandidateMatches = async (
+  candidateMatches,
+  { normalizedRoundType, normalizedQuestionKind, roundFocus, roundType }
+) => {
+  const focus = toSafeString(roundFocus);
+  const subtopicClause = buildSubtopicMongoClause(roundType, focus);
+  const passes = [
+    ...(subtopicClause && focus && focus !== "general" ? [true, false] : [false]),
+  ].map((requireSubtopic) => candidateMatches.map((base) =>
+    requireSubtopic ? mergeMatchClause(base, subtopicClause) : base
+  ));
+
+  for (const matches of passes) {
+    for (const match of matches) {
+      const batch = await pickTopQuestions(match, 24);
+      const selected =
+        batch.find((doc) =>
+          docPassesBankFilter(normalizedRoundType, doc, normalizedQuestionKind || null)
+        ) || null;
+      if (selected) return selected;
+    }
+  }
+  return null;
+};
+
+function formatRetrievedQuestion(selected, normalizedRoundType) {
+  const resolvedMcqMetadata = normalizeMcqBankDoc(selected);
+  const isMcq = resolvedMcqMetadata != null;
+
+  const expectedAnswerMode = inferExpectedAnswerMode({
+    roundType: selected.roundType,
+    evaluationStrategy: isMcq ? "mcq_exact" : selected.evaluationStrategy,
+    rubric: selected.rubric,
+    mcqMetadata: resolvedMcqMetadata,
+  });
+
+  const expectedPoints = isMcq
+    ? []
+    : normalizeExpectedPoints(selected.rubric, {
+        roundType: selected.roundType,
+        expectedAnswerMode,
+      });
+
+  const rawTests = dedupeTestCases(Array.isArray(selected.testCases) ? selected.testCases : []);
+
+  return {
+    question: toSafeString(selected.question),
+    expectedAnswerMode,
+    expectedPoints,
+    questionId: toSafeString(selected.questionId),
+    evaluationStrategy: isMcq
+      ? "mcq_exact"
+      : toSafeString(selected.evaluationStrategy),
+    resolvedMcqMetadata: resolvedMcqMetadata || undefined,
+    testCases: cloneSerializable(rawTests) || [],
+    metadata: {
+      title: toSafeString(selected.title),
+      url: toSafeString(selected.url),
+      companyTags: Array.isArray(selected.companyTags) ? selected.companyTags : [],
+      roundType: toSafeString(selected.roundType),
+      difficulty: toSafeString(selected.difficulty),
+      topics: normalizeStringList(selected.topics),
+      subtopics: normalizeStringList(selected.subtopics),
+      dsaMetadata: selected.dsaMetadata || {},
+      sqlMetadata: selected.sqlMetadata || {},
+      systemDesignMetadata: selected.systemDesignMetadata || {},
+      hrMetadata: selected.hrMetadata || {},
+      complexity: selected.complexity || {},
+      sourceMetadata: selected.sourceMetadata || {},
+    },
+  };
+}
+
 export async function retrieveQuestion({
   company,
   role,
@@ -168,6 +251,9 @@ export async function retrieveQuestion({
   excludedQuestionIds = [],
   questionKind = null,
   strictTargeting = false,
+  roundFocus = "",
+  platformMock = false,
+  companyCategoryId = "",
 }) {
   const companyTag = toSafeString(company);
   const roleTag = toSafeString(role);
@@ -177,6 +263,21 @@ export async function retrieveQuestion({
   const roundTypeMatcher = strictTargeting
     ? { $regex: `^${escapeRegex(normalizedRoundType)}$`, $options: "i" }
     : buildRoundTypeMatcher(normalizedRoundType);
+
+  if (platformMock) {
+    const selected = await retrievePlatformQuestion({
+      company: companyTag,
+      companyCategoryId: toSafeString(companyCategoryId),
+      role: roleTag,
+      roundType: normalizedRoundType,
+      difficulty: normalizedDifficulty,
+      excludedQuestionIds: exclusions,
+      questionKind,
+      roundFocus,
+    });
+    if (!selected) return null;
+    return formatRetrievedQuestion(selected, normalizedRoundType);
+  }
 
   if (
     !normalizedRoundType ||
@@ -255,78 +356,43 @@ export async function retrieveQuestion({
       companyTags: { $regex: `^${escapeRegex(companyTag)}$`, $options: "i" },
       roleTags: roleTag,
     };
-    if (normalizedQuestionKind === "mcq") {
-      candidateMatches.splice(0, candidateMatches.length, {
-        ...exactTargetMatch,
-        evaluationStrategy: "mcq_exact",
-      });
-    } else if (normalizedQuestionKind === "theory") {
-      candidateMatches.splice(0, candidateMatches.length, {
-        ...exactTargetMatch,
-        evaluationStrategy: "rubric_llm",
-      });
-    } else {
-      candidateMatches.splice(0, candidateMatches.length, exactTargetMatch);
-    }
+    /** Role-tagged rows with no company tag still apply to platform mocks for that role. */
+    const roleOnlyUntaggedCompanyMatch = {
+      ...baseMatch,
+      roleTags: roleTag,
+      $or: [{ companyTags: { $exists: false } }, { companyTags: { $size: 0 } }],
+    };
+
+    const applyStrictEval = (match) => {
+      if (normalizedQuestionKind === "mcq") {
+        return { ...match, evaluationStrategy: "mcq_exact" };
+      }
+      if (normalizedQuestionKind === "theory") {
+        return { ...match, evaluationStrategy: "rubric_llm" };
+      }
+      return match;
+    };
+
+    candidateMatches.splice(
+      0,
+      candidateMatches.length,
+      applyStrictEval(exactTargetMatch),
+      applyStrictEval(roleOnlyUntaggedCompanyMatch)
+    );
   }
 
-  let selected = null;
-
-  for (const match of candidateMatches) {
-    const batch = await pickTopQuestions(match, 24);
-    selected = batch.find((doc) => docPassesBankFilter(normalizedRoundType, doc, normalizedQuestionKind || null)) || null;
-    if (selected) break;
-  }
+  const selected = await selectFromCandidateMatches(candidateMatches, {
+    normalizedRoundType,
+    normalizedQuestionKind,
+    roundFocus,
+    roundType: normalizedRoundType,
+  });
 
   if (!selected) {
     return null;
   }
 
-  const resolvedMcqMetadata = normalizeMcqBankDoc(selected);
-  const isMcq = resolvedMcqMetadata != null;
-
-  const expectedAnswerMode = inferExpectedAnswerMode({
-    roundType: selected.roundType,
-    evaluationStrategy: isMcq ? "mcq_exact" : selected.evaluationStrategy,
-    rubric: selected.rubric,
-    mcqMetadata: resolvedMcqMetadata,
-  });
-
-  const expectedPoints = isMcq
-    ? []
-    : normalizeExpectedPoints(selected.rubric, {
-        roundType: selected.roundType,
-        expectedAnswerMode,
-      });
-
-  const rawTests = dedupeTestCases(Array.isArray(selected.testCases) ? selected.testCases : []);
-
-  return {
-    question: toSafeString(selected.question),
-    expectedAnswerMode,
-    expectedPoints,
-    questionId: toSafeString(selected.questionId),
-    evaluationStrategy: isMcq
-      ? "mcq_exact"
-      : toSafeString(selected.evaluationStrategy),
-    resolvedMcqMetadata: resolvedMcqMetadata || undefined,
-    testCases: cloneSerializable(rawTests) || [],
-    metadata: {
-      title: toSafeString(selected.title),
-      url: toSafeString(selected.url),
-      companyTags: Array.isArray(selected.companyTags) ? selected.companyTags : [],
-      roundType: toSafeString(selected.roundType),
-      difficulty: toSafeString(selected.difficulty),
-      topics: normalizeStringList(selected.topics),
-      subtopics: normalizeStringList(selected.subtopics),
-      dsaMetadata: selected.dsaMetadata || {},
-      sqlMetadata: selected.sqlMetadata || {},
-      systemDesignMetadata: selected.systemDesignMetadata || {},
-      hrMetadata: selected.hrMetadata || {},
-      complexity: selected.complexity || {},
-      sourceMetadata: selected.sourceMetadata || {},
-    },
-  };
+  return formatRetrievedQuestion(selected, normalizedRoundType);
 }
 
 export default retrieveQuestion;

@@ -35,6 +35,12 @@ describe('Company API Routes (split schema)', () => {
       expect(response.body[0]).toHaveProperty('name');
       expect(response.body[0]).toHaveProperty('type');
       expect(response.body[0]).toHaveProperty('business_model');
+      expect(response.body[0]).toHaveProperty('platformPrepCoverage');
+      expect(response.body[0].platformPrepCoverage).toEqual({
+        oa: 0,
+        interview: 0,
+        experiences: 0,
+      });
       expect(response.body[0]).not.toHaveProperty('interviewQuestions');
       expect(response.body[0]).not.toHaveProperty('About The Company');
     });

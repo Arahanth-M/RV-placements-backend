@@ -49,7 +49,7 @@ describe("platform question-bank targeting", () => {
     });
   });
 
-  it("requires company, role, round type, and difficulty in strict platform mode", async () => {
+  it("requires company, role, round type, and difficulty in legacy strict mode", async () => {
     const result = await retrieveQuestion({
       company: "acme",
       role: "Backend Engineer",

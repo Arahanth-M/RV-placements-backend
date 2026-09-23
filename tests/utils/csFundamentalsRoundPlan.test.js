@@ -22,6 +22,7 @@ describe("csFundamentalsRoundPlan", () => {
 
   test("isCsFundamentalsRoundType matches round label", () => {
     expect(isCsFundamentalsRoundType("CS Fundamentals")).toBe(true);
+    expect(isCsFundamentalsRoundType("Web Dev")).toBe(true);
     expect(isCsFundamentalsRoundType("DSA")).toBe(false);
   });
 });
