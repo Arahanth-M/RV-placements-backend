@@ -4,6 +4,7 @@ import {
   EMPTY_PLATFORM_PREP_COVERAGE,
   platformPrepCoverageFromDoc,
 } from "../utils/platformPrepCoverage.js";
+import { mapResearchSourcesForClient } from "../utils/researchSources.js";
 
 function asObjectId(value) {
   try {
@@ -15,6 +16,29 @@ function asObjectId(value) {
 
 function emptyCoverage() {
   return { ...EMPTY_PLATFORM_PREP_COVERAGE };
+}
+
+function isApprovedStatus(status) {
+  return !status || status === "approved";
+}
+
+function prepRoleKeysFromQuestions(items) {
+  const keys = [];
+  for (const item of Array.isArray(items) ? items : []) {
+    if (!isApprovedStatus(item?.status)) continue;
+    if (String(item?.question || "").trim() === "") continue;
+    keys.push(String(item?.prepRoleKey ?? "").trim());
+  }
+  return keys;
+}
+
+function mapPrepRolesForClient(prepRoles) {
+  return (Array.isArray(prepRoles) ? prepRoles : [])
+    .map((row) => ({
+      key: String(row?.key ?? "").trim(),
+      label: String(row?.label ?? row?.key ?? "").trim() || "General",
+    }))
+    .filter((row) => row.key);
 }
 
 /**
@@ -36,6 +60,11 @@ export async function attachPlatformPrepCoverageToCompanyList(list) {
     return rows.map((row) => ({
       ...row,
       platformPrepCoverage: emptyCoverage(),
+      researchSources: [],
+      prepRoles: [],
+      onlineQuestions_prepRoleKey: [],
+      interviewQuestions_prepRoleKey: [],
+      platformContentUpdatedAt: null,
     }));
   }
 
@@ -45,32 +74,63 @@ export async function attachPlatformPrepCoverageToCompanyList(list) {
     docs = await CompanyPlatformContent.find({ companyId: { $in: oids } })
       .select({
         companyId: 1,
+        prepRoles: 1,
+        updatedAt: 1,
+        createdAt: 1,
         "onlineQuestions.status": 1,
         "onlineQuestions.question": 1,
+        "onlineQuestions.prepRoleKey": 1,
         "interviewQuestions.status": 1,
         "interviewQuestions.question": 1,
+        "interviewQuestions.prepRoleKey": 1,
         "interviewExperiences.status": 1,
         "interviewExperiences.content": 1,
         "internshipExperiences.status": 1,
         "internshipExperiences.content": 1,
+        researchSources: 1,
       })
       .lean();
   } catch {
     return rows.map((row) => ({
       ...row,
       platformPrepCoverage: emptyCoverage(),
+      researchSources: [],
+      prepRoles: [],
+      onlineQuestions_prepRoleKey: [],
+      interviewQuestions_prepRoleKey: [],
+      platformContentUpdatedAt: null,
     }));
   }
 
-  const byId = new Map();
+  const coverageById = new Map();
+  const sourcesById = new Map();
+  const prepMetaById = new Map();
   for (const doc of Array.isArray(docs) ? docs : []) {
     const id = String(doc?.companyId || "");
     if (!id) continue;
-    byId.set(id, platformPrepCoverageFromDoc(doc));
+    coverageById.set(id, platformPrepCoverageFromDoc(doc));
+    sourcesById.set(id, mapResearchSourcesForClient(doc));
+    prepMetaById.set(id, {
+      prepRoles: mapPrepRolesForClient(doc?.prepRoles),
+      onlineQuestions_prepRoleKey: prepRoleKeysFromQuestions(doc?.onlineQuestions),
+      interviewQuestions_prepRoleKey: prepRoleKeysFromQuestions(doc?.interviewQuestions),
+      platformContentUpdatedAt: doc?.updatedAt || doc?.createdAt || null,
+    });
   }
 
-  return rows.map((row) => ({
-    ...row,
-    platformPrepCoverage: byId.get(String(row?._id || "")) || emptyCoverage(),
-  }));
+  return rows.map((row) => {
+    const id = String(row?._id || "");
+    const meta = prepMetaById.get(id) || {
+      prepRoles: [],
+      onlineQuestions_prepRoleKey: [],
+      interviewQuestions_prepRoleKey: [],
+      platformContentUpdatedAt: null,
+    };
+    return {
+      ...row,
+      platformPrepCoverage: coverageById.get(id) || emptyCoverage(),
+      researchSources: sourcesById.get(id) || [],
+      ...meta,
+    };
+  });
 }

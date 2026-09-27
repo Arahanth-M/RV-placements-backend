@@ -38,6 +38,15 @@ import {
   enhanceSubmissionContent,
   isSubmissionEnhancementSupported,
 } from "../services/submissionEnhanceService.js";
+import {
+  deletePlatformExperience,
+  deletePlatformMustDoByTopic,
+  deletePlatformQuestion,
+  deletePlatformResearchSourceByUrl,
+  updatePlatformExperience,
+  updatePlatformMustDoByTopic,
+  updatePlatformQuestion,
+} from "../services/platformCompanyMutationsService.js";
 
 const router = express.Router();
 router.use(authJWT);
@@ -441,6 +450,126 @@ router.delete("/submissions/:id/delete", async (req, res) => {
   } catch (error) {
     console.error("DELETE /api/admin/platform/submissions/:id/delete:", error?.message || error);
     return res.status(500).json({ error: "Server error" });
+  }
+});
+
+router.put("/companies/:id/oa-questions/:index", async (req, res) => {
+  try {
+    const out = await updatePlatformQuestion(
+      req.params.id,
+      "onlineQuestions",
+      req.params.index,
+      req.body
+    );
+    return res.json(out);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    return res.status(status).json({ error: error?.message || "Server error" });
+  }
+});
+
+router.delete("/companies/:id/oa-questions/:index", async (req, res) => {
+  try {
+    const out = await deletePlatformQuestion(
+      req.params.id,
+      "onlineQuestions",
+      req.params.index
+    );
+    return res.json(out);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    return res.status(status).json({ error: error?.message || "Server error" });
+  }
+});
+
+router.put("/companies/:id/interview-questions/:index", async (req, res) => {
+  try {
+    const out = await updatePlatformQuestion(
+      req.params.id,
+      "interviewQuestions",
+      req.params.index,
+      req.body
+    );
+    return res.json(out);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    return res.status(status).json({ error: error?.message || "Server error" });
+  }
+});
+
+router.delete("/companies/:id/interview-questions/:index", async (req, res) => {
+  try {
+    const out = await deletePlatformQuestion(
+      req.params.id,
+      "interviewQuestions",
+      req.params.index
+    );
+    return res.json(out);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    return res.status(status).json({ error: error?.message || "Server error" });
+  }
+});
+
+router.put("/companies/:id/interview-process/:index", async (req, res) => {
+  try {
+    const out = await updatePlatformExperience(
+      req.params.id,
+      "interviewExperiences",
+      req.params.index,
+      req.body
+    );
+    return res.json(out);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    return res.status(status).json({ error: error?.message || "Server error" });
+  }
+});
+
+router.delete("/companies/:id/interview-process/:index", async (req, res) => {
+  try {
+    const out = await deletePlatformExperience(
+      req.params.id,
+      "interviewExperiences",
+      req.params.index
+    );
+    return res.json(out);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    return res.status(status).json({ error: error?.message || "Server error" });
+  }
+});
+
+router.put("/companies/:id/must-do-topics/by-topic", async (req, res) => {
+  try {
+    const { currentTopic, topic } = req.body || {};
+    const out = await updatePlatformMustDoByTopic(req.params.id, currentTopic, topic);
+    return res.json(out);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    return res.status(status).json({ error: error?.message || "Server error" });
+  }
+});
+
+router.delete("/companies/:id/must-do-topics/by-topic", async (req, res) => {
+  try {
+    const currentTopic = req.body?.currentTopic ?? req.query?.currentTopic;
+    const out = await deletePlatformMustDoByTopic(req.params.id, currentTopic);
+    return res.json(out);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    return res.status(status).json({ error: error?.message || "Server error" });
+  }
+});
+
+router.delete("/companies/:id/research-sources", async (req, res) => {
+  try {
+    const url = req.body?.url ?? req.query?.url;
+    const out = await deletePlatformResearchSourceByUrl(req.params.id, url);
+    return res.json(out);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    return res.status(status).json({ error: error?.message || "Server error" });
   }
 });
 

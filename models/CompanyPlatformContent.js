@@ -25,8 +25,26 @@ const codingSolutionsSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const prepRoleCatalogSchema = new mongoose.Schema(
+  {
+    key: { type: String, trim: true, default: "" },
+    label: { type: String, trim: true, default: "" },
+  },
+  { _id: false }
+);
+
+const researchLinksSummarySchema = new mongoose.Schema(
+  {
+    prepRoleKey: { type: String, trim: true, default: "" },
+    summary: { type: String, trim: true, default: "" },
+    updatedAt: { type: Date, default: undefined },
+  },
+  { _id: false }
+);
+
 const questionItemSchema = new mongoose.Schema(
   {
+    prepRoleKey: { type: String, trim: true, default: "" },
     kind: {
       type: String,
       enum: ["coding", "non_coding"],
@@ -52,6 +70,7 @@ const questionItemSchema = new mongoose.Schema(
 
 const experienceItemSchema = new mongoose.Schema(
   {
+    prepRoleKey: { type: String, trim: true, default: "" },
     content: { type: String, trim: true, default: "" },
     status: {
       type: String,
@@ -78,6 +97,17 @@ const mustDoItemSchema = new mongoose.Schema(
     submittedBy: { type: submittedBySchema, default: undefined },
     createdAt: { type: Date, default: undefined },
     approvedAt: { type: Date, default: undefined },
+  },
+  { _id: true }
+);
+
+const researchSourceSchema = new mongoose.Schema(
+  {
+    prepRoleKey: { type: String, trim: true, default: "" },
+    title: { type: String, trim: true, default: "" },
+    url: { type: String, trim: true, required: true },
+    snippet: { type: String, trim: true, default: "" },
+    score: { type: Number, default: null },
   },
   { _id: true }
 );
@@ -113,6 +143,9 @@ const companyPlatformContentSchema = new mongoose.Schema(
     mustDoTopics: { type: [mustDoItemSchema], default: [] },
     codingQuestions: { type: [codingQuestionItemSchema], default: [] },
     mcqQuestions: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    researchSources: { type: [researchSourceSchema], default: [] },
+    prepRoles: { type: [prepRoleCatalogSchema], default: [] },
+    researchLinksSummaries: { type: [researchLinksSummarySchema], default: [] },
   },
   { timestamps: true }
 );

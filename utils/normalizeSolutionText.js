@@ -21,9 +21,11 @@ function looksLikeJsonWrapper(str) {
   );
 }
 
-function unescapeIfSingleLine(str) {
-  if (str.includes("\n") || !/\\[ntr]/.test(str)) return str;
-  return str.replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\r/g, "\r");
+function unescapeLiterals(str) {
+  return String(str)
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t")
+    .replace(/\\r/g, "\r");
 }
 
 /**
@@ -63,5 +65,5 @@ export function normalizeSolutionText(value, depth = 0) {
     }
   }
 
-  return unescapeIfSingleLine(str);
+  return unescapeLiterals(str);
 }

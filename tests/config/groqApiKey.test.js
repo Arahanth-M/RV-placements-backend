@@ -43,6 +43,31 @@ describe("groqApiKey", () => {
     expect(resolveGroqApiKey()).toBe("gsk_legacy");
   });
 
+  it("resolveGroqApiKey uses GROQ_KEY_WEB_SEARCH when slot is web_search", async () => {
+    process.env.GROQ_KEY_WEB_SEARCH = "gsk_web_search_test";
+    process.env.GROQ_KEY_ADMIN = "gsk_admin_test";
+    process.env.GROQ_KEY_PREP_PATH = "gsk_prep_path_test";
+    process.env.GROQ_API_KEY = "gsk_legacy";
+
+    const { resolveGroqApiKey, getGroqKeyEnvName, GROQ_KEY_SLOTS } = await import(
+      "../../config/groqApiKey.js"
+    );
+    expect(getGroqKeyEnvName(GROQ_KEY_SLOTS.WEB_SEARCH)).toBe("GROQ_KEY_WEB_SEARCH");
+    expect(resolveGroqApiKey("web_search")).toBe("gsk_web_search_test");
+    expect(resolveGroqApiKey("web-search")).toBe("gsk_web_search_test");
+  });
+
+  it("resolveGroqApiKey does not substitute another key when GROQ_KEY_WEB_SEARCH is missing", async () => {
+    delete process.env.GROQ_KEY_WEB_SEARCH;
+    process.env.GROQ_KEY_ADMIN = "gsk_admin_test";
+    process.env.GROQ_API_KEY = "gsk_legacy";
+
+    const { resolveGroqApiKey } = await import("../../config/groqApiKey.js");
+    expect(() => resolveGroqApiKey("web_search")).toThrow(
+      "Missing GROQ_KEY_WEB_SEARCH environment variable."
+    );
+  });
+
   it("resolveGroqApiKey uses GROQ_KEY_PREP_PATH when slot is prep_path", async () => {
     process.env.GROQ_KEY_PREP_PATH = "gsk_prep_path_test";
     process.env.GROQ_KEY_ADMIN = "gsk_admin_test";

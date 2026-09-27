@@ -26,6 +26,14 @@ describe("attachPlatformPrepCoverageToCompanyList", () => {
         { status: "approved", content: "DSA plus HR." },
       ],
       internshipExperiences: [{ status: "approved", content: "PPO after intern." }],
+      researchSources: [
+        {
+          title: "GFG Interview",
+          url: "https://www.geeksforgeeks.org/walmart",
+          snippet: "Prep notes",
+          score: 0.88,
+        },
+      ],
     });
 
     const [row] = await attachPlatformPrepCoverageToCompanyList([
@@ -36,6 +44,14 @@ describe("attachPlatformPrepCoverageToCompanyList", () => {
       interview: 5,
       experiences: 3,
     });
+    expect(row.researchSources).toEqual([
+      {
+        title: "GFG Interview",
+        url: "https://www.geeksforgeeks.org/walmart",
+        snippet: "Prep notes",
+        score: 0.88,
+      },
+    ]);
   });
 
   it("uses zeros when a company has no platform document", async () => {
@@ -50,5 +66,6 @@ describe("attachPlatformPrepCoverageToCompanyList", () => {
       interview: 0,
       experiences: 0,
     });
+    expect(row.researchSources).toEqual([]);
   });
 });

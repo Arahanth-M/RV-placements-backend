@@ -8,6 +8,7 @@ export const GROQ_KEY_SLOTS = Object.freeze({
   INTERVIEW_API: "interview_api",
   INTERVIEW_WORKER: "interview_worker",
   PREP_PATH: "prep_path",
+  WEB_SEARCH: "web_search",
 });
 
 /** Env var names (values are the secret keys). */
@@ -16,6 +17,7 @@ export const GROQ_KEY_ENV_BY_SLOT = Object.freeze({
   [GROQ_KEY_SLOTS.INTERVIEW_API]: "GROQ_KEY_INTERVIEW_API",
   [GROQ_KEY_SLOTS.INTERVIEW_WORKER]: "GROQ_KEY_INTERVIEW_WORKER",
   [GROQ_KEY_SLOTS.PREP_PATH]: "GROQ_KEY_PREP_PATH",
+  [GROQ_KEY_SLOTS.WEB_SEARCH]: "GROQ_KEY_WEB_SEARCH",
 });
 
 const VALID_SLOTS = new Set(Object.values(GROQ_KEY_SLOTS));
@@ -28,6 +30,9 @@ const normalizeSlot = (value) => {
   }
   if (raw === "prep-path" || raw === "preppath") {
     return GROQ_KEY_SLOTS.PREP_PATH;
+  }
+  if (raw === "web-search") {
+    return GROQ_KEY_SLOTS.WEB_SEARCH;
   }
   if (VALID_SLOTS.has(raw)) return raw;
   return null;

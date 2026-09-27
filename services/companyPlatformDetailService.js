@@ -3,6 +3,10 @@ import CompanyStatic from "../models/CompanyStatic.js";
 import CompanyPlatformContent from "../models/CompanyPlatformContent.js";
 import { getCompanyFocusTags } from "../utils/companyFocusTags.js";
 import { normalizeSolutionText } from "../utils/normalizeSolutionText.js";
+import { prepareSourceCodeForDisplay } from "../utils/prepareSourceCodeForDisplay.js";
+import { mapResearchSourcesForClient } from "../utils/researchSources.js";
+import { mapResearchLinksSummariesForClient } from "../utils/researchLinksSummaries.js";
+import { platformPrepCoverageFromDoc } from "../utils/platformPrepCoverage.js";
 
 function approvedItems(arr) {
   return (Array.isArray(arr) ? arr : []).filter(
@@ -19,22 +23,24 @@ function mapQuestionArrays(items) {
   const solutionsLegacy = [];
   const solutionsByLang = [];
   const intuitions = [];
+  const prepRoleKeys = [];
 
   for (const item of approvedItems(items)) {
     const question = text(item?.question);
     if (!question) continue;
     const sols = item?.solutions && typeof item.solutions === "object" ? item.solutions : {};
-    const cpp = normalizeSolutionText(sols.cpp);
-    const java = normalizeSolutionText(sols.java);
-    const python = normalizeSolutionText(sols.python);
+    const cpp = prepareSourceCodeForDisplay(normalizeSolutionText(sols.cpp), "cpp");
+    const java = prepareSourceCodeForDisplay(normalizeSolutionText(sols.java), "java");
+    const python = prepareSourceCodeForDisplay(normalizeSolutionText(sols.python), "python");
     const answer = normalizeSolutionText(item?.answer);
     questions.push(question);
     solutionsLegacy.push(cpp || java || python || answer);
     solutionsByLang.push({ cpp, java, python });
     intuitions.push(text(item?.intuition));
+    prepRoleKeys.push(text(item?.prepRoleKey));
   }
 
-  return { questions, solutionsLegacy, solutionsByLang, intuitions };
+  return { questions, solutionsLegacy, solutionsByLang, intuitions, prepRoleKeys };
 }
 
 function mapExperiences(items) {
@@ -67,9 +73,9 @@ function mapCodingQuestions(items) {
     const intuition = text(item?.intuition || base.intuition);
     if (intuition) base.intuition = intuition;
     const sols = item?.solutions && typeof item.solutions === "object" ? item.solutions : {};
-    const cpp = normalizeSolutionText(sols.cpp);
-    const java = normalizeSolutionText(sols.java);
-    const python = normalizeSolutionText(sols.python);
+    const cpp = prepareSourceCodeForDisplay(normalizeSolutionText(sols.cpp), "cpp");
+    const java = prepareSourceCodeForDisplay(normalizeSolutionText(sols.java), "java");
+    const python = prepareSourceCodeForDisplay(normalizeSolutionText(sols.python), "python");
     if (cpp) base.solution_cpp = cpp;
     if (java) base.solution_java = java;
     if (python) base.solution_python = python;
@@ -127,12 +133,24 @@ export async function getCompanyPlatformDetailById(companyId) {
     interviewQuestions_solution: iq.solutionsLegacy,
     interviewQuestions_solutions: iq.solutionsByLang,
     interviewQuestions_intuition: iq.intuitions,
+    interviewQuestions_prepRoleKey: iq.prepRoleKeys,
+    onlineQuestions_prepRoleKey: oa.prepRoleKeys,
+    prepRoles: Array.isArray(platform?.prepRoles)
+      ? platform.prepRoles.map((row) => ({
+          key: text(row?.key),
+          label: text(row?.label) || text(row?.key) || "General",
+        }))
+      : [],
+    researchLinksSummaries: mapResearchLinksSummariesForClient(platform),
     interviewProcess,
     internshipExperience,
     must_do_topics: mustDoMerged,
     Must_Do_Topics: mustDoMerged,
     prev_coding_ques,
     mcqQuestions: Array.isArray(platform?.mcqQuestions) ? platform.mcqQuestions : [],
+    researchSources: mapResearchSourcesForClient(platform),
+    platformPrepCoverage: platformPrepCoverageFromDoc(platform),
+    platformContentUpdatedAt: platform?.updatedAt || platform?.createdAt || null,
     placementYearsAvailable: [],
     roles: [],
     date_of_visit: "",

@@ -10,6 +10,7 @@
     "dev": "nodemon server.js",
     "worker:interview": "node workers/interviewWorker.js",
     "worker:execution": "node workers/executionWorker.js",
+    "worker:company-research": "node workers/companyResearchWorker.js",
     "score:calibrate": "node scripts/calibrateInterviewScoring.js",
     "score:calibrate:live": "node scripts/calibrateInterviewScoring.js --live",
     "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
