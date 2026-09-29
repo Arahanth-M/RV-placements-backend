@@ -24,6 +24,7 @@ function mapQuestionArrays(items) {
   const solutionsByLang = [];
   const intuitions = [];
   const prepRoleKeys = [];
+  const kinds = [];
 
   for (const item of approvedItems(items)) {
     const question = text(item?.question);
@@ -38,9 +39,36 @@ function mapQuestionArrays(items) {
     solutionsByLang.push({ cpp, java, python });
     intuitions.push(text(item?.intuition));
     prepRoleKeys.push(text(item?.prepRoleKey));
+    kinds.push(text(item?.kind) || "non_coding");
   }
 
-  return { questions, solutionsLegacy, solutionsByLang, intuitions, prepRoleKeys };
+  return { questions, solutionsLegacy, solutionsByLang, intuitions, prepRoleKeys, kinds };
+}
+
+function mapMcqQuestionsForClient(items) {
+  return approvedItems(items)
+    .map((item) => {
+      const question = text(item?.question);
+      if (!question) return null;
+      const meta =
+        item?.mcqMetadata && typeof item.mcqMetadata === "object" ? item.mcqMetadata : null;
+      const options = meta && Array.isArray(meta.options) ? meta.options : [];
+      const byId = Object.fromEntries(
+        options.map((opt) => [String(opt?.id || "").toUpperCase(), text(opt?.text)])
+      );
+      return {
+        question,
+        prepRoleKey: text(item?.prepRoleKey),
+        mcqMetadata: meta,
+        optionA: text(item?.optionA) || byId.A || "",
+        optionB: text(item?.optionB) || byId.B || "",
+        optionC: text(item?.optionC) || byId.C || "",
+        optionD: text(item?.optionD) || byId.D || "",
+        answer: text(meta?.correctOptionId || item?.answer),
+        explanation: text(meta?.explanation || item?.intuition),
+      };
+    })
+    .filter(Boolean);
 }
 
 function mapExperiences(items) {
@@ -50,6 +78,7 @@ function mapExperiences(items) {
       if (!content) return null;
       return {
         content,
+        prepRoleKey: text(item?.prepRoleKey),
         isAnonymous: item?.isAnonymous === true,
         submittedBy: item?.submittedBy,
         approvedAt: item?.approvedAt,
@@ -135,6 +164,7 @@ export async function getCompanyPlatformDetailById(companyId) {
     interviewQuestions_intuition: iq.intuitions,
     interviewQuestions_prepRoleKey: iq.prepRoleKeys,
     onlineQuestions_prepRoleKey: oa.prepRoleKeys,
+    onlineQuestions_kind: oa.kinds,
     prepRoles: Array.isArray(platform?.prepRoles)
       ? platform.prepRoles.map((row) => ({
           key: text(row?.key),
@@ -147,7 +177,7 @@ export async function getCompanyPlatformDetailById(companyId) {
     must_do_topics: mustDoMerged,
     Must_Do_Topics: mustDoMerged,
     prev_coding_ques,
-    mcqQuestions: Array.isArray(platform?.mcqQuestions) ? platform.mcqQuestions : [],
+    mcqQuestions: mapMcqQuestionsForClient(platform?.mcqQuestions),
     researchSources: mapResearchSourcesForClient(platform),
     platformPrepCoverage: platformPrepCoverageFromDoc(platform),
     platformContentUpdatedAt: platform?.updatedAt || platform?.createdAt || null,

@@ -66,7 +66,7 @@ export async function startResearchJob(input) {
     status: "queued",
     companyId: input.companyId,
     companyName: input.companyName,
-    field: "interviewQuestions",
+    field: input.field || "interviewQuestions",
     role: input.role || "",
     country: input.country || "",
     createdAt: new Date().toISOString(),

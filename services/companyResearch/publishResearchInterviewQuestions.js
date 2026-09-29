@@ -10,6 +10,7 @@ import {
   prepRoleCatalogMissing,
   prepRoleScopedKey,
 } from "../../utils/prepRole.js";
+import { resolveOaPrepRole } from "../../utils/oaPrepRoles.js";
 import { getResearchJob, markResearchJobPublished } from "./researchJobService.js";
 
 const PUBLISH_MESSAGES = Object.freeze({
@@ -141,9 +142,32 @@ function codingSolutionsFromCandidate(candidate) {
   return { cpp, java, python };
 }
 
+function toProductionExperience(candidate, reviewer, prepRoleKey = "") {
+  const item = {
+    prepRoleKey: String(prepRoleKey ?? ""),
+    content: String(candidate?.content || "").trim(),
+    status: "approved",
+    approvedAt: new Date(),
+  };
+  const reviewedBy = reviewerIdentity(reviewer);
+  if (reviewedBy) item.reviewedBy = reviewedBy;
+  return item;
+}
+
+function oaFormOf(candidate) {
+  const form = String(candidate?.form || "").trim().toLowerCase();
+  if (form === "coding" || form === "sql" || form === "mcq") return form;
+  if (candidate?.kind === "coding") return "coding";
+  if (candidate?.kind === "sql") return "sql";
+  return "";
+}
+
 function toProductionQuestion(candidate, reviewer, prepRoleKey = "") {
   const question = String(candidate?.question || "").trim();
-  const kind = candidate?.kind === "coding" ? "coding" : "non_coding";
+  const form = oaFormOf(candidate);
+  let kind = candidate?.kind === "coding" ? "coding" : "non_coding";
+  if (form === "coding") kind = "coding";
+  else if (form === "sql") kind = "sql";
   const item = {
     prepRoleKey: String(prepRoleKey ?? ""),
     kind,
@@ -162,11 +186,48 @@ function toProductionQuestion(candidate, reviewer, prepRoleKey = "") {
   return item;
 }
 
+function toProductionMcq(candidate, reviewer, prepRoleKey = "") {
+  const question = String(candidate?.question || "").trim();
+  const meta =
+    candidate?.mcqMetadata && typeof candidate.mcqMetadata === "object"
+      ? candidate.mcqMetadata
+      : {};
+  const options = Array.isArray(meta.options) ? meta.options : [];
+  const byId = Object.fromEntries(
+    options.map((opt) => [String(opt?.id || "").toUpperCase(), String(opt?.text || "").trim()])
+  );
+  const item = {
+    prepRoleKey: String(prepRoleKey ?? ""),
+    question,
+    mcqMetadata: meta,
+    optionA: byId.A || "",
+    optionB: byId.B || "",
+    optionC: byId.C || "",
+    optionD: byId.D || "",
+    answer: String(meta.correctOptionId || candidate?.answer || "").trim(),
+    status: "approved",
+    approvedAt: new Date(),
+  };
+  const reviewedBy = reviewerIdentity(reviewer);
+  if (reviewedBy) item.reviewedBy = reviewedBy;
+  return item;
+}
+
+const PUBLISHABLE_FIELDS = Object.freeze({
+  interviewQuestions: "interviewQuestions",
+  onlineQuestions: "onlineQuestions",
+  interviewExperiences: "interviewExperiences",
+});
+
+function publishTarget(field) {
+  return PUBLISHABLE_FIELDS[field] || "";
+}
+
 function assertReviewJob(job) {
   if (!job) throw new PublishResearchError("job_not_found");
   if (job.status === "published") throw new PublishResearchError("already_published");
   if (job.status !== "review") throw new PublishResearchError("not_reviewable");
-  if (job.field !== "interviewQuestions") throw new PublishResearchError("not_reviewable");
+  if (!publishTarget(job.field)) throw new PublishResearchError("not_reviewable");
   if (!Array.isArray(job.result?.items)) throw new PublishResearchError("invalid_selection");
 }
 
@@ -202,60 +263,122 @@ export async function publishResearchInterviewQuestions(input = {}) {
     const company = await CompanyStatic.findById(companyId).select("_id").lean();
     if (!company) throw new PublishResearchError("company_not_found");
 
-    const { key: prepRoleKey, label: prepRoleLabel } = normalizePrepRoleKey(job.role);
+    const oaField = job.field === "onlineQuestions";
+    const prepRole = oaField
+      ? resolveOaPrepRole(job.role)
+      : normalizePrepRoleKey(job.role);
+    const prepRoleKey = prepRole.key;
+    const prepRoleLabel = prepRole.label;
+    const target = publishTarget(job.field);
+    const experienceField = target === "interviewExperiences";
+
+    const selectFields = experienceField
+      ? `${target} prepRoles researchSources`
+      : oaField
+        ? `${target} mcqQuestions prepRoles researchSources`
+        : `${target} prepRoles researchSources`;
 
     const existing = await CompanyPlatformContent.findOne({ companyId })
-      .select("interviewQuestions prepRoles")
+      .select(selectFields)
       .lean();
 
+    const existingItems = Array.isArray(existing?.[target]) ? existing[target] : [];
+    const existingMcqs = oaField && Array.isArray(existing?.mcqQuestions) ? existing.mcqQuestions : [];
     const seenQuestions = new Set(
-      (Array.isArray(existing?.interviewQuestions) ? existing.interviewQuestions : [])
+      existingItems
         .map((item) =>
-          prepRoleScopedKey(item?.prepRoleKey, normalizeQuestionKey(item?.question))
+          prepRoleScopedKey(
+            item?.prepRoleKey,
+            normalizeQuestionKey(experienceField ? item?.content : item?.question)
+          )
         )
         .filter((key) => Boolean(key.split("\0")[1]))
     );
+    for (const item of existingMcqs) {
+      const questionKey = normalizeQuestionKey(item?.question);
+      if (questionKey) seenQuestions.add(prepRoleScopedKey(item?.prepRoleKey, questionKey));
+    }
 
     const questionsToInsert = [];
+    const mcqsToInsert = [];
     let duplicateCount = 0;
     for (const index of indexes) {
       const candidate = job.result.items[index];
-      const questionKey = normalizeQuestionKey(candidate?.question);
+      const questionKey = normalizeQuestionKey(
+        experienceField ? candidate?.content : candidate?.question
+      );
       const scoped = prepRoleScopedKey(prepRoleKey, questionKey);
       if (!questionKey || seenQuestions.has(scoped)) {
         duplicateCount += 1;
         continue;
       }
       seenQuestions.add(scoped);
+      if (experienceField) {
+        questionsToInsert.push(toProductionExperience(candidate, input.reviewer, prepRoleKey));
+        continue;
+      }
+      if (oaField && oaFormOf(candidate) === "mcq") {
+        mcqsToInsert.push(toProductionMcq(candidate, input.reviewer, prepRoleKey));
+        continue;
+      }
       questionsToInsert.push(toProductionQuestion(candidate, input.reviewer, prepRoleKey));
     }
 
+    const existingSourceKeys = new Set(
+      (Array.isArray(existing?.researchSources) ? existing.researchSources : [])
+        .map((item) => prepRoleScopedKey(item?.prepRoleKey, normalizeSourceUrl(item?.url)))
+        .filter((key) => Boolean(key.split("\0")[1]))
+    );
+    const sourceInsert = experienceField
+      ? collectResearchSourcesToInsert(
+          job.result?.sources,
+          existingSourceKeys,
+          prepRoleKey
+        )
+      : { toInsert: [] };
+    const sourcesToInsert = sourceInsert.toInsert;
+
     const prepRoleEntry = { key: prepRoleKey, label: prepRoleLabel };
+    const insertedCount = questionsToInsert.length + mcqsToInsert.length;
     const addPrepRole =
       prepRoleKey !== "" &&
       prepRoleCatalogMissing(existing?.prepRoles, prepRoleEntry) &&
-      questionsToInsert.length > 0;
+      (insertedCount > 0 || sourcesToInsert.length > 0);
 
-    if (questionsToInsert.length > 0) {
+    if (insertedCount > 0 || sourcesToInsert.length > 0) {
       try {
-        const pushUpdate = { interviewQuestions: { $each: questionsToInsert } };
+        const pushUpdate = {};
+        if (questionsToInsert.length > 0) {
+          pushUpdate[target] = { $each: questionsToInsert };
+        }
+        if (mcqsToInsert.length > 0) {
+          pushUpdate.mcqQuestions = { $each: mcqsToInsert };
+        }
+        if (sourcesToInsert.length > 0) {
+          pushUpdate.researchSources = { $each: sourcesToInsert };
+        }
         if (addPrepRole) pushUpdate.prepRoles = prepRoleEntry;
+        const setOnInsert = {
+          companyId,
+          onlineQuestions: [],
+          interviewQuestions: [],
+          interviewExperiences: [],
+          internshipExperiences: [],
+          mustDoTopics: [],
+          codingQuestions: [],
+          mcqQuestions: [],
+          researchSources: [],
+          prepRoles: [],
+          researchLinksSummaries: [],
+        };
+        delete setOnInsert[target];
+        if (sourcesToInsert.length > 0) delete setOnInsert.researchSources;
+        if (mcqsToInsert.length > 0) delete setOnInsert.mcqQuestions;
         await CompanyPlatformContent.updateOne(
           { companyId },
           {
             $push: pushUpdate,
-            $setOnInsert: {
-              companyId,
-              onlineQuestions: [],
-              interviewExperiences: [],
-              internshipExperiences: [],
-              mustDoTopics: [],
-              codingQuestions: [],
-              mcqQuestions: [],
-              researchSources: [],
-              prepRoles: [],
-              researchLinksSummaries: [],
-            },
+            $setOnInsert: setOnInsert,
           },
           { upsert: true }
         );
@@ -274,14 +397,14 @@ export async function publishResearchInterviewQuestions(input = {}) {
     }
 
     await markResearchJobPublished(jobId, {
-      insertedCount: questionsToInsert.length,
+      insertedCount,
       duplicateCount,
     });
 
     return {
       jobId,
       status: "published",
-      insertedCount: questionsToInsert.length,
+      insertedCount,
       duplicateCount,
     };
   });

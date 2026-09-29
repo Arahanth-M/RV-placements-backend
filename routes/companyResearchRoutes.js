@@ -7,6 +7,7 @@ import {
   DEFAULT_MAX_SOURCES,
   MAX_SOURCES_CAP,
 } from "../services/companyResearch/researchInterviewQuestions.js";
+import { isValidOaResearchRole } from "../utils/oaPrepRoles.js";
 import { getResearchJob, startResearchJob } from "../services/companyResearch/researchJobService.js";
 
 const router = express.Router();
@@ -15,7 +16,11 @@ router.use(authorize(["admin"]));
 router.use(requireAdmin);
 router.use(requirePlatformAdmin);
 
-const SUPPORTED_FIELD = "interviewQuestions";
+const SUPPORTED_FIELDS = new Set([
+  "interviewQuestions",
+  "onlineQuestions",
+  "interviewExperiences",
+]);
 
 function text(value) {
   return String(value ?? "").trim();
@@ -34,11 +39,25 @@ export function validateResearchRequest(body) {
   if (typeof payload.companyName !== "string" || !text(payload.companyName)) {
     return { ok: false, message: "companyName is required." };
   }
-  if (payload.field !== SUPPORTED_FIELD) {
-    return { ok: false, message: "field must be interviewQuestions." };
+  if (!SUPPORTED_FIELDS.has(payload.field)) {
+    return {
+      ok: false,
+      message: "field must be interviewQuestions, onlineQuestions, or interviewExperiences.",
+    };
   }
   if (payload.role != null && payload.role !== "" && typeof payload.role !== "string") {
     return { ok: false, message: "role must be a string." };
+  }
+  if (payload.field === "onlineQuestions") {
+    if (!text(payload.role)) {
+      return { ok: false, message: "role is required for OA questions (SDE, Analyst, or Data Scientist)." };
+    }
+    if (!isValidOaResearchRole(payload.role)) {
+      return {
+        ok: false,
+        message: "role must be SDE, Analyst, or Data Scientist for OA questions.",
+      };
+    }
   }
   if (payload.country != null && payload.country !== "" && typeof payload.country !== "string") {
     return { ok: false, message: "country must be a string." };
@@ -69,7 +88,7 @@ export function validateResearchRequest(body) {
     value: {
       companyId: text(payload.companyId),
       companyName: text(payload.companyName),
-      field: SUPPORTED_FIELD,
+      field: payload.field,
       role: text(payload.role),
       country: text(payload.country),
       maxSources: maxSources ?? DEFAULT_MAX_SOURCES,

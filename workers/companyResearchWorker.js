@@ -20,13 +20,27 @@ export async function processCompanyResearchJob(job) {
       return { jobId: data.jobId, status: running.status };
     }
 
-    const result = await researchInterviewQuestions({
+    const researchInput = {
       companyName: data.companyName,
       role: data.role,
       country: data.country,
       maxSources: data.maxSources,
       searchDepth: data.searchDepth,
-    });
+    };
+    let result;
+    if (data.field === "onlineQuestions") {
+      const { researchOnlineQuestions } = await import(
+        "../services/companyResearch/researchOnlineQuestions.js"
+      );
+      result = await researchOnlineQuestions(researchInput);
+    } else if (data.field === "interviewExperiences") {
+      const { researchInterviewExperiences } = await import(
+        "../services/companyResearch/researchInterviewExperiences.js"
+      );
+      result = await researchInterviewExperiences(researchInput);
+    } else {
+      result = await researchInterviewQuestions(researchInput);
+    }
     await markResearchJobReview(data.jobId, result);
     return { jobId: data.jobId, status: "review" };
   } catch (error) {

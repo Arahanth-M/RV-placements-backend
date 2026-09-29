@@ -47,7 +47,7 @@ const questionItemSchema = new mongoose.Schema(
     prepRoleKey: { type: String, trim: true, default: "" },
     kind: {
       type: String,
-      enum: ["coding", "non_coding"],
+      enum: ["coding", "non_coding", "sql"],
       default: "non_coding",
     },
     question: { type: String, trim: true, default: "" },

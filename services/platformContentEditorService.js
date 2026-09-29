@@ -44,7 +44,8 @@ function mapQuestionItem(raw) {
   const hasSolutions = Boolean(solutions.cpp || solutions.java || solutions.python);
   if (!question && !answer && !intuition && !hasSolutions) return null;
   const item = {
-    kind: raw.kind === "coding" ? "coding" : "non_coding",
+    kind:
+      raw.kind === "coding" ? "coding" : raw.kind === "sql" ? "sql" : "non_coding",
     question,
     answer,
     solutions,
@@ -159,7 +160,8 @@ function serializeQuestion(item) {
   const sols = item?.solutions && typeof item.solutions === "object" ? item.solutions : {};
   return {
     _id: item?._id ? String(item._id) : "",
-    kind: item?.kind === "coding" ? "coding" : "non_coding",
+    kind:
+      item?.kind === "coding" ? "coding" : item?.kind === "sql" ? "sql" : "non_coding",
     question: text(item?.question),
     answer: text(item?.answer),
     solutions: mapSolutions(sols),

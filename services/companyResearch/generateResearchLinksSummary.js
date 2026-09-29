@@ -14,6 +14,7 @@ function assertReviewJob(job) {
   if (!job) throw new PublishResearchError("job_not_found");
   if (job.status === "published") throw new PublishResearchError("already_published");
   if (job.status !== "review") throw new PublishResearchError("not_reviewable");
+  if (job.field && job.field !== "interviewQuestions") throw new PublishResearchError("not_reviewable");
   if (!Array.isArray(job.result?.sources)) throw new PublishResearchError("not_reviewable");
 }
 

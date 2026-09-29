@@ -450,7 +450,9 @@ describe("researchInterviewQuestions", () => {
 
     expect(result.stats.searchedResults).toBeGreaterThan(2);
     expect(result.stats.uniqueSources).toBe(3);
-    expect(result.sources).toHaveLength(2);
+    expect(result.stats.selectedSources).toBe(2);
+    expect(result.sources).toHaveLength(3);
+    expect(result.sources[2].extractionStatus).toBe("skipped");
     expect(result.sources[0].url).toBe("https://example.com/page?utm_source=newsletter");
     expect(result.sources[0].tavilyScore).toBe(0.4);
     expect(result.sources[1].tavilyScore).toBeNull();

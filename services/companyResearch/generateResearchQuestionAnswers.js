@@ -13,6 +13,7 @@ function assertReviewJob(job) {
   if (!job) throw new PublishResearchError("job_not_found");
   if (job.status === "published") throw new PublishResearchError("already_published");
   if (job.status !== "review") throw new PublishResearchError("not_reviewable");
+  if (job.field === "interviewExperiences") throw new PublishResearchError("not_reviewable");
   if (!Array.isArray(job.result?.items)) throw new PublishResearchError("invalid_selection");
 }
 
@@ -37,26 +38,65 @@ const CODING_SYSTEM = [
   "Use standard library only unless the problem requires otherwise.",
 ].join(" ");
 
+const SQL_SYSTEM = [
+  "You write SQL solutions for online assessment prep.",
+  'Return only JSON: {"answer":"SQL query and brief explanation"}',
+  "Use standard SQL. Explain assumptions in the answer field.",
+].join(" ");
+
+const MCQ_SYSTEM = [
+  "You explain multiple-choice OA questions for placement prep.",
+  'Return only JSON: {"answer":"why the correct option is right","explanation":"short teaching note"}',
+  "If options are provided, reference the correct letter.",
+].join(" ");
+
+function oaFormOf(item) {
+  const form = String(item?.form || "").trim().toLowerCase();
+  if (form === "coding" || form === "sql" || form === "mcq") return form;
+  if (item?.kind === "coding") return "coding";
+  if (item?.kind === "sql") return "sql";
+  return "non_coding";
+}
+
 async function generateOneAnswer(item) {
   const question = compact(item?.question);
   if (!question) {
     throw new PublishResearchError("invalid_selection");
   }
-  const kind = item?.kind === "coding" ? "coding" : "non_coding";
+  const form = oaFormOf(item);
   const evidence = compact(item?.evidence);
+  const meta = item?.mcqMetadata && typeof item.mcqMetadata === "object" ? item.mcqMetadata : null;
+  const optionLines =
+    meta && Array.isArray(meta.options)
+      ? meta.options.map((opt) => `${opt.id}. ${opt.text}`).join("\n")
+      : "";
+
+  let system = NON_CODING_SYSTEM;
+  let extra = "Provide a clear written answer.";
+  if (form === "coding") {
+    system = CODING_SYSTEM;
+    extra = "Provide C++, Java, and Python solutions.";
+  } else if (form === "sql") {
+    system = SQL_SYSTEM;
+    extra = "Provide SQL and a short explanation.";
+  } else if (form === "mcq") {
+    system = MCQ_SYSTEM;
+    extra = optionLines
+      ? `Options:\n${optionLines}\nCorrect option id: ${meta?.correctOptionId || "unknown"}`
+      : "Provide the best answer explanation.";
+  }
+
   const userContent = [
     `Question: ${question}`,
     evidence ? `Context from source: ${evidence}` : "",
-    kind === "coding"
-      ? "Provide C++, Java, and Python solutions."
-      : "Provide a clear written answer.",
+    extra,
   ]
     .filter(Boolean)
     .join("\n\n");
 
   const response = await callLLM(
     [
-      { role: "system", content: kind === "coding" ? CODING_SYSTEM : NON_CODING_SYSTEM },
+      { role: "system", content: system },
       { role: "user", content: userContent },
     ],
     { apiKeySlot: GROQ_KEY_SLOTS.ADMIN }
@@ -69,7 +109,7 @@ async function generateOneAnswer(item) {
     throw error;
   }
 
-  if (kind === "coding") {
+  if (form === "coding") {
     const solutions = parsed.solutions && typeof parsed.solutions === "object" ? parsed.solutions : {};
     return {
       answer: normalizeMultilineText(parsed.answer),
@@ -82,9 +122,22 @@ async function generateOneAnswer(item) {
     };
   }
 
+  const answer = normalizeMultilineText(parsed.answer);
+  const explanation = normalizeMultilineText(parsed.explanation);
+  if (form === "mcq" && meta) {
+    return {
+      answer,
+      intuition: explanation,
+      mcqMetadata: {
+        ...meta,
+        explanation: explanation || meta.explanation || answer,
+      },
+    };
+  }
+
   return {
-    answer: normalizeMultilineText(parsed.answer),
-    intuition: normalizeMultilineText(parsed.intuition),
+    answer,
+    intuition: explanation || normalizeMultilineText(parsed.intuition),
   };
 }
 

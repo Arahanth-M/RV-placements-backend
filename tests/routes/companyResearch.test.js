@@ -136,14 +136,35 @@ describe("company research API", () => {
       .expect(404);
   });
 
+  it("queues OA questions and interview experiences without running research", async () => {
+    for (const field of ["onlineQuestions", "interviewExperiences"]) {
+      const response = await postResearch({
+        companyId: "amazon-id",
+        companyName: "Amazon",
+        field,
+        role: "SDE",
+        country: "India",
+        maxSources: 2,
+      }).expect(200);
+      expect(response.body.status).toBe("queued");
+      expect(mockEnqueue).toHaveBeenLastCalledWith(
+        expect.objectContaining({ field, maxSources: 2, role: "SDE" })
+      );
+      expect(store.get(`${RESEARCH_JOB_KEY_PREFIX}${response.body.jobId}`).value.field).toBe(field);
+    }
+    expect(mockResearch).not.toHaveBeenCalled();
+  });
+
   it("rejects an unsupported field and invalid parameters before research", async () => {
     const cases = [
-      { companyId: "id", companyName: "Amazon", field: "onlineQuestions" },
+      { companyId: "id", companyName: "Amazon", field: "codingQuestions" },
       { companyId: "  ", companyName: "Amazon", field: "interviewQuestions" },
       { companyId: "id", companyName: "", field: "interviewQuestions" },
       { companyId: "id", companyName: "Amazon", field: "interviewQuestions", maxSources: 9 },
       { companyId: "id", companyName: "Amazon", field: "interviewQuestions", searchDepth: "deep" },
       { companyId: "id", companyName: "Amazon", field: "interviewQuestions", role: 12 },
+      { companyId: "id", companyName: "Amazon", field: "onlineQuestions", role: "" },
+      { companyId: "id", companyName: "Amazon", field: "onlineQuestions", role: "Product Manager" },
     ];
 
     for (const body of cases) {

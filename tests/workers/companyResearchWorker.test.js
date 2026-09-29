@@ -28,10 +28,21 @@ jest.unstable_mockModule("../../src/utils/redisHelpers.js", () => ({
   setJSON: (...args) => mockSetJSON(...args),
 }));
 
+const mockOnline = jest.fn();
+const mockExperiences = jest.fn();
+
 jest.unstable_mockModule("../../services/companyResearch/researchInterviewQuestions.js", () => ({
   researchInterviewQuestions: (...args) => mockResearch(...args),
   DEFAULT_MAX_SOURCES: 3,
   MAX_SOURCES_CAP: 8,
+}));
+
+jest.unstable_mockModule("../../services/companyResearch/researchOnlineQuestions.js", () => ({
+  researchOnlineQuestions: (...args) => mockOnline(...args),
+}));
+
+jest.unstable_mockModule("../../services/companyResearch/researchInterviewExperiences.js", () => ({
+  researchInterviewExperiences: (...args) => mockExperiences(...args),
 }));
 
 const { processCompanyResearchJob } = await import("../../workers/companyResearchWorker.js");
@@ -64,6 +75,8 @@ describe("company research worker", () => {
   beforeEach(() => {
     store.clear();
     mockResearch.mockReset();
+    mockOnline.mockReset();
+    mockExperiences.mockReset();
     mockGetJSON.mockReset();
     mockSetJSON.mockReset();
     mockSetJSON.mockImplementation(async (key, value, ttl) => {
@@ -110,6 +123,51 @@ describe("company research worker", () => {
     expect(saved.error).toBeNull();
     expect(store.get(`${RESEARCH_JOB_KEY_PREFIX}${jobId}`).ttl).toBe(RESEARCH_JOB_TTL_SECONDS);
     expect(mockResearch).toHaveBeenCalledTimes(1);
+    expect(mockOnline).not.toHaveBeenCalled();
+    expect(mockExperiences).not.toHaveBeenCalled();
+  });
+
+  it("runs OA research and interview-experience research on their own fields", async () => {
+    const oaId = "66666666-6666-4666-8666-666666666666";
+    seedQueued(oaId);
+    mockOnline.mockResolvedValue({
+      companyName: "Amazon",
+      outcome: "ok",
+      items: [{ question: "Two sum", kind: "coding" }],
+      sources: [],
+    });
+    await expect(
+      processCompanyResearchJob({
+        data: { jobId: oaId, companyName: "Amazon", field: "onlineQuestions", maxSources: 2 },
+      })
+    ).resolves.toEqual({ jobId: oaId, status: "review" });
+    expect(mockOnline).toHaveBeenCalledWith(
+      expect.objectContaining({ companyName: "Amazon", maxSources: 2 })
+    );
+    expect(mockResearch).not.toHaveBeenCalled();
+
+    const experienceId = "77777777-7777-4777-8777-777777777777";
+    seedQueued(experienceId);
+    mockExperiences.mockResolvedValue({
+      companyName: "Amazon",
+      outcome: "ok",
+      items: [{ content: "Three rounds.", summarized: false }],
+      sources: [],
+    });
+    await expect(
+      processCompanyResearchJob({
+        data: {
+          jobId: experienceId,
+          companyName: "Amazon",
+          field: "interviewExperiences",
+          maxSources: 1,
+        },
+      })
+    ).resolves.toEqual({ jobId: experienceId, status: "review" });
+    expect(mockExperiences).toHaveBeenCalledTimes(1);
+    expect(store.get(`${RESEARCH_JOB_KEY_PREFIX}${experienceId}`).value.result.items[0].content).toBe(
+      "Three rounds."
+    );
   });
 
   it("stores a safe failure and rethrows without the secret", async () => {

@@ -186,7 +186,7 @@ describe("publish research interview questions", () => {
     ).rejects.toMatchObject({ code: "not_reviewable" });
 
     store.set(`${RESEARCH_JOB_KEY_PREFIX}${JOB_ID}`, {
-      value: reviewJob({ field: "onlineQuestions" }),
+      value: reviewJob({ field: "codingQuestions" }),
       ttl: RESEARCH_JOB_TTL_SECONDS,
     });
     await expect(
@@ -332,6 +332,138 @@ describe("publish research interview questions", () => {
       publishResearchInterviewQuestions({ jobId: JOB_ID, selectedIndexes: [1], reviewer })
     ).rejects.toMatchObject({ code: "already_published", status: 409 });
     expect(mockUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("publishes selected OA questions into onlineQuestions and skips research links", async () => {
+    store.set(`${RESEARCH_JOB_KEY_PREFIX}${JOB_ID}`, {
+      value: reviewJob({ field: "onlineQuestions", role: "SDE" }),
+      ttl: RESEARCH_JOB_TTL_SECONDS,
+    });
+    mockFindOne.mockImplementation(() => leanOf({ onlineQuestions: [], mcqQuestions: [], prepRoles: [] }));
+
+    const result = await publishResearchInterviewQuestions({
+      jobId: JOB_ID,
+      selectedIndexes: [1],
+      reviewer,
+    });
+    expect(result).toMatchObject({ insertedCount: 1, duplicateCount: 0 });
+    const update = mockUpdateOne.mock.calls[0][1];
+    expect(Object.keys(update.$push)).toEqual(["onlineQuestions", "prepRoles"]);
+    expect(update.$push.onlineQuestions.$each[0]).toMatchObject({
+      prepRoleKey: "sde",
+      question: "What is CAP theorem?",
+      kind: "non_coding",
+      status: "approved",
+    });
+    expect(update.$setOnInsert.onlineQuestions).toBeUndefined();
+    expect(update.$setOnInsert.interviewQuestions).toEqual([]);
+    expect(update.$push.onlineQuestions.$each[0].sourceUrl).toBeUndefined();
+  });
+
+  it("publishes OA MCQs into mcqQuestions and coding into onlineQuestions", async () => {
+    store.set(`${RESEARCH_JOB_KEY_PREFIX}${JOB_ID}`, {
+      value: reviewJob({
+        field: "onlineQuestions",
+        role: "Analyst",
+        result: {
+          sources: [],
+          items: [
+            {
+              form: "mcq",
+              question: "Which index speeds up lookups?",
+              evidence: "MCQ on indexes.",
+              mcqMetadata: {
+                options: [
+                  { id: "A", text: "Primary key" },
+                  { id: "B", text: "Secondary index" },
+                ],
+                correctOptionId: "B",
+              },
+            },
+            {
+              form: "coding",
+              question: "Reverse a linked list.",
+              evidence: "Coding on linked list.",
+            },
+          ],
+        },
+      }),
+      ttl: RESEARCH_JOB_TTL_SECONDS,
+    });
+    mockFindOne.mockImplementation(() =>
+      leanOf({ onlineQuestions: [], mcqQuestions: [], prepRoles: [] })
+    );
+
+    const result = await publishResearchInterviewQuestions({
+      jobId: JOB_ID,
+      selectedIndexes: [0, 1],
+      reviewer,
+    });
+    expect(result).toMatchObject({ insertedCount: 2, duplicateCount: 0 });
+    const update = mockUpdateOne.mock.calls[0][1];
+    expect(update.$push.mcqQuestions.$each[0]).toMatchObject({
+      prepRoleKey: "analyst",
+      question: "Which index speeds up lookups?",
+      answer: "B",
+      optionB: "Secondary index",
+    });
+    expect(update.$push.onlineQuestions.$each[0]).toMatchObject({
+      prepRoleKey: "analyst",
+      kind: "coding",
+      question: "Reverse a linked list.",
+    });
+  });
+
+  it("publishes selected interview experiences and does not store a source link", async () => {
+    store.set(`${RESEARCH_JOB_KEY_PREFIX}${JOB_ID}`, {
+      value: reviewJob({
+        field: "interviewExperiences",
+        role: "SDE",
+        result: {
+          sources: JOB_SOURCES,
+          items: [
+            {
+              content: "Round 1 was two coding problems. I cleared it.",
+              evidence: "Round 1 was two coding problems.",
+              summarized: false,
+              sourceUrl: "https://example.com/a",
+              sourceTitle: "Example",
+            },
+          ],
+        },
+      }),
+      ttl: RESEARCH_JOB_TTL_SECONDS,
+    });
+    mockFindOne.mockImplementation(() =>
+      leanOf({
+        interviewExperiences: [{ prepRoleKey: "sde", content: "An older writeup." }],
+        prepRoles: [{ key: "sde", label: "SDE" }],
+      })
+    );
+
+    const result = await publishResearchInterviewQuestions({
+      jobId: JOB_ID,
+      selectedIndexes: [0],
+      reviewer,
+    });
+    expect(result).toMatchObject({ insertedCount: 1, duplicateCount: 0 });
+    const inserted = mockUpdateOne.mock.calls[0][1].$push.interviewExperiences.$each[0];
+    expect(inserted).toMatchObject({
+      prepRoleKey: "sde",
+      content: "Round 1 was two coding problems. I cleared it.",
+      status: "approved",
+      reviewedBy: { name: "Ada", email: "ada@example.com" },
+    });
+    expect(inserted.sourceUrl).toBeUndefined();
+    expect(inserted.evidence).toBeUndefined();
+    expect(inserted.summarized).toBeUndefined();
+    expect(mockUpdateOne.mock.calls[0][1].$push.prepRoles).toBeUndefined();
+    const sources = mockUpdateOne.mock.calls[0][1].$push.researchSources.$each;
+    expect(sources.length).toBeGreaterThan(0);
+    expect(sources[0]).toMatchObject({
+      prepRoleKey: "sde",
+      url: "https://example.com/a",
+    });
   });
 
   it("publishes through the admin route using only selected indexes and the authenticated reviewer", async () => {
