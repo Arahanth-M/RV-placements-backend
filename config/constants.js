@@ -82,6 +82,8 @@ export const routes = {
   LEADERBOARD: '/api/leaderboard',
   INTERVIEW: '/api/interview',
   INTERVIEW_QUESTION_BANK: '/api/interview-question-bank',
+  PRACTICE_CHALLENGES: '/api/practice-challenges',
+  DRIVE_CALENDAR: '/api/drive-calendar',
   RESUME: '/api/resume',
   PREP_PATH: '/api/prep-path',
   DAU: '/api/dau',

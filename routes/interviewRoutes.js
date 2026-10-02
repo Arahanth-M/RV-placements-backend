@@ -9,6 +9,25 @@ import {
   normalizeVisitKeyParts,
 } from "../services/companyService.js";
 import { getCompanyPlatformDetailById } from "../services/companyPlatformDetailService.js";
+import {
+  startBehavioralCoachPractice,
+  evaluateBehavioralCoachPractice,
+  getBehavioralCoachAnalytics,
+} from "../services/behavioralCoachService.js";
+import {
+  createPeerSession,
+  listOpenPeerSessions,
+  listMyPeerSessions,
+  requestJoinPeerSession,
+  acceptJoinRequest,
+  rejectJoinRequest,
+  cancelJoinRequest,
+  cancelPeerSession,
+  leavePeerSession,
+  getPeerSession,
+  findPeerSessionByInviteCode,
+  SESSION_TYPES as PEER_SESSION_TYPES,
+} from "../services/peerSessionService.js";
 
 const parseMergePlacementByType = (raw) =>
   raw === true || raw === "true" || raw === "1" || raw === 1;
@@ -25,6 +44,11 @@ import {
   interviewSlotBookSchema,
   interviewSlotRescheduleSchema,
   interviewSlotStatusSchema,
+  behavioralCoachStartSchema,
+  behavioralCoachEvaluateSchema,
+  peerSessionCreateSchema,
+  peerSessionJoinSchema,
+  peerSessionRequestActionSchema,
 } from "../validations/interview.validation.js";
 import {
   createSession,
@@ -2021,6 +2045,296 @@ router.delete("/slot-bookings/:bookingId", async (req, res) => {
     }
     console.error("[slot-bookings] cancel failed", error?.message || error);
     return res.status(500).json({ error: "Failed to cancel booking." });
+  }
+});
+
+router.post(
+  "/behavioral-coach/start",
+  validateRequest(behavioralCoachStartSchema),
+  async (req, res) => {
+    try {
+      const userId = getAuthenticatedUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const result = await startBehavioralCoachPractice({
+        userId,
+        focus: req.body.focus,
+      });
+      recordDauActivitySafe(req.user, { action: "behavioral_coach" });
+      return res.status(201).json({ success: true, ...result });
+    } catch (error) {
+      const code = error?.code;
+      if (code === "UNAUTHORIZED") {
+        return res.status(401).json({ error: error.message });
+      }
+      if (code === "QUESTION_UNAVAILABLE") {
+        return res.status(503).json({ error: error.message, code });
+      }
+      console.error("[behavioral-coach] start failed:", error?.message || error);
+      return res.status(500).json({ error: "Failed to start behavioral practice" });
+    }
+  }
+);
+
+router.post(
+  "/behavioral-coach/evaluate",
+  validateRequest(behavioralCoachEvaluateSchema),
+  async (req, res) => {
+    try {
+      const userId = getAuthenticatedUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const result = await evaluateBehavioralCoachPractice({
+        userId,
+        practiceId: req.body.practiceId,
+        answer: req.body.answer,
+      });
+      return res.json({ success: true, ...result });
+    } catch (error) {
+      const code = error?.code;
+      if (code === "UNAUTHORIZED") {
+        return res.status(401).json({ error: error.message });
+      }
+      if (code === "ANSWER_TOO_SHORT" || code === "INVALID_PRACTICE") {
+        return res.status(400).json({ error: error.message, code });
+      }
+      if (code === "PRACTICE_NOT_FOUND") {
+        return res.status(404).json({ error: error.message, code });
+      }
+      console.error("[behavioral-coach] evaluate failed:", error?.message || error);
+      return res.status(500).json({ error: "Failed to evaluate behavioral answer" });
+    }
+  }
+);
+
+router.get("/behavioral-coach/analytics", async (req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const limitRaw = Number(req.query?.limit);
+    const data = await getBehavioralCoachAnalytics({
+      userId,
+      limit: Number.isFinite(limitRaw) ? limitRaw : undefined,
+    });
+    return res.json({ success: true, ...data });
+  } catch (error) {
+    if (error?.code === "UNAUTHORIZED") {
+      return res.status(401).json({ error: error.message });
+    }
+    console.error("[behavioral-coach] analytics failed:", error?.message || error);
+    return res.status(500).json({ error: "Failed to load behavioral coach analytics" });
+  }
+});
+
+function mapPeerSessionError(res, error) {
+  const code = error?.code;
+  const status = error?.status || 400;
+  if (code === "UNAUTHORIZED") {
+    return res.status(401).json({ error: error.message, code });
+  }
+  if (code === "NOT_FOUND") {
+    return res.status(404).json({ error: error.message, code });
+  }
+  if (code === "FORBIDDEN") {
+    return res.status(403).json({ error: error.message, code });
+  }
+  if (code) {
+    return res.status(status).json({ error: error.message, code });
+  }
+  return null;
+}
+
+router.get("/peer-sessions/types", (_req, res) => {
+  return res.json({
+    success: true,
+    types: Object.values(PEER_SESSION_TYPES).map((t) => ({
+      id: t.id,
+      label: t.label,
+      defaultMax: t.defaultMax,
+      maxCap: t.maxCap,
+    })),
+  });
+});
+
+router.get("/peer-sessions/open", async (req, res) => {
+  try {
+    const sessions = await listOpenPeerSessions({
+      user: req.user,
+      sessionType: req.query?.sessionType,
+    });
+    return res.json({ success: true, sessions });
+  } catch (error) {
+    if (mapPeerSessionError(res, error)) return undefined;
+    console.error("[peer-sessions] open failed:", error?.message || error);
+    return res.status(500).json({ error: "Failed to list open sessions" });
+  }
+});
+
+router.get("/peer-sessions/mine", async (req, res) => {
+  try {
+    const sessions = await listMyPeerSessions({ user: req.user });
+    return res.json({ success: true, sessions });
+  } catch (error) {
+    if (mapPeerSessionError(res, error)) return undefined;
+    console.error("[peer-sessions] mine failed:", error?.message || error);
+    return res.status(500).json({ error: "Failed to list your sessions" });
+  }
+});
+
+router.get("/peer-sessions/by-code/:inviteCode", async (req, res) => {
+  try {
+    const session = await findPeerSessionByInviteCode({
+      user: req.user,
+      inviteCode: req.params.inviteCode,
+    });
+    return res.json({ success: true, session });
+  } catch (error) {
+    if (mapPeerSessionError(res, error)) return undefined;
+    console.error("[peer-sessions] by-code failed:", error?.message || error);
+    return res.status(500).json({ error: "Failed to find session by code" });
+  }
+});
+
+router.get("/peer-sessions/:sessionId", async (req, res) => {
+  try {
+    const session = await getPeerSession({
+      user: req.user,
+      sessionId: req.params.sessionId,
+    });
+    return res.json({ success: true, session });
+  } catch (error) {
+    if (mapPeerSessionError(res, error)) return undefined;
+    console.error("[peer-sessions] get failed:", error?.message || error);
+    return res.status(500).json({ error: "Failed to load session" });
+  }
+});
+
+router.post(
+  "/peer-sessions",
+  validateRequest(peerSessionCreateSchema),
+  async (req, res) => {
+    try {
+      const session = await createPeerSession({
+        user: req.user,
+        sessionType: req.body.sessionType,
+        topic: req.body.topic,
+        notes: req.body.notes,
+        slotStart: req.body.slotStart,
+        slotEnd: req.body.slotEnd,
+        maxParticipants: req.body.maxParticipants,
+        meetLink: req.body.meetLink,
+      });
+      recordDauActivitySafe(req.user, { action: "peer_session_create" });
+      return res.status(201).json({ success: true, session });
+    } catch (error) {
+      if (mapPeerSessionError(res, error)) return undefined;
+      console.error("[peer-sessions] create failed:", error?.message || error);
+      return res.status(500).json({ error: "Failed to create peer session" });
+    }
+  }
+);
+
+router.post(
+  "/peer-sessions/join",
+  validateRequest(peerSessionJoinSchema),
+  async (req, res) => {
+    try {
+      const session = await requestJoinPeerSession({
+        user: req.user,
+        sessionId: req.body.sessionId,
+        note: req.body.note,
+      });
+      recordDauActivitySafe(req.user, { action: "peer_session_request" });
+      return res.json({ success: true, session });
+    } catch (error) {
+      if (mapPeerSessionError(res, error)) return undefined;
+      console.error("[peer-sessions] request join failed:", error?.message || error);
+      return res.status(500).json({ error: "Failed to request join" });
+    }
+  }
+);
+
+router.post(
+  "/peer-sessions/:sessionId/accept",
+  validateRequest(peerSessionRequestActionSchema),
+  async (req, res) => {
+    try {
+      const session = await acceptJoinRequest({
+        user: req.user,
+        sessionId: req.params.sessionId,
+        requesterUserId: req.body.requesterUserId,
+      });
+      return res.json({ success: true, session });
+    } catch (error) {
+      if (mapPeerSessionError(res, error)) return undefined;
+      console.error("[peer-sessions] accept failed:", error?.message || error);
+      return res.status(500).json({ error: "Failed to accept join request" });
+    }
+  }
+);
+
+router.post(
+  "/peer-sessions/:sessionId/reject",
+  validateRequest(peerSessionRequestActionSchema),
+  async (req, res) => {
+    try {
+      const session = await rejectJoinRequest({
+        user: req.user,
+        sessionId: req.params.sessionId,
+        requesterUserId: req.body.requesterUserId,
+      });
+      return res.json({ success: true, session });
+    } catch (error) {
+      if (mapPeerSessionError(res, error)) return undefined;
+      console.error("[peer-sessions] reject failed:", error?.message || error);
+      return res.status(500).json({ error: "Failed to reject join request" });
+    }
+  }
+);
+
+router.post("/peer-sessions/:sessionId/cancel-request", async (req, res) => {
+  try {
+    const session = await cancelJoinRequest({
+      user: req.user,
+      sessionId: req.params.sessionId,
+    });
+    return res.json({ success: true, session });
+  } catch (error) {
+    if (mapPeerSessionError(res, error)) return undefined;
+    console.error("[peer-sessions] cancel-request failed:", error?.message || error);
+    return res.status(500).json({ error: "Failed to cancel join request" });
+  }
+});
+
+router.post("/peer-sessions/:sessionId/cancel", async (req, res) => {
+  try {
+    const session = await cancelPeerSession({
+      user: req.user,
+      sessionId: req.params.sessionId,
+    });
+    return res.json({ success: true, session });
+  } catch (error) {
+    if (mapPeerSessionError(res, error)) return undefined;
+    console.error("[peer-sessions] cancel failed:", error?.message || error);
+    return res.status(500).json({ error: "Failed to cancel session" });
+  }
+});
+
+router.post("/peer-sessions/:sessionId/leave", async (req, res) => {
+  try {
+    const session = await leavePeerSession({
+      user: req.user,
+      sessionId: req.params.sessionId,
+    });
+    return res.json({ success: true, session });
+  } catch (error) {
+    if (mapPeerSessionError(res, error)) return undefined;
+    console.error("[peer-sessions] leave failed:", error?.message || error);
+    return res.status(500).json({ error: "Failed to leave session" });
   }
 });
 

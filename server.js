@@ -34,11 +34,13 @@ import studentRouter from "./routes/studentRoutes.js";
 import placementRouter from "./routes/placementRoutes.js";
 import leaderboardRouter from "./routes/leaderboardRoutes.js";
 import interviewRouter from "./routes/interviewRoutes.js";
+import practiceChallengeRouter from "./routes/practiceChallengeRoutes.js";
 import resumeRouter from "./routes/resumeRoutes.js";
 import prepPathRouter from "./routes/prepPathRoutes.js";
 import dauRouter from "./routes/dauRoutes.js";
 import billingRouter from "./routes/billingRoutes.js";
 import interviewQuestionBankRouter from "./routes/interviewQuestionBankRoutes.js";
+import driveCalendarRouter from "./routes/driveCalendarRoutes.js";
 
 import "./services/passport.js";
 
@@ -176,11 +178,13 @@ app.use(routes.STUDENTS, studentRouter);
 app.use(routes.PLACEMENT, placementRouter);
 app.use(routes.LEADERBOARD, leaderboardRouter);
 app.use(routes.INTERVIEW, interviewRouter);
+app.use(routes.PRACTICE_CHALLENGES, practiceChallengeRouter);
 app.use(routes.RESUME, resumeRouter);
 app.use(routes.PREP_PATH, prepPathRouter);
 app.use(routes.DAU, dauRouter);
 app.use(routes.BILLING, billingRouter);
 app.use(routes.INTERVIEW_QUESTION_BANK, interviewQuestionBankRouter);
+app.use(routes.DRIVE_CALENDAR, driveCalendarRouter);
 
 /**
  * 6. Server Initialization
