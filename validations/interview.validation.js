@@ -102,6 +102,50 @@ export const interviewSlotStatusSchema = Joi.object({
     .required(),
 }).unknown(true);
 
+export const behavioralCoachStartSchema = Joi.object({
+  focus: Joi.string()
+    .trim()
+    .lowercase()
+    .valid("general", "teamwork", "conflict", "leadership", "failure", "why_company")
+    .default("general"),
+}).unknown(false);
+
+export const behavioralCoachEvaluateSchema = Joi.object({
+  practiceId: Joi.string().trim().uuid().required(),
+  answer: Joi.string().trim().min(20).max(12000).required(),
+}).unknown(false);
+
+export const peerSessionCreateSchema = Joi.object({
+  sessionType: Joi.string()
+    .trim()
+    .valid("mock_interview", "study_group", "doubt_clarification")
+    .required(),
+  topic: Joi.string().trim().min(3).max(160).required(),
+  notes: Joi.string().trim().allow("").max(1000).optional(),
+  slotStart: Joi.alternatives().try(Joi.date().iso(), Joi.string().trim().min(8)).required(),
+  slotEnd: Joi.alternatives().try(Joi.date().iso(), Joi.string().trim().min(8)).optional(),
+  maxParticipants: Joi.number().integer().min(2).max(8).optional(),
+  /** Optional override; when omitted, Meet is created via Google Calendar API. */
+  meetLink: Joi.string().trim().uri({ scheme: ["http", "https"] }).min(20).max(500).optional().allow(""),
+}).unknown(false);
+
+export const peerSessionJoinSchema = Joi.object({
+  sessionId: Joi.string().trim().pattern(/^[a-fA-F0-9]{24}$/).required().messages({
+    "string.pattern.base": "Invalid session id",
+    "any.required": "sessionId is required",
+  }),
+  note: Joi.string().trim().min(8).max(400).required().messages({
+    "string.min": "Add a short note for the host (at least 8 characters)",
+    "string.max": "Note must be at most 400 characters",
+    "any.required": "Add a short note for the host",
+    "string.empty": "Add a short note for the host",
+  }),
+}).unknown(false);
+
+export const peerSessionRequestActionSchema = Joi.object({
+  requesterUserId: Joi.string().trim().min(1).max(128).required(),
+}).unknown(false);
+
 export default {
   interviewStartSchema,
   interviewSubmitAnswerSchema,
@@ -110,4 +154,9 @@ export default {
   interviewSlotBookSchema,
   interviewSlotRescheduleSchema,
   interviewSlotStatusSchema,
+  behavioralCoachStartSchema,
+  behavioralCoachEvaluateSchema,
+  peerSessionCreateSchema,
+  peerSessionJoinSchema,
+  peerSessionRequestActionSchema,
 };

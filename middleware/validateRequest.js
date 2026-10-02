@@ -39,6 +39,8 @@ export default function validateRequest(spec) {
     throw new TypeError("validateRequest: expected a Joi schema or options object");
   }
 
+  const validateOpts = { abortEarly: false, stripUnknown: true, convert: true };
+
   if (hasMultiSchemaShape(spec)) {
     const { bodySchema, paramsSchema, querySchema } = spec;
     assertJoiSchema(bodySchema, "bodySchema");
@@ -49,22 +51,26 @@ export default function validateRequest(spec) {
       const errors = [];
 
       if (bodySchema) {
-        const { error } = bodySchema.validate(req.body ?? {}, { abortEarly: false });
+        const { error, value } = bodySchema.validate(req.body ?? {}, validateOpts);
         errors.push(...collectMessages(error));
+        if (!error) req.body = value;
       }
       if (paramsSchema) {
-        const { error } = paramsSchema.validate(req.params ?? {}, { abortEarly: false });
+        const { error, value } = paramsSchema.validate(req.params ?? {}, validateOpts);
         errors.push(...collectMessages(error));
+        if (!error) req.params = value;
       }
       if (querySchema) {
-        const { error } = querySchema.validate(req.query ?? {}, { abortEarly: false });
+        const { error, value } = querySchema.validate(req.query ?? {}, validateOpts);
         errors.push(...collectMessages(error));
+        if (!error) req.query = value;
       }
 
       if (errors.length > 0) {
         return res.status(400).json({
           success: false,
           message: "Validation error",
+          error: errors[0],
           errors,
         });
       }
@@ -78,17 +84,19 @@ export default function validateRequest(spec) {
   }
 
   return (req, res, next) => {
-    const { error } = spec.validate(req.body, { abortEarly: false });
+    const { error, value } = spec.validate(req.body ?? {}, validateOpts);
 
     if (error) {
       const errors = collectMessages(error);
       return res.status(400).json({
         success: false,
         message: "Validation error",
+        error: errors[0] || "Validation error",
         errors,
       });
     }
 
+    req.body = value;
     next();
   };
 }

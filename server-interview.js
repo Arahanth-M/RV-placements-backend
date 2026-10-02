@@ -9,6 +9,7 @@ import { config, routes } from "./config/constants.js";
 import { createExpressApp, applySharedHttpMiddleware } from "./server/bootstrapExpressApp.js";
 
 import interviewRouter from "./routes/interviewRoutes.js";
+import practiceChallengeRouter from "./routes/practiceChallengeRoutes.js";
 import { createHealthHandler } from "./server/healthHandler.js";
 
 const app = createExpressApp();
@@ -17,6 +18,7 @@ applySharedHttpMiddleware(app, { bypassGlobalLimiterForInterviewPrefix: true });
 app.get("/health", createHealthHandler("backend-interview"));
 
 app.use(routes.INTERVIEW, interviewRouter);
+app.use(routes.PRACTICE_CHALLENGES, practiceChallengeRouter);
 
 if (process.env.NODE_ENV !== "test") {
   connectDB(config.MONGO_URI).then(async () => {
