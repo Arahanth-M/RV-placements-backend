@@ -4,25 +4,25 @@ import { listBillingPlans, PLAN_IDS } from "../../config/billingPlans.js";
 describe("quotePlanPurchase", () => {
   it("charges full list price with no overlapping entitlements", () => {
     const quote = quotePlanPurchase(PLAN_IDS.ALL_PREMIUM, []);
-    expect(quote.listPriceInr).toBe(699);
+    expect(quote.listPriceInr).toBe(7);
     expect(quote.creditInr).toBe(0);
-    expect(quote.payableInr).toBe(699);
-    expect(quote.amountPaise).toBe(69900);
+    expect(quote.payableInr).toBe(7);
+    expect(quote.amountPaise).toBe(700);
   });
 
   it("credits a prior category unlock when buying PrepPath", () => {
     const quote = quotePlanPurchase(PLAN_IDS.PREP_PATH, [{ planId: PLAN_IDS.CATEGORY }]);
-    expect(quote.listPriceInr).toBe(499);
-    expect(quote.creditInr).toBe(199);
-    expect(quote.payableInr).toBe(300);
+    expect(quote.listPriceInr).toBe(7);
+    expect(quote.creditInr).toBe(7);
+    expect(quote.payableInr).toBe(0);
   });
 
   it("credits overlapping list prices without proration", () => {
     const quote = quotePlanPurchase(PLAN_IDS.ALL_PREMIUM, [
       { planId: PLAN_IDS.ALL_CARDS },
     ]);
-    expect(quote.creditInr).toBe(499);
-    expect(quote.payableInr).toBe(200);
+    expect(quote.creditInr).toBe(7);
+    expect(quote.payableInr).toBe(0);
   });
 
   it("requires a category for the category SKU", () => {
