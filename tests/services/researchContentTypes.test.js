@@ -6,6 +6,11 @@ jest.unstable_mockModule("../../services/llmClient.js", () => ({
   callLLM: (...args) => mockCallLLM(...args),
 }));
 
+jest.unstable_mockModule("../../src/utils/redisHelpers.js", () => ({
+  getJSON: async () => null,
+  setJSON: async () => true,
+}));
+
 const { structureOnlineQuestions } = await import(
   "../../services/companyResearch/structureWithGroq.js"
 );

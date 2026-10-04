@@ -11,7 +11,7 @@ import Entitlement from "../models/Entitlement.js";
 import CollegeOnboardingRequest from "../models/CollegeOnboardingRequest.js";
 import InterviewSession from "../models/InterviewSession.js";
 import PrepPathPlan from "../models/PrepPathPlan.js";
-import { mongoMatchPlatformUsers } from "../utils/collegeScope.js";
+import { isAllowedCollegeEmail, mongoMatchPlatformUsers } from "../utils/collegeScope.js";
 import {
   listCollegeOnboardingRequests,
   updateCollegeOnboardingRequest,
@@ -52,6 +52,7 @@ import {
   listRuntimeSecrets,
   setRuntimeSecret,
 } from "../services/platformRuntimeSecrets.js";
+import { listLlmBudgets, setLlmBudget } from "../services/platformLlmBudgets.js";
 
 const router = express.Router();
 router.use(authJWT);
@@ -148,6 +149,51 @@ router.get("/stats", async (_req, res) => {
   } catch (error) {
     console.error("GET /api/admin/platform/stats:", error?.message || error);
     return res.status(500).json({ error: "Server error" });
+  }
+});
+
+/** Logins from the start of 1 October 2026, India time. */
+export const VISITOR_LOGIN_AFTER = new Date("2026-10-01T00:00:00+05:30");
+
+function escapeVisitorSearch(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+router.get("/visitors", async (req, res) => {
+  try {
+    const { page, limit, skip } = parseAdminPagination(req.query);
+    const q = String(req.query?.q || "").trim().slice(0, 80);
+    const filter = { lastLoginAt: { $gte: VISITOR_LOGIN_AFTER } };
+    if (q) {
+      const pattern = new RegExp(escapeVisitorSearch(q), "i");
+      filter.$or = [{ email: pattern }, { username: pattern }];
+    }
+    const [total, rows] = await Promise.all([
+      User1.countDocuments(filter),
+      User1.find(filter)
+        .select("username email lastLoginAt createdAt")
+        .sort({ lastLoginAt: -1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+    ]);
+    return res.json({
+      items: rows.map((row) => ({
+        id: String(row._id),
+        username: String(row.username || "").trim(),
+        email: String(row.email || "").trim(),
+        lastLoginAt: row.lastLoginAt || null,
+        signedUpAt: row.createdAt || null,
+        audience: isAllowedCollegeEmail(row.email) ? "campus" : "general",
+      })),
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    });
+  } catch (error) {
+    console.error("GET /api/admin/platform/visitors:", error?.message || error);
+    return res.status(500).json({ error: "Failed to load visitors" });
   }
 });
 
@@ -569,11 +615,24 @@ router.delete("/companies/:id/must-do-topics/by-topic", async (req, res) => {
 
 router.get("/runtime-secrets", async (_req, res) => {
   try {
-    const keys = await listRuntimeSecrets();
-    return res.json({ keys });
+    const [keys, budgets] = await Promise.all([listRuntimeSecrets(), listLlmBudgets()]);
+    return res.json({ keys, budgets });
   } catch (error) {
     console.error("[runtime-secrets] list failed", error?.message || "list_failed");
     return res.status(500).json({ error: "Keys could not be loaded." });
+  }
+});
+
+router.put("/runtime-budgets/:id", async (req, res) => {
+  try {
+    const row = await setLlmBudget(req.params.id, req.body?.value);
+    return res.json(row);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    if (status >= 500) {
+      console.error("[runtime-budgets] update failed", error?.message || "update_failed");
+    }
+    return res.status(status).json({ error: error?.message || "Token budget could not be saved." });
   }
 });
 

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { addToSet, getJSON, getSetMembers, setJSON } from "../../src/utils/redisHelpers.js";
+import { isTokenLimitError, publicProviderMessage } from "../../utils/publicProviderError.js";
 
 /** Abandoned research jobs expire on their own. */
 export const RESEARCH_JOB_TTL_SECONDS = 24 * 60 * 60;
@@ -51,7 +52,14 @@ export function safeResearchError(error) {
   const code = Object.prototype.hasOwnProperty.call(SAFE_ERROR_MESSAGES, error?.code)
     ? error.code
     : "research_failed";
-  return { code, message: SAFE_ERROR_MESSAGES[code] };
+  const message = publicProviderMessage(error, SAFE_ERROR_MESSAGES[code]);
+  const tokenLimit = isTokenLimitError(error?.message) || isTokenLimitError(message);
+  const secretId = tokenLimit ? (code === "search_failed" ? "tavily" : "groq-web-search") : "";
+  return {
+    code,
+    message,
+    ...(tokenLimit ? { tokenLimit: true, secretId } : {}),
+  };
 }
 
 function withoutPageContent(value) {

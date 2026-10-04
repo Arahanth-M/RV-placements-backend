@@ -1,12 +1,19 @@
 import { callLLM } from "../llmClient.js";
 import { parseJSONResponse } from "../../utils/parseJSONResponse.js";
 import { GROQ_KEY_SLOTS } from "../../config/groqApiKey.js";
+import { getLlmBudget } from "../platformLlmBudgets.js";
+import { llmActionError } from "../../utils/publicProviderError.js";
 import { getResearchJob, replaceResearchJobResultItems } from "./researchJobService.js";
 import { PublishResearchError, parseSelectedIndexes } from "./publishResearchInterviewQuestions.js";
 import { normalizeMultilineText, compactSingleLine } from "../../utils/normalizeMultilineText.js";
 
-function compact(value) {
-  return compactSingleLine(value);
+const MAX_QUESTION_CHARS = 6000;
+const MAX_EVIDENCE_CHARS = 1200;
+
+function compact(value, max = 0) {
+  const text = compactSingleLine(value);
+  if (!max || text.length <= max) return text;
+  return text.slice(0, max).trim();
 }
 
 function assertReviewJob(job) {
@@ -58,13 +65,25 @@ function oaFormOf(item) {
   return "non_coding";
 }
 
+async function answerCallOptions(form) {
+  const max_completion_tokens = await getLlmBudget(form === "coding" ? "answers-coding" : "answers-text");
+  return {
+    apiKeySlot: GROQ_KEY_SLOTS.ADMIN,
+    temperature: 0.1,
+    reasoning_effort: "low",
+    include_reasoning: false,
+    max_completion_tokens,
+    response_format: { type: "json_object" },
+  };
+}
+
 async function generateOneAnswer(item) {
-  const question = compact(item?.question);
+  const question = compact(item?.question, MAX_QUESTION_CHARS);
   if (!question) {
     throw new PublishResearchError("invalid_selection");
   }
   const form = oaFormOf(item);
-  const evidence = compact(item?.evidence);
+  const evidence = compact(item?.evidence, MAX_EVIDENCE_CHARS);
   const meta = item?.mcqMetadata && typeof item.mcqMetadata === "object" ? item.mcqMetadata : null;
   const optionLines =
     meta && Array.isArray(meta.options)
@@ -94,15 +113,29 @@ async function generateOneAnswer(item) {
     .filter(Boolean)
     .join("\n\n");
 
-  const response = await callLLM(
-    [
-      { role: "system", content: system },
-      { role: "user", content: userContent },
-    ],
-    { apiKeySlot: GROQ_KEY_SLOTS.ADMIN }
-  );
-
-  const parsed = parseJSONResponse(response);
+  const messages = [
+    { role: "system", content: system },
+    { role: "user", content: userContent },
+  ];
+  const callOptions = await answerCallOptions(form);
+  let response = await callLLM(messages, callOptions);
+  let parsed;
+  try {
+    parsed = parseJSONResponse(response);
+  } catch (error) {
+    response = await callLLM(
+      [
+        ...messages,
+        {
+          role: "user",
+          content: "Return one JSON object only. Escape newlines inside strings as \\n.",
+        },
+      ],
+      callOptions
+    );
+    parsed = parseJSONResponse(response);
+    if (!parsed) throw error;
+  }
   if (!parsed || typeof parsed !== "object") {
     const error = new Error("Answer generation returned invalid JSON.");
     error.code = "answer_generation_failed";
@@ -167,14 +200,18 @@ export async function generateResearchQuestionAnswers(input = {}) {
       updatedIndexes.push(index);
     }
   } catch (error) {
+    if (error?.name === "PublishResearchError") throw error;
     console.error("[company-research] answer generation failed", {
       jobId,
       code: error?.code || "answer_generation_failed",
+      message: String(error?.message || "").slice(0, 300),
     });
-    const wrapped = new Error("Answers could not be generated.");
-    wrapped.code = "answer_generation_failed";
-    wrapped.status = 500;
-    throw wrapped;
+    throw llmActionError(
+      error,
+      "answer_generation_failed",
+      "Answers could not be generated.",
+      "groq-admin"
+    );
   }
 
   await replaceResearchJobResultItems(jobId, items);

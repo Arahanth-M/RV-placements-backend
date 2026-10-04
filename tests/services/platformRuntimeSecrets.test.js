@@ -13,6 +13,8 @@ jest.unstable_mockModule("../../src/utils/redisHelpers.js", () => ({
 const { listRuntimeSecrets, setRuntimeSecret, clearRuntimeSecret } = await import(
   "../../services/platformRuntimeSecrets.js"
 );
+const { publicProviderMessage } = await import("../../utils/publicProviderError.js");
+const { getLlmBudget, setLlmBudget } = await import("../../services/platformLlmBudgets.js");
 
 const FULL_KEY = "gsk_admin_secret_value_ABCD";
 
@@ -53,5 +55,22 @@ describe("platform runtime secrets", () => {
   it("rejects a masked paste and an unknown key", async () => {
     await expect(setRuntimeSecret("groq-admin", "••••ABCD")).rejects.toMatchObject({ status: 400 });
     await expect(setRuntimeSecret("groq-other", FULL_KEY)).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("keeps the provider error and redacts secrets", () => {
+    const message = publicProviderMessage(
+      new Error("Groq LLM request failed: Rate limit reached for sk-live-secret-value"),
+      "Research could not be completed."
+    );
+    expect(message).toContain("Rate limit reached");
+    expect(message).not.toContain("sk-live-secret-value");
+    expect(message).toContain("[redacted]");
+  });
+
+  it("saves a replacement token budget", async () => {
+    expect(await getLlmBudget("answers-coding")).toBe(8192);
+    const saved = await setLlmBudget("answers-coding", 12000);
+    expect(saved.value).toBe(12000);
+    expect(await getLlmBudget("answers-coding")).toBe(12000);
   });
 });

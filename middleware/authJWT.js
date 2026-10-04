@@ -1,5 +1,9 @@
 import jwt from "jsonwebtoken";
 import { config, messages } from "../config/constants.js";
+import {
+  PRODUCTION_LOGIN_MESSAGE,
+  productionLoginAllowed,
+} from "../utils/productionLoginLock.js";
 
 const getBearerToken = (req) => {
   const auth = req.headers.authorization;
@@ -51,6 +55,11 @@ export default function authJWT(req, res, next) {
 
     if (shouldLogJwtAuthSteps()) {
       console.log("userId extracted:", decoded.userId);
+    }
+
+    if (!productionLoginAllowed(decoded.email)) {
+      res.clearCookie("token", { path: "/" });
+      return res.status(401).json({ error: PRODUCTION_LOGIN_MESSAGE });
     }
 
     req.user = decoded;

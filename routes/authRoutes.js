@@ -18,6 +18,7 @@ import {
   submitCollegeEnrollmentInterest,
 } from "../services/blockedLoginAttempts.js";
 import { createCollegeOnboardingRequest } from "../services/collegeOnboardingService.js";
+import { productionLoginAllowed } from "../utils/productionLoginLock.js";
 
 const router = express.Router();
 
@@ -166,6 +167,9 @@ router.get(
         return redirectToAuthCallback(req, res, "login=failed");
       }
       if (!user) {
+        if (info && info.reason === "closed") {
+          return redirectToAuthCallback(req, res, "login=failed&reason=closed");
+        }
         if (info && info.reason === "domain") {
           let query = "login=failed&reason=domain";
           const attemptId = info.attemptId ? String(info.attemptId).trim() : "";
@@ -189,6 +193,10 @@ router.get(
           return redirectToAuthCallback(req, res, "login=failed&reason=not_found");
         }
         return redirectToAuthCallback(req, res, "login=failed");
+      }
+
+      if (!productionLoginAllowed(user.email)) {
+        return redirectToAuthCallback(req, res, "login=failed&reason=closed");
       }
 
       const flow = req.cookies?.oauth_flow || "";

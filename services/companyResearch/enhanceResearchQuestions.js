@@ -1,6 +1,8 @@
 import { callLLM } from "../llmClient.js";
 import { parseJSONResponse } from "../../utils/parseJSONResponse.js";
 import { GROQ_KEY_SLOTS } from "../../config/groqApiKey.js";
+import { getLlmBudget } from "../platformLlmBudgets.js";
+import { llmActionError } from "../../utils/publicProviderError.js";
 import { getResearchJob, replaceResearchJobResultItems } from "./researchJobService.js";
 import { PublishResearchError, parseSelectedIndexes } from "./publishResearchInterviewQuestions.js";
 import { normalizeMultilineText } from "../../utils/normalizeMultilineText.js";
@@ -70,7 +72,13 @@ async function enhanceBatch(job, batch) {
       { role: "system", content: SYSTEM },
       { role: "user", content: batchPrompt(job, batch) },
     ],
-    { apiKeySlot: GROQ_KEY_SLOTS.ADMIN }
+    {
+      apiKeySlot: GROQ_KEY_SLOTS.ADMIN,
+      temperature: 0.1,
+      reasoning_effort: "low",
+      include_reasoning: false,
+      max_completion_tokens: await getLlmBudget("enhance"),
+    }
   );
   const parsed = parseJSONResponse(response);
   const rows = Array.isArray(parsed?.items) ? parsed.items : [];
@@ -124,14 +132,13 @@ export async function enhanceResearchQuestions(input = {}) {
       }
     }
   } catch (error) {
+    if (error?.name === "PublishResearchError") throw error;
     console.error("[company-research] question enhance failed", {
       jobId,
       code: error?.code || "enhance_failed",
+      message: String(error?.message || "").slice(0, 300),
     });
-    const wrapped = new Error("Questions could not be enhanced.");
-    wrapped.code = "enhance_failed";
-    wrapped.status = 500;
-    throw wrapped;
+    throw llmActionError(error, "enhance_failed", "Questions could not be enhanced.", "groq-admin");
   }
 
   if (updatedIndexes.length > 0) {

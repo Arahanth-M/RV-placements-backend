@@ -270,19 +270,23 @@ router.post("/company-research/:jobId/enhance-questions", async (req, res) => {
   } catch (error) {
     const code = error?.code || "enhance_failed";
     const status = Number.isInteger(error?.status) ? error.status : 500;
-    if (error?.name === "PublishResearchError" || status !== 500) {
+    if (error?.name === "PublishResearchError" || error?.tokenLimit === true || status !== 500) {
       return res.status(status).json({
         error: {
           code,
           message: error?.message || "Questions could not be enhanced.",
+          tokenLimit: error?.tokenLimit === true,
+          secretId: error?.secretId || "",
         },
       });
     }
-    console.error("[company-research] enhance-questions failed", { code });
-    return res.status(500).json({
+    console.error("[company-research] enhance-questions failed", { code, message: error?.message });
+    return res.status(status).json({
       error: {
-        code: "enhance_failed",
-        message: "Questions could not be enhanced.",
+        code,
+        message: error?.message || "Questions could not be enhanced.",
+        tokenLimit: error?.tokenLimit === true,
+        secretId: error?.secretId || "",
       },
     });
   }
@@ -301,19 +305,23 @@ router.post("/company-research/:jobId/generate-answers", async (req, res) => {
   } catch (error) {
     const code = error?.code || "answer_generation_failed";
     const status = Number.isInteger(error?.status) ? error.status : 500;
-    if (error?.name === "PublishResearchError" || status !== 500) {
+    if (error?.name === "PublishResearchError" || error?.tokenLimit === true || status !== 500) {
       return res.status(status).json({
         error: {
           code,
           message: error?.message || "Answers could not be generated.",
+          tokenLimit: error?.tokenLimit === true,
+          secretId: error?.secretId || "",
         },
       });
     }
-    console.error("[company-research] generate-answers failed", { code });
+    console.error("[company-research] generate-answers failed", { code, message: error?.message });
     return res.status(500).json({
       error: {
-        code: "answer_generation_failed",
-        message: "Answers could not be generated.",
+        code,
+        message: error?.message || "Answers could not be generated.",
+        tokenLimit: false,
+        secretId: "",
       },
     });
   }

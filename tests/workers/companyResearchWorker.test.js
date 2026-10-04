@@ -182,14 +182,14 @@ describe("company research worker", () => {
     mockResearch.mockRejectedValue(error);
 
     await expect(processCompanyResearchJob({ data: { jobId, companyName: "Amazon" } })).rejects.toThrow(
-      "Research could not be completed."
+      "upstream [redacted]"
     );
 
     const saved = store.get(`${RESEARCH_JOB_KEY_PREFIX}${jobId}`).value;
     expect(saved.status).toBe("failed");
     expect(saved.error).toEqual({
       code: "search_failed",
-      message: "Research could not be completed.",
+      message: "upstream [redacted]",
     });
     expect(JSON.stringify(saved)).not.toContain(secret);
   });

@@ -40,6 +40,19 @@ const getGroqClient = (options = {}) => {
   return client;
 };
 
+function completionTokenBudget(options) {
+  if (
+    typeof options?.max_completion_tokens === "number" &&
+    Number.isFinite(options.max_completion_tokens)
+  ) {
+    return options.max_completion_tokens;
+  }
+  if (typeof options?.max_tokens === "number" && Number.isFinite(options.max_tokens)) {
+    return options.max_tokens;
+  }
+  return null;
+}
+
 const getErrorMessage = (error) => {
   if (error?.error?.message) {
     return error.error.message;
@@ -87,13 +100,38 @@ export const callLLM = async (messages, options = {}) => {
     if (typeof options?.temperature === "number" && Number.isFinite(options.temperature)) {
       request.temperature = options.temperature;
     }
-    if (typeof options?.max_tokens === "number" && Number.isFinite(options.max_tokens)) {
-      request.max_tokens = options.max_tokens;
+    const completionBudget = completionTokenBudget(options);
+    if (completionBudget != null) {
+      request.max_completion_tokens = completionBudget;
+    }
+    if (typeof options?.reasoning_effort === "string" && options.reasoning_effort.trim()) {
+      request.reasoning_effort = options.reasoning_effort.trim();
+    }
+    if (typeof options?.include_reasoning === "boolean") {
+      request.include_reasoning = options.include_reasoning;
+    }
+    if (options?.response_format && typeof options.response_format === "object") {
+      request.response_format = options.response_format;
     }
 
     const completion = await client.chat.completions.create(request);
+    const choice = completion?.choices?.[0];
+    const text = String(choice?.message?.content ?? "").trim();
+    if (!text && choice?.finish_reason === "length" && options?._retriedEmpty !== true) {
+      const nextBudget = Math.min(Math.max((completionBudget || 1024) * 2, 8192), 16384);
+      console.warn(
+        `[Groq] Empty completion after reasoning (finish_reason=length) on ${selectedModel}. Retrying with max_completion_tokens=${nextBudget}.`
+      );
+      return callLLM(messages, {
+        ...options,
+        reasoning_effort: "low",
+        max_completion_tokens: nextBudget,
+        max_tokens: undefined,
+        _retriedEmpty: true,
+      });
+    }
 
-    return completion?.choices?.[0]?.message?.content?.trim() || "";
+    return text;
   } catch (error) {
     const message = getErrorMessage(error);
     const lower = String(message).toLowerCase();
@@ -115,14 +153,14 @@ export const callLLM = async (messages, options = {}) => {
       console.warn(
         `⚠️ [Groq] Rate/TPM limit on ${options?.model || DEFAULT_ORCHESTRATOR_MODEL}. Falling back to ${RATE_LIMIT_FALLBACK_MODEL}...`
       );
-      const nextMax =
-        typeof options?.max_tokens === "number" && Number.isFinite(options.max_tokens)
-          ? Math.min(options.max_tokens, 3500)
-          : options?.max_tokens;
+      const requested = completionTokenBudget(options);
+      const nextMax = typeof requested === "number" ? Math.min(requested, 6000) : requested;
       return callLLM(messages, {
         ...options,
         model: RATE_LIMIT_FALLBACK_MODEL,
-        max_tokens: nextMax,
+        reasoning_effort: options?.reasoning_effort || "low",
+        max_completion_tokens: nextMax,
+        max_tokens: undefined,
       });
     }
 
