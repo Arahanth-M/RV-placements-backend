@@ -48,6 +48,18 @@ export function activeRoleSetKey(companyId) {
   return `${RESEARCH_ACTIVE_KEY_PREFIX}roles:${companyId}`;
 }
 
+export function researchLinksAlreadyPublished(job) {
+  return Boolean(job?.sourcesPublication?.publishedAt);
+}
+
+/** Interview-question jobs stay link-editable in review and after questions are published. */
+export function canManageResearchLinks(job) {
+  if (!job || job.field !== "interviewQuestions") return false;
+  if (!Array.isArray(job.result?.sources)) return false;
+  if (researchLinksAlreadyPublished(job)) return false;
+  return job.status === "review" || job.status === "published";
+}
+
 export function safeResearchError(error) {
   const code = Object.prototype.hasOwnProperty.call(SAFE_ERROR_MESSAGES, error?.code)
     ? error.code
@@ -238,7 +250,7 @@ export async function markResearchJobSourcesPublished(jobId, summary) {
     error.code = "job_not_found";
     throw error;
   }
-  if (current.status === "published") return current;
+  if (researchLinksAlreadyPublished(current)) return current;
   const updated = {
     ...current,
     sourcesPublication: {
@@ -422,7 +434,7 @@ export async function setResearchJobLinksSummaryDraft(jobId, draft) {
     error.code = "job_not_found";
     throw error;
   }
-  if (current.status !== "review") {
+  if (!canManageResearchLinks(current)) {
     const error = new Error("Research job is not in review.");
     error.code = "not_reviewable";
     throw error;

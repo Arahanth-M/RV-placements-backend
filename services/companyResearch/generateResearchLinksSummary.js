@@ -2,7 +2,11 @@ import { callLLM } from "../llmClient.js";
 import { parseJSONResponse } from "../../utils/parseJSONResponse.js";
 import { GROQ_KEY_SLOTS } from "../../config/groqApiKey.js";
 import { normalizePrepRoleKey } from "../../utils/prepRole.js";
-import { getResearchJob, setResearchJobLinksSummaryDraft } from "./researchJobService.js";
+import {
+  canManageResearchLinks,
+  getResearchJob,
+  setResearchJobLinksSummaryDraft,
+} from "./researchJobService.js";
 import { PublishResearchError } from "./publishResearchInterviewQuestions.js";
 import { normalizeMultilineText } from "../../utils/normalizeMultilineText.js";
 
@@ -12,10 +16,7 @@ function compact(value) {
 
 function assertReviewJob(job) {
   if (!job) throw new PublishResearchError("job_not_found");
-  if (job.status === "published") throw new PublishResearchError("already_published");
-  if (job.status !== "review") throw new PublishResearchError("not_reviewable");
-  if (job.field && job.field !== "interviewQuestions") throw new PublishResearchError("not_reviewable");
-  if (!Array.isArray(job.result?.sources)) throw new PublishResearchError("not_reviewable");
+  if (!canManageResearchLinks(job)) throw new PublishResearchError("not_reviewable");
 }
 
 const SYSTEM = [

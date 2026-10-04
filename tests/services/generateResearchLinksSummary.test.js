@@ -55,6 +55,7 @@ describe("generateResearchLinksSummary", () => {
       value: {
         jobId: JOB_ID,
         status: "review",
+        field: "interviewQuestions",
         companyName: "Acme",
         role: "Software Engineer",
         result: {
@@ -70,5 +71,24 @@ describe("generateResearchLinksSummary", () => {
     const saved = store.get(`${RESEARCH_JOB_KEY_PREFIX}${JOB_ID}`).value;
     expect(saved.linksSummaryDraft.summary).toMatch(/DSA/);
     expect(mockCallLLM).toHaveBeenCalled();
+  });
+
+  it("generates a summary after interview questions were published", async () => {
+    store.set(`${RESEARCH_JOB_KEY_PREFIX}${JOB_ID}`, {
+      value: {
+        jobId: JOB_ID,
+        status: "published",
+        companyName: "Acme",
+        field: "interviewQuestions",
+        role: "Software Engineer",
+        result: {
+          sources: [{ title: "GFG", url: "https://gfg.org/x", tavilySnippet: "arrays" }],
+        },
+      },
+      ttl: RESEARCH_JOB_TTL_SECONDS,
+    });
+
+    const result = await generateResearchLinksSummary({ jobId: JOB_ID });
+    expect(result.summary).toMatch(/DSA/);
   });
 });

@@ -13,7 +13,12 @@ import {
   PublishResearchError,
   collectResearchSourcesToInsert,
 } from "./publishResearchInterviewQuestions.js";
-import { getResearchJob, markResearchJobSourcesPublished } from "./researchJobService.js";
+import {
+  canManageResearchLinks,
+  getResearchJob,
+  markResearchJobSourcesPublished,
+  researchLinksAlreadyPublished,
+} from "./researchJobService.js";
 
 function objectIdString(value) {
   const id = String(value || "").trim();
@@ -23,10 +28,8 @@ function objectIdString(value) {
 
 function assertSourcesPublishable(job) {
   if (!job) throw new PublishResearchError("job_not_found");
-  if (job.status === "published") throw new PublishResearchError("already_published");
-  if (job.status !== "review") throw new PublishResearchError("not_reviewable");
-  if (job.field && job.field !== "interviewQuestions") throw new PublishResearchError("not_reviewable");
-  if (!Array.isArray(job.result?.sources)) throw new PublishResearchError("not_reviewable");
+  if (researchLinksAlreadyPublished(job)) throw new PublishResearchError("already_published");
+  if (!canManageResearchLinks(job)) throw new PublishResearchError("not_reviewable");
 }
 
 function compact(value) {
@@ -139,7 +142,7 @@ export async function publishResearchSources(input = {}) {
 
     return {
       jobId,
-      status: "review",
+      status: job.status === "published" ? "published" : "review",
       prepRoleKey,
       insertedSourceCount: sourcesToInsert.length,
       duplicateSourceCount,
