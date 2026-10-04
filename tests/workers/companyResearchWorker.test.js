@@ -26,6 +26,8 @@ jest.unstable_mockModule("bullmq", () => ({
 jest.unstable_mockModule("../../src/utils/redisHelpers.js", () => ({
   getJSON: (...args) => mockGetJSON(...args),
   setJSON: (...args) => mockSetJSON(...args),
+  addToSet: async () => true,
+  getSetMembers: async () => [],
 }));
 
 const mockOnline = jest.fn();

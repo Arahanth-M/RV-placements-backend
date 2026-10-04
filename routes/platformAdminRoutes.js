@@ -47,6 +47,11 @@ import {
   updatePlatformMustDoByTopic,
   updatePlatformQuestion,
 } from "../services/platformCompanyMutationsService.js";
+import {
+  clearRuntimeSecret,
+  listRuntimeSecrets,
+  setRuntimeSecret,
+} from "../services/platformRuntimeSecrets.js";
 
 const router = express.Router();
 router.use(authJWT);
@@ -559,6 +564,32 @@ router.delete("/companies/:id/must-do-topics/by-topic", async (req, res) => {
   } catch (error) {
     const status = Number(error?.status) || 500;
     return res.status(status).json({ error: error?.message || "Server error" });
+  }
+});
+
+router.get("/runtime-secrets", async (_req, res) => {
+  try {
+    const keys = await listRuntimeSecrets();
+    return res.json({ keys });
+  } catch (error) {
+    console.error("[runtime-secrets] list failed", error?.message || "list_failed");
+    return res.status(500).json({ error: "Keys could not be loaded." });
+  }
+});
+
+router.put("/runtime-secrets/:id", async (req, res) => {
+  try {
+    const row =
+      req.body?.revert === true
+        ? await clearRuntimeSecret(req.params.id)
+        : await setRuntimeSecret(req.params.id, req.body?.value);
+    return res.json(row);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    if (status >= 500) {
+      console.error("[runtime-secrets] update failed", error?.message || "update_failed");
+    }
+    return res.status(status).json({ error: error?.message || "Key could not be saved." });
   }
 });
 

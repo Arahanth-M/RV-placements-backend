@@ -7,6 +7,8 @@ const mockCallLLM = jest.fn();
 jest.unstable_mockModule("../../src/utils/redisHelpers.js", () => ({
   getJSON: (...args) => mockGetJSON(...args),
   setJSON: (...args) => mockSetJSON(...args),
+  addToSet: async () => true,
+  getSetMembers: async () => [],
 }));
 
 jest.unstable_mockModule("../../services/llmClient.js", () => ({

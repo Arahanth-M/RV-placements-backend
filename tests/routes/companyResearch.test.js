@@ -7,16 +7,28 @@ const mockGetJSON = jest.fn();
 const mockSetJSON = jest.fn();
 const mockResearch = jest.fn();
 const mockEnqueue = jest.fn();
+const mockSuggestFresherRoles = jest.fn();
+const roleSets = new Map();
 
 jest.unstable_mockModule("../../src/utils/redisHelpers.js", () => ({
   getJSON: (...args) => mockGetJSON(...args),
   setJSON: (...args) => mockSetJSON(...args),
+  addToSet: async (key, value) => {
+    if (!roleSets.has(key)) roleSets.set(key, new Set());
+    roleSets.get(key).add(value);
+    return true;
+  },
+  getSetMembers: async (key) => [...(roleSets.get(key) || [])],
 }));
 
 jest.unstable_mockModule("../../services/companyResearch/researchInterviewQuestions.js", () => ({
   researchInterviewQuestions: (...args) => mockResearch(...args),
   DEFAULT_MAX_SOURCES: 3,
   MAX_SOURCES_CAP: 8,
+}));
+
+jest.unstable_mockModule("../../services/companyResearch/suggestFresherRoles.js", () => ({
+  suggestFresherRoles: (...args) => mockSuggestFresherRoles(...args),
 }));
 
 jest.unstable_mockModule("../../services/queues/companyResearchQueue.js", () => ({
@@ -46,9 +58,8 @@ jest.unstable_mockModule("../../middleware/requirePlatformAdmin.js", () => ({
 }));
 
 const { default: companyResearchRouter } = await import("../../routes/companyResearchRoutes.js");
-const { RESEARCH_JOB_TTL_SECONDS, RESEARCH_JOB_KEY_PREFIX } = await import(
-  "../../services/companyResearch/researchJobService.js"
-);
+const { RESEARCH_JOB_TTL_SECONDS, RESEARCH_JOB_KEY_PREFIX, RESEARCH_ACTIVE_KEY_PREFIX, activeRoleSetKey } =
+  await import("../../services/companyResearch/researchJobService.js");
 
 const app = express();
 app.use(express.json());
@@ -59,7 +70,9 @@ const store = new Map();
 describe("company research API", () => {
   beforeEach(() => {
     store.clear();
+    roleSets.clear();
     mockResearch.mockReset();
+    mockSuggestFresherRoles.mockReset();
     mockEnqueue.mockReset();
     mockEnqueue.mockResolvedValue({ id: "bull-job" });
     mockGetJSON.mockReset();
@@ -96,7 +109,14 @@ describe("company research API", () => {
     expect(store.get(key).ttl).toBe(RESEARCH_JOB_TTL_SECONDS);
     expect(RESEARCH_JOB_TTL_SECONDS).toBe(24 * 60 * 60);
     expect(store.get(key).value.status).toBe("queued");
-    expect(mockSetJSON.mock.calls.map((call) => call[1].status)).toEqual(["queued"]);
+    const jobWrites = mockSetJSON.mock.calls.filter((call) =>
+      String(call[0]).startsWith(RESEARCH_JOB_KEY_PREFIX)
+    );
+    expect(jobWrites.map((call) => call[1].status)).toEqual(["queued"]);
+    expect(store.get(`${RESEARCH_ACTIVE_KEY_PREFIX}amazon-id:interviewQuestions:software-engineer`).value).toEqual({
+      jobId: response.body.jobId,
+    });
+    expect(roleSets.get(activeRoleSetKey("amazon-id"))).toEqual(new Set([response.body.jobId]));
     expect(mockResearch).not.toHaveBeenCalled();
     expect(mockEnqueue).toHaveBeenCalledWith({
       jobId: response.body.jobId,
@@ -134,6 +154,135 @@ describe("company research API", () => {
     await request(app)
       .get("/api/admin/platform/company-research/11111111-1111-1111-1111-111111111111")
       .expect(404);
+  });
+
+  it("returns each company's latest job so research can continue after leaving the page", async () => {
+    const amazon = await postResearch({
+      companyId: "amazon-id",
+      companyName: "Amazon",
+      field: "interviewQuestions",
+      role: "SDE",
+      country: "India",
+    }).expect(200);
+    const google = await postResearch({
+      companyId: "google-id",
+      companyName: "Google",
+      field: "onlineQuestions",
+      role: "SDE",
+      country: "India",
+    }).expect(200);
+
+    const amazonJobs = await request(app)
+      .get("/api/admin/platform/companies/amazon-id/company-research")
+      .expect(200);
+    const googleJobs = await request(app)
+      .get("/api/admin/platform/companies/google-id/company-research")
+      .expect(200);
+
+    expect(amazonJobs.body.jobs.map((job) => job.jobId)).toEqual([amazon.body.jobId]);
+    expect(amazonJobs.body.jobs[0]).toEqual(
+      expect.objectContaining({ status: "queued", field: "interviewQuestions", companyName: "Amazon" })
+    );
+    expect(googleJobs.body.jobs.map((job) => job.jobId)).toEqual([google.body.jobId]);
+    expect(googleJobs.body.jobs[0].field).toBe("onlineQuestions");
+
+    const analyst = await postResearch({
+      companyId: "amazon-id",
+      companyName: "Amazon",
+      field: "interviewQuestions",
+      role: "Data Analyst",
+      country: "India",
+    }).expect(200);
+    const amazonRoles = await request(app)
+      .get("/api/admin/platform/companies/amazon-id/company-research")
+      .expect(200);
+    expect(amazonRoles.body.jobs.map((job) => job.jobId).sort()).toEqual(
+      [amazon.body.jobId, analyst.body.jobId].sort()
+    );
+
+    await request(app).get("/api/admin/platform/companies/not%20valid/company-research").expect(400);
+  });
+
+  it("returns fresher roles suggested from public hiring pages", async () => {
+    mockSuggestFresherRoles.mockResolvedValue(["SDE", "Data Analyst"]);
+
+    const response = await request(app)
+      .get("/api/admin/platform/companies/amazon-id/fresher-roles")
+      .query({ companyName: "Amazon" })
+      .expect(200);
+
+    expect(mockSuggestFresherRoles).toHaveBeenCalledWith({
+      companyId: "amazon-id",
+      companyName: "Amazon",
+    });
+    expect(response.body.roles).toEqual(["SDE", "Data Analyst"]);
+
+    await request(app)
+      .get("/api/admin/platform/companies/amazon-id/fresher-roles")
+      .expect(400);
+  });
+
+  it("saves edited question, answer, and experience text on a review job", async () => {
+    const jobId = "11111111-1111-4111-8111-111111111111";
+    const experienceId = "22222222-2222-4222-8222-222222222222";
+    await mockSetJSON(`${RESEARCH_JOB_KEY_PREFIX}${jobId}`, {
+      jobId,
+      status: "review",
+      companyId: "amazon-id",
+      companyName: "Amazon",
+      field: "interviewQuestions",
+      result: {
+        items: [
+          {
+            question: "Implement an LRU cache.",
+            kind: "coding",
+            answer: "Use a map.",
+            intuition: "O(1).",
+            solutions: { cpp: "old", java: "", python: "" },
+          },
+        ],
+      },
+    });
+    await mockSetJSON(`${RESEARCH_JOB_KEY_PREFIX}${experienceId}`, {
+      jobId: experienceId,
+      status: "review",
+      companyId: "amazon-id",
+      companyName: "Amazon",
+      field: "interviewExperiences",
+      result: { items: [{ content: "Original writeup." }] },
+    });
+
+    const edited = await request(app)
+      .put(`/api/admin/platform/company-research/${jobId}/items/0`)
+      .send({
+        question: "Implement an LRU cache with O(1) operations.",
+        answer: "Hash map plus doubly linked list.",
+        intuition: "Move the node on each get.",
+        solutions: { cpp: "class LRU {};", java: "class LRU {}", python: "class LRU: pass" },
+      })
+      .expect(200);
+    expect(edited.body.item.question).toBe("Implement an LRU cache with O(1) operations.");
+    expect(edited.body.item.answer).toBe("Hash map plus doubly linked list.");
+    expect(store.get(`${RESEARCH_JOB_KEY_PREFIX}${jobId}`).value.result.items[0].solutions.cpp).toBe(
+      "class LRU {};"
+    );
+
+    const experience = await request(app)
+      .put(`/api/admin/platform/company-research/${experienceId}/items/0`)
+      .send({ content: "Updated interview writeup." })
+      .expect(200);
+    expect(experience.body.item.content).toBe("Updated interview writeup.");
+
+    await request(app)
+      .put(`/api/admin/platform/company-research/${jobId}/items/0`)
+      .send({ question: "   " })
+      .expect(400);
+
+    store.get(`${RESEARCH_JOB_KEY_PREFIX}${jobId}`).value.status = "published";
+    await request(app)
+      .put(`/api/admin/platform/company-research/${jobId}/items/0`)
+      .send({ question: "Should not save." })
+      .expect(409);
   });
 
   it("queues OA questions and interview experiences without running research", async () => {

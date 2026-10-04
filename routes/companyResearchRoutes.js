@@ -8,7 +8,14 @@ import {
   MAX_SOURCES_CAP,
 } from "../services/companyResearch/researchInterviewQuestions.js";
 import { isValidOaResearchRole } from "../utils/oaPrepRoles.js";
-import { getResearchJob, startResearchJob } from "../services/companyResearch/researchJobService.js";
+import {
+  getResearchJob,
+  isResearchCompanyId,
+  listCompanyResearchJobs,
+  startResearchJob,
+  updateResearchJobItem,
+} from "../services/companyResearch/researchJobService.js";
+import { suggestFresherRoles } from "../services/companyResearch/suggestFresherRoles.js";
 
 const router = express.Router();
 router.use(authJWT);
@@ -220,6 +227,67 @@ router.post("/company-research/:jobId/publish-sources", async (req, res) => {
   }
 });
 
+router.put("/company-research/:jobId/items/:index", async (req, res) => {
+  const index = Number(req.params.index);
+  try {
+    const result = await updateResearchJobItem({
+      jobId: req.params.jobId,
+      index,
+      patch: req.body,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    const code = error?.code || "item_update_failed";
+    const status = Number.isInteger(error?.status) ? error.status : 500;
+    if (error?.name === "ResearchItemUpdateError" || status !== 500) {
+      return res.status(status).json({
+        error: {
+          code,
+          message: error?.message || "This item could not be saved.",
+        },
+      });
+    }
+    console.error("[company-research] item update failed", { code });
+    return res.status(500).json({
+      error: {
+        code: "item_update_failed",
+        message: "This item could not be saved.",
+      },
+    });
+  }
+});
+
+router.post("/company-research/:jobId/enhance-questions", async (req, res) => {
+  try {
+    const { enhanceResearchQuestions } = await import(
+      "../services/companyResearch/enhanceResearchQuestions.js"
+    );
+    const result = await enhanceResearchQuestions({
+      jobId: req.params.jobId,
+      selectedIndexes: req.body?.selectedIndexes,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    const code = error?.code || "enhance_failed";
+    const status = Number.isInteger(error?.status) ? error.status : 500;
+    if (error?.name === "PublishResearchError" || status !== 500) {
+      return res.status(status).json({
+        error: {
+          code,
+          message: error?.message || "Questions could not be enhanced.",
+        },
+      });
+    }
+    console.error("[company-research] enhance-questions failed", { code });
+    return res.status(500).json({
+      error: {
+        code: "enhance_failed",
+        message: "Questions could not be enhanced.",
+      },
+    });
+  }
+});
+
 router.post("/company-research/:jobId/generate-answers", async (req, res) => {
   try {
     const { generateResearchQuestionAnswers } = await import(
@@ -278,6 +346,43 @@ router.post("/company-research/:jobId/publish", async (req, res) => {
       error: {
         code: "publish_failed",
         message: "Research could not be published.",
+      },
+    });
+  }
+});
+
+router.get("/companies/:companyId/fresher-roles", async (req, res) => {
+  const companyId = text(req.params.companyId);
+  const companyName = text(req.query.companyName);
+  if (!isResearchCompanyId(companyId)) {
+    return res.status(400).json({ error: "companyId is not valid." });
+  }
+  if (!companyName) {
+    return res.status(400).json({ error: "companyName is required." });
+  }
+  try {
+    const roles = await suggestFresherRoles({ companyId, companyName });
+    return res.status(200).json({ roles });
+  } catch (error) {
+    console.error("[company-research] fresher roles failed", error?.message || "fresher_roles_failed");
+    return res.status(200).json({ roles: [] });
+  }
+});
+
+router.get("/companies/:companyId/company-research", async (req, res) => {
+  const companyId = text(req.params.companyId);
+  if (!isResearchCompanyId(companyId)) {
+    return res.status(400).json({ error: "companyId is not valid." });
+  }
+  try {
+    const jobs = await listCompanyResearchJobs(companyId);
+    return res.status(200).json({ jobs });
+  } catch (error) {
+    console.error("[company-research] list failed", { code: error?.code || "job_read_failed" });
+    return res.status(500).json({
+      error: {
+        code: "job_read_failed",
+        message: "Research jobs could not be read.",
       },
     });
   }

@@ -39,8 +39,16 @@ export const authLimiter = rateLimit({
   handler: rateLimitExceededHandler,
 });
 
+function isCompanyResearchStatusRead(req) {
+  if (req.method !== "GET") return false;
+  const path = String(req.originalUrl || req.url || "").split("?")[0];
+  return path.includes("/company-research");
+}
+
 /**
  * Admin Rate Limiter: Protects critical administrative operations.
+ * Status polling is excluded: one research run polls for many minutes, and
+ * several companies can be in progress together.
  */
 export const adminLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -48,6 +56,7 @@ export const adminLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: "Too many administrative attempts, please try again after 15 minutes",
+  skip: (req) => isCompanyResearchStatusRead(req),
   handler: rateLimitExceededHandler,
 });
 
