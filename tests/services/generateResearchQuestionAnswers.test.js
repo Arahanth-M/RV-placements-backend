@@ -87,9 +87,10 @@ describe("generateResearchQuestionAnswers", () => {
 
     mockCallLLM
       .mockResolvedValueOnce('{"answer":"REST is an architectural style."}')
-      .mockResolvedValueOnce(
-        '{"answer":"Use a hash map.","solutions":{"cpp":"// cpp","java":"// java","python":"# py"}}'
-      );
+      .mockResolvedValueOnce('{"answer":"Use a hash map."}')
+      .mockResolvedValueOnce('{"code":"// cpp"}')
+      .mockResolvedValueOnce('{"code":"// java"}')
+      .mockResolvedValueOnce('{"code":"# py"}');
 
     const result = await generateResearchQuestionAnswers({
       jobId: JOB_ID,
@@ -101,9 +102,26 @@ describe("generateResearchQuestionAnswers", () => {
       reasoning_effort: "low",
       include_reasoning: false,
       max_completion_tokens: 3072,
-      response_format: { type: "json_object" },
+      response_format: {
+        type: "json_schema",
+        json_schema: { name: "written_answer", strict: true },
+      },
     });
-    expect(mockCallLLM.mock.calls[1][1].max_completion_tokens).toBe(8192);
+    expect(mockCallLLM.mock.calls[0][0][0].content).toContain("escape newlines as \\n");
+    expect(mockCallLLM.mock.calls[0][0][0].content).not.toContain("real newline");
+    expect(mockCallLLM.mock.calls[1][1].max_completion_tokens).toBe(3072);
+    expect(mockCallLLM.mock.calls[1][0][1].content).not.toContain("Provide C++, Java, and Python");
+    expect(mockCallLLM.mock.calls[2][1]).toMatchObject({
+      max_completion_tokens: 8192,
+      response_format: {
+        type: "json_schema",
+        json_schema: { name: "source_code", strict: true },
+      },
+    });
+    expect(mockCallLLM.mock.calls[2][0][1].content).toContain("complete C++");
+    expect(mockCallLLM.mock.calls[2][0][1].content).not.toContain("Java");
+    expect(mockCallLLM.mock.calls[3][0][1].content).toContain("complete Java");
+    expect(mockCallLLM.mock.calls[4][0][1].content).toContain("complete Python");
     const saved = store.get(`${RESEARCH_JOB_KEY_PREFIX}${JOB_ID}`).value;
     expect(saved.result.items[0].answer).toBe("REST is an architectural style.");
     expect(saved.result.items[1].solutions).toEqual({
@@ -140,5 +158,95 @@ describe("generateResearchQuestionAnswers", () => {
     const prompt = mockCallLLM.mock.calls[0][0][1].content;
     expect(prompt.length).toBeLessThan(evidence.length);
     expect(prompt).toContain("Context from source:");
+  });
+
+  it("rewrites one answer and keeps answers saved on other questions while it runs", async () => {
+    store.set(`${RESEARCH_JOB_KEY_PREFIX}${JOB_ID}`, {
+      value: {
+        jobId: JOB_ID,
+        status: "review",
+        result: {
+          items: [
+            { question: "What is REST?", kind: "non_coding", answer: "A weak first draft." },
+            { question: "Two Sum", kind: "coding", answer: "Original two sum answer." },
+          ],
+        },
+      },
+      ttl: RESEARCH_JOB_TTL_SECONDS,
+    });
+
+    mockCallLLM.mockImplementation(async () => {
+      const key = `${RESEARCH_JOB_KEY_PREFIX}${JOB_ID}`;
+      const stored = store.get(key);
+      stored.value = {
+        ...stored.value,
+        result: {
+          ...stored.value.result,
+          items: stored.value.result.items.map((item, index) =>
+            index === 1 ? { ...item, answer: "Kept sibling." } : item
+          ),
+        },
+      };
+      return '{"answer":"REST uses resources and HTTP methods."}';
+    });
+
+    const result = await generateResearchQuestionAnswers({
+      jobId: JOB_ID,
+      selectedIndexes: [0],
+      regenerate: true,
+    });
+
+    expect(result.updatedIndexes).toEqual([0]);
+    expect(result.items[0].answer).toBe("REST uses resources and HTTP methods.");
+    const prompt = mockCallLLM.mock.calls[0][0][1].content;
+    expect(prompt).toContain("Rewrite the previous answer");
+    expect(prompt).toContain("A weak first draft.");
+    expect(mockCallLLM.mock.calls[0][1].temperature).toBe(0.4);
+    const saved = store.get(`${RESEARCH_JOB_KEY_PREFIX}${JOB_ID}`).value;
+    expect(saved.result.items[0].answer).toBe("REST uses resources and HTTP methods.");
+    expect(saved.result.items[1].answer).toBe("Kept sibling.");
+  });
+
+  it("rewrites one coding language and keeps the other languages", async () => {
+    store.set(`${RESEARCH_JOB_KEY_PREFIX}${JOB_ID}`, {
+      value: {
+        jobId: JOB_ID,
+        status: "review",
+        result: {
+          items: [
+            {
+              question: "Implement an LRU cache",
+              kind: "coding",
+              answer: "Hash map plus list.",
+              solutions: {
+                cpp: "int oldCpp() { return 1; }",
+                java: "int oldJava() { return 1; }",
+                python: "def old_python():\n    return 1",
+              },
+            },
+          ],
+        },
+      },
+      ttl: RESEARCH_JOB_TTL_SECONDS,
+    });
+    mockCallLLM.mockResolvedValue('{"code":"def rewritten_python():\\n    return 2"}');
+
+    const result = await generateResearchQuestionAnswers({
+      jobId: JOB_ID,
+      selectedIndexes: [0],
+      regenerate: true,
+      language: "python",
+    });
+
+    expect(result.items[0].solutions).toEqual({
+      cpp: "int oldCpp() { return 1; }",
+      java: "int oldJava() { return 1; }",
+      python: "def rewritten_python():\n    return 2",
+    });
+    expect(result.items[0].answer).toBe("Hash map plus list.");
+    const prompt = mockCallLLM.mock.calls[0][0][1].content;
+    expect(prompt).toContain("Rewrite only the Python solution");
+    expect(prompt).toContain("def old_python()");
+    expect(prompt).not.toContain("oldCpp");
   });
 });

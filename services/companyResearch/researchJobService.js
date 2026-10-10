@@ -323,6 +323,22 @@ function applyResearchItemPatch(field, item, patch) {
     next.intuition = editedText(patch.intuition, ITEM_TEXT_LIMITS.intuition, "Intuition");
     changed = true;
   }
+  if (Object.prototype.hasOwnProperty.call(patch, "kind")) {
+    const kind = String(patch.kind || "").trim().toLowerCase();
+    if (kind !== "coding" && kind !== "non_coding") {
+      throw itemUpdateError("invalid_item", "Question type must be coding or non-coding.", 400);
+    }
+    const currentForm = String(item?.form || "").trim().toLowerCase();
+    if (currentForm === "mcq" || currentForm === "sql") {
+      throw itemUpdateError("invalid_item", "This question type cannot be changed.", 400);
+    }
+    next.kind = kind;
+    next.form = kind;
+    if (kind === "non_coding") {
+      next.solutions = { cpp: "", java: "", python: "" };
+    }
+    changed = true;
+  }
   if (patch.solutions && typeof patch.solutions === "object" && !Array.isArray(patch.solutions)) {
     const previous = next.solutions && typeof next.solutions === "object" ? next.solutions : {};
     next.solutions = {
@@ -402,6 +418,29 @@ export async function updateResearchJobItem(input = {}) {
   items[index] = applyResearchItemPatch(current.field, items[index], input.patch);
   await replaceResearchJobResultItems(jobId, items);
   return { jobId, index, item: items[index] };
+}
+
+/**
+ * Remove one review item. Later indexes shift down by one.
+ * @param {{ jobId?: string, index?: number }} input
+ */
+export async function deleteResearchJobItem(input = {}) {
+  const jobId = String(input.jobId || "").trim();
+  const index = input.index;
+  const current = await getResearchJob(jobId);
+  if (!current) throw itemUpdateError("job_not_found", "Research job was not found.", 404);
+  if (current.status !== "review") {
+    throw itemUpdateError("not_reviewable", "Research job is not in review.", 409);
+  }
+  if (!Array.isArray(current.result?.items)) {
+    throw itemUpdateError("invalid_item", "Research job has no items to edit.", 400);
+  }
+  if (typeof index !== "number" || !Number.isInteger(index) || index < 0 || index >= current.result.items.length) {
+    throw itemUpdateError("invalid_item", "That item was not found.", 400);
+  }
+  const items = current.result.items.filter((_, itemIndex) => itemIndex !== index);
+  await replaceResearchJobResultItems(jobId, items);
+  return { jobId, index, items };
 }
 
 export async function replaceResearchJobResultItems(jobId, items) {

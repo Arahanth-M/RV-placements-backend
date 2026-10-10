@@ -8,6 +8,7 @@ const mockSetJSON = jest.fn();
 const mockResearch = jest.fn();
 const mockEnqueue = jest.fn();
 const mockSuggestFresherRoles = jest.fn();
+const mockListRvceVisitRoles = jest.fn();
 const roleSets = new Map();
 
 jest.unstable_mockModule("../../src/utils/redisHelpers.js", () => ({
@@ -29,6 +30,10 @@ jest.unstable_mockModule("../../services/companyResearch/researchInterviewQuesti
 
 jest.unstable_mockModule("../../services/companyResearch/suggestFresherRoles.js", () => ({
   suggestFresherRoles: (...args) => mockSuggestFresherRoles(...args),
+}));
+
+jest.unstable_mockModule("../../services/companyResearch/rvceVisitRoles.js", () => ({
+  listRvceVisitRoles: (...args) => mockListRvceVisitRoles(...args),
 }));
 
 jest.unstable_mockModule("../../services/queues/companyResearchQueue.js", () => ({
@@ -73,6 +78,8 @@ describe("company research API", () => {
     roleSets.clear();
     mockResearch.mockReset();
     mockSuggestFresherRoles.mockReset();
+    mockListRvceVisitRoles.mockReset();
+    mockListRvceVisitRoles.mockResolvedValue([]);
     mockEnqueue.mockReset();
     mockEnqueue.mockResolvedValue({ id: "bull-job" });
     mockGetJSON.mockReset();
@@ -167,7 +174,7 @@ describe("company research API", () => {
     const google = await postResearch({
       companyId: "google-id",
       companyName: "Google",
-      field: "onlineQuestions",
+      field: "interviewExperiences",
       role: "SDE",
       country: "India",
     }).expect(200);
@@ -184,7 +191,7 @@ describe("company research API", () => {
       expect.objectContaining({ status: "queued", field: "interviewQuestions", companyName: "Amazon" })
     );
     expect(googleJobs.body.jobs.map((job) => job.jobId)).toEqual([google.body.jobId]);
-    expect(googleJobs.body.jobs[0].field).toBe("onlineQuestions");
+    expect(googleJobs.body.jobs[0].field).toBe("interviewExperiences");
 
     const analyst = await postResearch({
       companyId: "amazon-id",
@@ -215,7 +222,20 @@ describe("company research API", () => {
       companyId: "amazon-id",
       companyName: "Amazon",
     });
+    expect(mockListRvceVisitRoles).toHaveBeenCalledWith("amazon-id");
     expect(response.body.roles).toEqual(["SDE", "Data Analyst"]);
+  });
+
+  it("includes RVCE visit roles and hides TBD", async () => {
+    mockSuggestFresherRoles.mockResolvedValue(["Data Analyst", "SDE"]);
+    mockListRvceVisitRoles.mockResolvedValue(["Software Engineer", "TBD", "Data Analyst"]);
+
+    const response = await request(app)
+      .get("/api/admin/platform/companies/amazon-id/fresher-roles")
+      .query({ companyName: "Amazon" })
+      .expect(200);
+
+    expect(response.body.roles).toEqual(["Software Engineer", "Data Analyst", "SDE"]);
 
     await request(app)
       .get("/api/admin/platform/companies/amazon-id/fresher-roles")
@@ -273,6 +293,26 @@ describe("company research API", () => {
       .expect(200);
     expect(experience.body.item.content).toBe("Updated interview writeup.");
 
+    const nonCoding = await request(app)
+      .put(`/api/admin/platform/company-research/${jobId}/items/0`)
+      .send({ kind: "non_coding" })
+      .expect(200);
+    expect(nonCoding.body.item.kind).toBe("non_coding");
+    expect(nonCoding.body.item.form).toBe("non_coding");
+    expect(nonCoding.body.item.solutions).toEqual({ cpp: "", java: "", python: "" });
+
+    const coding = await request(app)
+      .put(`/api/admin/platform/company-research/${jobId}/items/0`)
+      .send({ kind: "coding" })
+      .expect(200);
+    expect(coding.body.item.kind).toBe("coding");
+    expect(coding.body.item.form).toBe("coding");
+
+    await request(app)
+      .put(`/api/admin/platform/company-research/${jobId}/items/0`)
+      .send({ kind: "sql" })
+      .expect(400);
+
     await request(app)
       .put(`/api/admin/platform/company-research/${jobId}/items/0`)
       .send({ question: "   " })
@@ -285,22 +325,62 @@ describe("company research API", () => {
       .expect(409);
   });
 
-  it("queues OA questions and interview experiences without running research", async () => {
-    for (const field of ["onlineQuestions", "interviewExperiences"]) {
-      const response = await postResearch({
-        companyId: "amazon-id",
-        companyName: "Amazon",
-        field,
-        role: "SDE",
-        country: "India",
-        maxSources: 2,
-      }).expect(200);
-      expect(response.body.status).toBe("queued");
-      expect(mockEnqueue).toHaveBeenLastCalledWith(
-        expect.objectContaining({ field, maxSources: 2, role: "SDE" })
-      );
-      expect(store.get(`${RESEARCH_JOB_KEY_PREFIX}${response.body.jobId}`).value.field).toBe(field);
-    }
+  it("deletes one review question and keeps the questions after it", async () => {
+    const jobId = "33333333-3333-4333-8333-333333333333";
+    await mockSetJSON(`${RESEARCH_JOB_KEY_PREFIX}${jobId}`, {
+      jobId,
+      status: "review",
+      companyId: "amazon-id",
+      companyName: "Amazon",
+      field: "interviewQuestions",
+      result: {
+        items: [
+          { question: "Leaders in an array", answer: "Scan from the right." },
+          { question: "Pairs with sum divisible by K", answer: "Count remainders." },
+        ],
+      },
+    });
+
+    const deleted = await request(app)
+      .delete(`/api/admin/platform/company-research/${jobId}/items/0`)
+      .expect(200);
+    expect(deleted.body.index).toBe(0);
+    expect(deleted.body.items.map((item) => item.question)).toEqual([
+      "Pairs with sum divisible by K",
+    ]);
+    expect(store.get(`${RESEARCH_JOB_KEY_PREFIX}${jobId}`).value.result.items).toHaveLength(1);
+
+    await request(app).delete(`/api/admin/platform/company-research/${jobId}/items/4`).expect(400);
+
+    store.get(`${RESEARCH_JOB_KEY_PREFIX}${jobId}`).value.status = "published";
+    await request(app).delete(`/api/admin/platform/company-research/${jobId}/items/0`).expect(409);
+  });
+
+  it("queues interview experiences without running research and rejects OA research", async () => {
+    const response = await postResearch({
+      companyId: "amazon-id",
+      companyName: "Amazon",
+      field: "interviewExperiences",
+      role: "SDE",
+      country: "India",
+      maxSources: 2,
+    }).expect(200);
+    expect(response.body.status).toBe("queued");
+    expect(mockEnqueue).toHaveBeenLastCalledWith(
+      expect.objectContaining({ field: "interviewExperiences", maxSources: 2, role: "SDE" })
+    );
+    expect(store.get(`${RESEARCH_JOB_KEY_PREFIX}${response.body.jobId}`).value.field).toBe(
+      "interviewExperiences"
+    );
+
+    const rejected = await postResearch({
+      companyId: "amazon-id",
+      companyName: "Amazon",
+      field: "onlineQuestions",
+      role: "SDE",
+      country: "India",
+    }).expect(400);
+    expect(rejected.body.error).toMatch(/interviewQuestions or interviewExperiences/);
     expect(mockResearch).not.toHaveBeenCalled();
   });
 
@@ -312,8 +392,7 @@ describe("company research API", () => {
       { companyId: "id", companyName: "Amazon", field: "interviewQuestions", maxSources: 9 },
       { companyId: "id", companyName: "Amazon", field: "interviewQuestions", searchDepth: "deep" },
       { companyId: "id", companyName: "Amazon", field: "interviewQuestions", role: 12 },
-      { companyId: "id", companyName: "Amazon", field: "onlineQuestions", role: "" },
-      { companyId: "id", companyName: "Amazon", field: "onlineQuestions", role: "Product Manager" },
+      { companyId: "id", companyName: "Amazon", field: "onlineQuestions", role: "SDE" },
     ];
 
     for (const body of cases) {

@@ -53,6 +53,21 @@ function completionTokenBudget(options) {
   return null;
 }
 
+function raisedCompletionBudget(current) {
+  return Math.min(Math.max((current || 1024) * 2, 8192), 16384);
+}
+
+function isJsonValidateFailed(error) {
+  const body = error?.error;
+  const code =
+    (body && typeof body.code === "string" && body.code) ||
+    (body?.error && typeof body.error.code === "string" && body.error.code) ||
+    "";
+  if (code === "json_validate_failed") return true;
+  const text = String(error?.message || "");
+  return text.includes("json_validate_failed") || text.includes("Failed to generate JSON");
+}
+
 const getErrorMessage = (error) => {
   if (error?.error?.message) {
     return error.error.message;
@@ -118,7 +133,7 @@ export const callLLM = async (messages, options = {}) => {
     const choice = completion?.choices?.[0];
     const text = String(choice?.message?.content ?? "").trim();
     if (!text && choice?.finish_reason === "length" && options?._retriedEmpty !== true) {
-      const nextBudget = Math.min(Math.max((completionBudget || 1024) * 2, 8192), 16384);
+      const nextBudget = raisedCompletionBudget(completionBudget);
       console.warn(
         `[Groq] Empty completion after reasoning (finish_reason=length) on ${selectedModel}. Retrying with max_completion_tokens=${nextBudget}.`
       );
@@ -147,6 +162,31 @@ export const callLLM = async (messages, options = {}) => {
       options?.model === RATE_LIMIT_FALLBACK_MODEL ||
       options?.model === "llama-3.1-8b-instant" ||
       options?.model === "llama3-8b-8192";
+
+    // JSON mode rejects a clipped or unescaped completion with 400 before any text is returned.
+    if (isJsonValidateFailed(error) && options?._retriedJson !== true) {
+      const nextBudget = raisedCompletionBudget(completionTokenBudget(options));
+      console.warn(
+        `[Groq] JSON validation failed on ${options?.model || DEFAULT_ORCHESTRATOR_MODEL}. Retrying with max_completion_tokens=${nextBudget}.`
+      );
+      return callLLM(
+        [
+          ...messages,
+          {
+            role: "user",
+            content:
+              "Return one JSON object only. Escape newlines inside strings as \\n. Do not stop before the JSON object is closed.",
+          },
+        ],
+        {
+          ...options,
+          reasoning_effort: "low",
+          max_completion_tokens: nextBudget,
+          max_tokens: undefined,
+          _retriedJson: true,
+        }
+      );
+    }
 
     // Retry once with the fast model (+ smaller max_tokens) if the primary hits TPM limits
     if (isRateLimit && !alreadyOnFallback && options?.allowFallback !== false) {

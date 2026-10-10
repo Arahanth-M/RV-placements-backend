@@ -51,8 +51,8 @@ export const GENERAL_COMPANY_CATEGORIES = [
   },
   {
     id: GENERAL_COMPANY_CATEGORY_OTHERS,
-    label: "Others",
-    subtitle: "Companies that don’t fit the groups above",
+    label: "Miscellaneous companies",
+    subtitle: "Extra bonus companies",
   },
 ];
 

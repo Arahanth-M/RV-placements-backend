@@ -10,22 +10,33 @@ describe("attachPlatformPrepCoverageToCompanyList", () => {
     });
     await CompanyPlatformContent.create({
       companyId: staticRow._id,
+      prepRoles: [
+        { key: "sde", label: "SDE" },
+        { key: "analyst", label: "Analyst" },
+      ],
       onlineQuestions: [
-        { status: "approved", question: "Two Sum" },
-        { status: "pending", question: "Not yet" },
+        { status: "approved", question: "Two Sum", prepRoleKey: "sde" },
+        { status: "pending", question: "Not yet", prepRoleKey: "sde" },
+      ],
+      mcqQuestions: [
+        { status: "approved", question: "How many page faults?", prepRoleKey: "sde" },
+        { status: "approved", question: "Which join?", prepRoleKey: "analyst" },
+        { status: "pending", question: "Hidden MCQ", prepRoleKey: "analyst" },
       ],
       interviewQuestions: [
-        { status: "approved", question: "What is REST?" },
-        { status: "approved", question: "Explain OOP" },
-        { status: "approved", question: "System design" },
-        { status: "approved", question: "DBMS" },
-        { status: "approved", question: "OS" },
+        { status: "approved", question: "What is REST?", prepRoleKey: "sde" },
+        { status: "approved", question: "Explain OOP", prepRoleKey: "analyst" },
+        { status: "approved", question: "System design", prepRoleKey: "analyst" },
+        { status: "approved", question: "DBMS", prepRoleKey: "analyst" },
+        { status: "approved", question: "OS", prepRoleKey: "analyst" },
       ],
       interviewExperiences: [
-        { status: "approved", content: "Two rounds, then HR." },
-        { status: "approved", content: "DSA plus HR." },
+        { status: "approved", content: "Two rounds, then HR.", prepRoleKey: "sde" },
+        { status: "approved", content: "DSA plus HR.", prepRoleKey: "analyst" },
       ],
-      internshipExperiences: [{ status: "approved", content: "PPO after intern." }],
+      internshipExperiences: [
+        { status: "approved", content: "PPO after intern.", prepRoleKey: "analyst" },
+      ],
       researchSources: [
         {
           title: "GFG Interview",
@@ -40,12 +51,17 @@ describe("attachPlatformPrepCoverageToCompanyList", () => {
       { _id: staticRow._id, name: "Coverage Co" },
     ]);
     expect(row.platformPrepCoverage).toEqual({
-      oa: 1,
+      oa: 3,
       interview: 5,
       experiences: 3,
     });
+    expect(row.platformPrepCoverageByRole).toEqual([
+      { key: "sde", label: "SDE", oa: 2, interview: 1, experiences: 1 },
+      { key: "analyst", label: "Analyst", oa: 1, interview: 4, experiences: 2 },
+    ]);
     expect(row.researchSources).toEqual([
       {
+        prepRoleKey: "",
         title: "GFG Interview",
         url: "https://www.geeksforgeeks.org/walmart",
         snippet: "Prep notes",
@@ -66,6 +82,7 @@ describe("attachPlatformPrepCoverageToCompanyList", () => {
       interview: 0,
       experiences: 0,
     });
+    expect(row.platformPrepCoverageByRole).toEqual([]);
     expect(row.researchSources).toEqual([]);
   });
 });

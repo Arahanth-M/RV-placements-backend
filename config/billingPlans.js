@@ -1,7 +1,4 @@
-/** One-time /general SKUs. Amounts are INR, GST-inclusive. Validity is 6 months.
- * Temporary live-payment test: every plan is ₹7.
- * Restore: category 199, prep_path 499, mocks 499, all_premium 699, all_cards 499, mocks_prep 499.
- */
+/** One-time /general SKUs. Amounts are INR, GST-inclusive. Validity is 6 months. */
 
 export const BILLING_DURATION_MONTHS = 6;
 
@@ -19,7 +16,7 @@ export const BILLING_PLANS = Object.freeze({
     id: PLAN_IDS.CATEGORY,
     name: "Unlock one category",
     description: "Company-card details for every company in one category. No AI mocks or PrepPath.",
-    priceInr: 7,
+    priceInr: 199,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: true,
     catalog: true,
@@ -29,7 +26,7 @@ export const BILLING_PLANS = Object.freeze({
     id: PLAN_IDS.PREP_PATH,
     name: "Unlimited PrepPath",
     description: "Unlimited PrepPath plus all company cards for 6 months.",
-    priceInr: 7,
+    priceInr: 499,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
     catalog: true,
@@ -39,7 +36,7 @@ export const BILLING_PLANS = Object.freeze({
     id: PLAN_IDS.MOCKS,
     name: "Unlimited AI mock interviews",
     description: "Unlimited AI mocks plus all company cards for 6 months.",
-    priceInr: 7,
+    priceInr: 499,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
     catalog: true,
@@ -49,7 +46,7 @@ export const BILLING_PLANS = Object.freeze({
     id: PLAN_IDS.ALL_PREMIUM,
     name: "All premium features",
     description: "All company cards, unlimited AI mocks, and unlimited PrepPath.",
-    priceInr: 7,
+    priceInr: 699,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
     catalog: true,
@@ -60,7 +57,7 @@ export const BILLING_PLANS = Object.freeze({
     id: PLAN_IDS.ALL_CARDS,
     name: "Unlock all company cards",
     description: "Full details for every company card on /general.",
-    priceInr: 7,
+    priceInr: 499,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
     catalog: false,
@@ -70,7 +67,7 @@ export const BILLING_PLANS = Object.freeze({
     id: PLAN_IDS.MOCKS_PREP,
     name: "AI mocks + PrepPath",
     description: "Unlimited AI mocks and PrepPath for 6 months.",
-    priceInr: 7,
+    priceInr: 499,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
     catalog: false,
