@@ -12,6 +12,8 @@ const mockInvalidate = jest.fn();
 jest.unstable_mockModule("../../src/utils/redisHelpers.js", () => ({
   getJSON: (...args) => mockGetJSON(...args),
   setJSON: (...args) => mockSetJSON(...args),
+  addToSet: async () => true,
+  getSetMembers: async () => [],
 }));
 
 jest.unstable_mockModule("../../models/CompanyStatic.js", () => ({
@@ -355,6 +357,7 @@ describe("publish research interview questions", () => {
       kind: "non_coding",
       status: "approved",
     });
+    expect(update.$setOnInsert.prepRoles).toBeUndefined();
     expect(update.$setOnInsert.onlineQuestions).toBeUndefined();
     expect(update.$setOnInsert.interviewQuestions).toEqual([]);
     expect(update.$push.onlineQuestions.$each[0].sourceUrl).toBeUndefined();

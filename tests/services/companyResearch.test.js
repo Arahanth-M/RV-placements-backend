@@ -17,6 +17,11 @@ jest.unstable_mockModule("../../services/llmClient.js", () => ({
   callLLM: mockCallLLM,
 }));
 
+jest.unstable_mockModule("../../src/utils/redisHelpers.js", () => ({
+  getJSON: async () => null,
+  setJSON: async () => true,
+}));
+
 const { structureInterviewQuestions, StructureInterviewQuestionsError } = await import(
   "../../services/companyResearch/structureWithGroq.js"
 );
@@ -359,10 +364,15 @@ describe("structureInterviewQuestions", () => {
       markdown: "No questions here.",
     });
 
-    expect(mockCallLLM).toHaveBeenCalledWith(expect.any(Array), {
-      apiKeySlot: "web_search",
-      temperature: 0.1,
-    });
+    expect(mockCallLLM).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({
+        apiKeySlot: "web_search",
+        temperature: 0.1,
+        reasoning_effort: "low",
+        max_completion_tokens: 8192,
+      })
+    );
     const options = mockCallLLM.mock.calls[0][1];
     expect(options).not.toHaveProperty("apiKey");
   });

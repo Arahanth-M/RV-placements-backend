@@ -193,6 +193,10 @@ app.use(routes.DRIVE_CALENDAR, driveCalendarRouter);
 if (process.env.NODE_ENV !== "test") {
   connectDB(config.MONGO_URI).then(async () => {
     await connectRedis().catch(() => {});
+    const { loadRuntimeSecrets } = await import("./services/platformRuntimeSecrets.js");
+    await loadRuntimeSecrets().catch((error) =>
+      console.error("[runtime-secrets] load failed:", error?.message || error)
+    );
     const { startNotificationSseSubscriber } = await import(
       "./services/realtime/notificationEmitter.js"
     );
@@ -208,14 +212,25 @@ if (process.env.NODE_ENV !== "test") {
 
     if (skipEmbeddedWorker) {
       console.log("[interview] Embedded BullMQ worker disabled.");
-      return;
+    } else {
+      try {
+        await import("./workers/interviewWorker.js");
+        console.log("[interview] BullMQ interview worker started.");
+      } catch (err) {
+        console.error("[interview] Failed to start embedded worker:", err?.message || err);
+      }
     }
 
-    try {
-      await import("./workers/interviewWorker.js");
-      console.log("[interview] BullMQ interview worker started.");
-    } catch (err) {
-      console.error("[interview] Failed to start embedded worker:", err?.message || err);
+    if (process.env.DISABLE_EMBEDDED_COMPANY_RESEARCH_WORKER === "1") {
+      console.log("[company-research] Embedded BullMQ worker disabled.");
+    } else {
+      try {
+        const { startCompanyResearchWorker } = await import("./workers/companyResearchWorker.js");
+        await startCompanyResearchWorker();
+        console.log("[company-research] BullMQ worker started.");
+      } catch (err) {
+        console.error("[company-research] Failed to start embedded worker:", err?.message || err);
+      }
     }
   });
 }

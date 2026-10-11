@@ -135,6 +135,7 @@ export async function getCompanyPlatformDetailById(companyId) {
   if (!staticRow) return null;
 
   const oa = mapQuestionArrays(platform?.onlineQuestions);
+  const mcqQuestions = mapMcqQuestionsForClient(platform?.mcqQuestions);
   const iq = mapQuestionArrays(platform?.interviewQuestions);
   const mustDo = approvedItems(platform?.mustDoTopics)
     .map((item) => text(item?.topic))
@@ -163,7 +164,10 @@ export async function getCompanyPlatformDetailById(companyId) {
     interviewQuestions_solutions: iq.solutionsByLang,
     interviewQuestions_intuition: iq.intuitions,
     interviewQuestions_prepRoleKey: iq.prepRoleKeys,
-    onlineQuestions_prepRoleKey: oa.prepRoleKeys,
+    onlineQuestions_prepRoleKey: [
+      ...oa.prepRoleKeys,
+      ...mcqQuestions.map((item) => item.prepRoleKey),
+    ],
     onlineQuestions_kind: oa.kinds,
     prepRoles: Array.isArray(platform?.prepRoles)
       ? platform.prepRoles.map((row) => ({
@@ -177,7 +181,7 @@ export async function getCompanyPlatformDetailById(companyId) {
     must_do_topics: mustDoMerged,
     Must_Do_Topics: mustDoMerged,
     prev_coding_ques,
-    mcqQuestions: mapMcqQuestionsForClient(platform?.mcqQuestions),
+    mcqQuestions,
     researchSources: mapResearchSourcesForClient(platform),
     platformPrepCoverage: platformPrepCoverageFromDoc(platform),
     platformContentUpdatedAt: platform?.updatedAt || platform?.createdAt || null,

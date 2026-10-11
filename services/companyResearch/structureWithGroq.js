@@ -1,5 +1,6 @@
 import { callLLM } from "../llmClient.js";
 import { parseJSONResponse } from "../../utils/parseJSONResponse.js";
+import { researchLlmOptions } from "../platformLlmBudgets.js";
 
 /**
  * Characters of webpage markdown sent to Groq.
@@ -197,7 +198,7 @@ async function structureQuestions(source, profileName) {
       { role: "system", content: profile.system },
       { role: "user", content: user },
     ],
-    { apiKeySlot: "web_search", temperature: 0.1 }
+    await researchLlmOptions({ temperature: 0.1 })
   );
 
   let parsed;

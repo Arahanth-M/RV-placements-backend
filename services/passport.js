@@ -7,6 +7,7 @@ import { urls } from "../config/constants.js";
 import { sendWelcomeEmailWebhook } from "./webhookService.js";
 import { isAllowedCollegeEmail, isRvceCollegeEmail } from "../utils/collegeScope.js";
 import { isPlatformOwnerEmail } from "../config/constants.js";
+import { productionLoginAllowed } from "../utils/productionLoginLock.js";
 import { recordDauActivitySafe } from "./dau/recordDauActivity.js";
 import { recordBlockedLoginAttempt } from "./blockedLoginAttempts.js";
 
@@ -45,6 +46,11 @@ passport.use(
         // 1. Basic Email Validation
         if (!normalizedEmail) {
           return done(null, false, { reason: "not_allowed" });
+        }
+
+        // Localhost and production only accept the platform admin while payments are still being tested.
+        if (!productionLoginAllowed(normalizedEmail)) {
+          return done(null, false, { reason: "closed" });
         }
 
         const isCampusLogin = flow === "campus" || flow === "spc";

@@ -29,6 +29,7 @@ import {
 import { attachTrendingFlagsToCompanyList, attachAdminCompanyCardViews, stripCompanyListViews } from "../services/companyCardTrending.js";
 import { attachCardContentUpdatedAt } from "../services/companyCardContentUpdated.js";
 import { attachPlatformPrepCoverageToCompanyList } from "../services/companyPlatformPrepCoverage.js";
+import { listPlatformPrepCatalog } from "../services/platformPrepCatalogService.js";
 import {
   getCompanyPlatformDetailById,
   isPlatformCompanyScope,
@@ -261,6 +262,21 @@ companyRouter.get("/names", async (_req, res) => {
     return res.json(list);
   } catch (e) {
     console.error("❌ Error fetching company names:", e?.message);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+/**
+ * Platform admin company-prep index: same companies as data entry, with the
+ * business model Student Corner categories use and coverage counts.
+ * Must stay above `GET /:id`.
+ */
+companyRouter.get("/platform-prep-catalog", authJWT, requirePlatformAdmin, async (_req, res) => {
+  try {
+    const list = await listPlatformPrepCatalog();
+    return res.json(list);
+  } catch (e) {
+    console.error("❌ Error fetching platform prep catalog:", e?.message);
     return res.status(500).json({ error: "Server error" });
   }
 });

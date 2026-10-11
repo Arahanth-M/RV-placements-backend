@@ -1,4 +1,5 @@
 import { callLLM } from "../llmClient.js";
+import { researchLlmOptions } from "../platformLlmBudgets.js";
 import { parseJSONResponse } from "../../utils/parseJSONResponse.js";
 import {
   MAX_SOURCE_MARKDOWN_CHARS,
@@ -131,7 +132,7 @@ export async function structureOaPage(source) {
       { role: "system", content: OA_EXTRACT_SYSTEM },
       { role: "user", content: user },
     ],
-    { apiKeySlot: "web_search", temperature: 0.1 }
+    await researchLlmOptions({ temperature: 0.1 })
   );
 
   let parsed;

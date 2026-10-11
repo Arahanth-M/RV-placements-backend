@@ -10,19 +10,32 @@ const DEFAULT_CORS_ORIGINS = [
   "https://lastminuteplacementprep.in",
   "http://www.lastminuteplacementprep.in",
   "https://www.lastminuteplacementprep.in",
+  "http://test.lastminuteplacementprep.in",
+  "https://test.lastminuteplacementprep.in",
 ];
 
-const parseCorsOrigins = (origins) => {
-  if (!origins) {
-    return DEFAULT_CORS_ORIGINS;
+function originFromUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    return url.origin;
+  } catch {
+    return "";
   }
+}
 
-  const envOrigins = origins
+const parseCorsOrigins = (origins) => {
+  const envOrigins = String(origins || "")
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
+  const fromPublicUrls = [process.env.FRONTEND_URL, process.env.BACKEND_URL]
+    .map(originFromUrl)
+    .filter(Boolean);
 
-  return [...new Set([...DEFAULT_CORS_ORIGINS, ...envOrigins])];
+  return [...new Set([...DEFAULT_CORS_ORIGINS, ...envOrigins, ...fromPublicUrls])];
 };
 
 // Environment configuration

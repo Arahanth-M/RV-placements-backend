@@ -1,4 +1,5 @@
 import { callLLM } from "../llmClient.js";
+import { researchLlmOptions } from "../platformLlmBudgets.js";
 import { parseJSONResponse } from "../../utils/parseJSONResponse.js";
 import { normalizeQuestionKey } from "./researchInterviewQuestions.js";
 
@@ -109,7 +110,7 @@ export async function consolidateOaItems(extracted, context = {}) {
         ].join("\n"),
       },
     ],
-    { apiKeySlot: "web_search", temperature: 0.15 }
+    await researchLlmOptions({ temperature: 0.15 })
   );
 
   let parsed;

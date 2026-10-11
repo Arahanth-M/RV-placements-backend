@@ -40,6 +40,34 @@ const getGroqClient = (options = {}) => {
   return client;
 };
 
+function completionTokenBudget(options) {
+  if (
+    typeof options?.max_completion_tokens === "number" &&
+    Number.isFinite(options.max_completion_tokens)
+  ) {
+    return options.max_completion_tokens;
+  }
+  if (typeof options?.max_tokens === "number" && Number.isFinite(options.max_tokens)) {
+    return options.max_tokens;
+  }
+  return null;
+}
+
+function raisedCompletionBudget(current) {
+  return Math.min(Math.max((current || 1024) * 2, 8192), 16384);
+}
+
+function isJsonValidateFailed(error) {
+  const body = error?.error;
+  const code =
+    (body && typeof body.code === "string" && body.code) ||
+    (body?.error && typeof body.error.code === "string" && body.error.code) ||
+    "";
+  if (code === "json_validate_failed") return true;
+  const text = String(error?.message || "");
+  return text.includes("json_validate_failed") || text.includes("Failed to generate JSON");
+}
+
 const getErrorMessage = (error) => {
   if (error?.error?.message) {
     return error.error.message;
@@ -87,13 +115,38 @@ export const callLLM = async (messages, options = {}) => {
     if (typeof options?.temperature === "number" && Number.isFinite(options.temperature)) {
       request.temperature = options.temperature;
     }
-    if (typeof options?.max_tokens === "number" && Number.isFinite(options.max_tokens)) {
-      request.max_tokens = options.max_tokens;
+    const completionBudget = completionTokenBudget(options);
+    if (completionBudget != null) {
+      request.max_completion_tokens = completionBudget;
+    }
+    if (typeof options?.reasoning_effort === "string" && options.reasoning_effort.trim()) {
+      request.reasoning_effort = options.reasoning_effort.trim();
+    }
+    if (typeof options?.include_reasoning === "boolean") {
+      request.include_reasoning = options.include_reasoning;
+    }
+    if (options?.response_format && typeof options.response_format === "object") {
+      request.response_format = options.response_format;
     }
 
     const completion = await client.chat.completions.create(request);
+    const choice = completion?.choices?.[0];
+    const text = String(choice?.message?.content ?? "").trim();
+    if (!text && choice?.finish_reason === "length" && options?._retriedEmpty !== true) {
+      const nextBudget = raisedCompletionBudget(completionBudget);
+      console.warn(
+        `[Groq] Empty completion after reasoning (finish_reason=length) on ${selectedModel}. Retrying with max_completion_tokens=${nextBudget}.`
+      );
+      return callLLM(messages, {
+        ...options,
+        reasoning_effort: "low",
+        max_completion_tokens: nextBudget,
+        max_tokens: undefined,
+        _retriedEmpty: true,
+      });
+    }
 
-    return completion?.choices?.[0]?.message?.content?.trim() || "";
+    return text;
   } catch (error) {
     const message = getErrorMessage(error);
     const lower = String(message).toLowerCase();
@@ -110,19 +163,44 @@ export const callLLM = async (messages, options = {}) => {
       options?.model === "llama-3.1-8b-instant" ||
       options?.model === "llama3-8b-8192";
 
+    // JSON mode rejects a clipped or unescaped completion with 400 before any text is returned.
+    if (isJsonValidateFailed(error) && options?._retriedJson !== true) {
+      const nextBudget = raisedCompletionBudget(completionTokenBudget(options));
+      console.warn(
+        `[Groq] JSON validation failed on ${options?.model || DEFAULT_ORCHESTRATOR_MODEL}. Retrying with max_completion_tokens=${nextBudget}.`
+      );
+      return callLLM(
+        [
+          ...messages,
+          {
+            role: "user",
+            content:
+              "Return one JSON object only. Escape newlines inside strings as \\n. Do not stop before the JSON object is closed.",
+          },
+        ],
+        {
+          ...options,
+          reasoning_effort: "low",
+          max_completion_tokens: nextBudget,
+          max_tokens: undefined,
+          _retriedJson: true,
+        }
+      );
+    }
+
     // Retry once with the fast model (+ smaller max_tokens) if the primary hits TPM limits
     if (isRateLimit && !alreadyOnFallback && options?.allowFallback !== false) {
       console.warn(
         `⚠️ [Groq] Rate/TPM limit on ${options?.model || DEFAULT_ORCHESTRATOR_MODEL}. Falling back to ${RATE_LIMIT_FALLBACK_MODEL}...`
       );
-      const nextMax =
-        typeof options?.max_tokens === "number" && Number.isFinite(options.max_tokens)
-          ? Math.min(options.max_tokens, 3500)
-          : options?.max_tokens;
+      const requested = completionTokenBudget(options);
+      const nextMax = typeof requested === "number" ? Math.min(requested, 6000) : requested;
       return callLLM(messages, {
         ...options,
         model: RATE_LIMIT_FALLBACK_MODEL,
-        max_tokens: nextMax,
+        reasoning_effort: options?.reasoning_effort || "low",
+        max_completion_tokens: nextMax,
+        max_tokens: undefined,
       });
     }
 

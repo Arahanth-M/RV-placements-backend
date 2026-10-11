@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import CompanyPlatformContent from "../models/CompanyPlatformContent.js";
 import {
   EMPTY_PLATFORM_PREP_COVERAGE,
+  platformPrepCoverageByRoleFromDoc,
   platformPrepCoverageFromDoc,
 } from "../utils/platformPrepCoverage.js";
 import { mapResearchSourcesForClient } from "../utils/researchSources.js";
@@ -60,6 +61,7 @@ export async function attachPlatformPrepCoverageToCompanyList(list) {
     return rows.map((row) => ({
       ...row,
       platformPrepCoverage: emptyCoverage(),
+      platformPrepCoverageByRole: [],
       researchSources: [],
       prepRoles: [],
       onlineQuestions_prepRoleKey: [],
@@ -80,13 +82,18 @@ export async function attachPlatformPrepCoverageToCompanyList(list) {
         "onlineQuestions.status": 1,
         "onlineQuestions.question": 1,
         "onlineQuestions.prepRoleKey": 1,
+        "mcqQuestions.status": 1,
+        "mcqQuestions.question": 1,
+        "mcqQuestions.prepRoleKey": 1,
         "interviewQuestions.status": 1,
         "interviewQuestions.question": 1,
         "interviewQuestions.prepRoleKey": 1,
         "interviewExperiences.status": 1,
         "interviewExperiences.content": 1,
+        "interviewExperiences.prepRoleKey": 1,
         "internshipExperiences.status": 1,
         "internshipExperiences.content": 1,
+        "internshipExperiences.prepRoleKey": 1,
         researchSources: 1,
       })
       .lean();
@@ -94,6 +101,7 @@ export async function attachPlatformPrepCoverageToCompanyList(list) {
     return rows.map((row) => ({
       ...row,
       platformPrepCoverage: emptyCoverage(),
+      platformPrepCoverageByRole: [],
       researchSources: [],
       prepRoles: [],
       onlineQuestions_prepRoleKey: [],
@@ -103,16 +111,21 @@ export async function attachPlatformPrepCoverageToCompanyList(list) {
   }
 
   const coverageById = new Map();
+  const coverageByRoleById = new Map();
   const sourcesById = new Map();
   const prepMetaById = new Map();
   for (const doc of Array.isArray(docs) ? docs : []) {
     const id = String(doc?.companyId || "");
     if (!id) continue;
     coverageById.set(id, platformPrepCoverageFromDoc(doc));
+    coverageByRoleById.set(id, platformPrepCoverageByRoleFromDoc(doc));
     sourcesById.set(id, mapResearchSourcesForClient(doc));
     prepMetaById.set(id, {
       prepRoles: mapPrepRolesForClient(doc?.prepRoles),
-      onlineQuestions_prepRoleKey: prepRoleKeysFromQuestions(doc?.onlineQuestions),
+      onlineQuestions_prepRoleKey: [
+        ...prepRoleKeysFromQuestions(doc?.onlineQuestions),
+        ...prepRoleKeysFromQuestions(doc?.mcqQuestions),
+      ],
       interviewQuestions_prepRoleKey: prepRoleKeysFromQuestions(doc?.interviewQuestions),
       platformContentUpdatedAt: doc?.updatedAt || doc?.createdAt || null,
     });
@@ -129,6 +142,7 @@ export async function attachPlatformPrepCoverageToCompanyList(list) {
     return {
       ...row,
       platformPrepCoverage: coverageById.get(id) || emptyCoverage(),
+      platformPrepCoverageByRole: coverageByRoleById.get(id) || [],
       researchSources: sourcesById.get(id) || [],
       ...meta,
     };

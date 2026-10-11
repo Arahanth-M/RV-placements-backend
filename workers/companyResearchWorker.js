@@ -15,6 +15,8 @@ import {
 export async function processCompanyResearchJob(job) {
   const data = job?.data || {};
   try {
+    const { loadRuntimeSecrets } = await import("../services/platformRuntimeSecrets.js");
+    await loadRuntimeSecrets().catch(() => {});
     const running = await markResearchJobRunning(data.jobId);
     if (running?.status === "review" || running?.status === "published") {
       return { jobId: data.jobId, status: running.status };
@@ -69,28 +71,58 @@ function isDirectExecution() {
   return import.meta.url === pathToFileURL(entry).href;
 }
 
+/** Several companies can be scraped at once. Override with COMPANY_RESEARCH_WORKER_CONCURRENCY (1–8). */
+export function companyResearchConcurrency() {
+  const raw = Number(process.env.COMPANY_RESEARCH_WORKER_CONCURRENCY);
+  if (Number.isInteger(raw) && raw >= 1 && raw <= 8) return raw;
+  return 3;
+}
+
+let startPromise = null;
+
+/**
+ * Start the BullMQ consumer in this process. The API server calls this so
+ * production does not depend on a separate worker process. Safe to call once.
+ */
+export function startCompanyResearchWorker() {
+  if (!startPromise) {
+    startPromise = (async () => {
+      const { Worker } = await import("bullmq");
+      const { COMPANY_RESEARCH_QUEUE } = await import("../services/queues/companyResearchQueue.js");
+      const { redisUrl } = await import("../src/utils/redisClient.js");
+      const connection = redisUrl ? { url: redisUrl } : {};
+      const worker = new Worker(COMPANY_RESEARCH_QUEUE, processCompanyResearchJob, {
+        connection,
+        concurrency: companyResearchConcurrency(),
+      });
+
+      worker.on("completed", (job) => {
+        console.log("[companyResearchWorker] completed", { id: job.id, name: job.name });
+      });
+
+      worker.on("failed", (job, err) => {
+        console.error("[companyResearchWorker] failed", {
+          id: job?.id,
+          name: job?.name,
+          code: err?.code || "research_failed",
+        });
+      });
+
+      worker.on("error", (err) => {
+        console.error("[companyResearchWorker] worker error:", err?.message || err);
+      });
+
+      return worker;
+    })();
+  }
+  return startPromise;
+}
+
 if (isDirectExecution()) {
   dotenv.config();
-  const { connectRedis, redisUrl } = await import("../src/utils/redisClient.js");
-  const { Worker } = await import("bullmq");
-  const { COMPANY_RESEARCH_QUEUE } = await import("../services/queues/companyResearchQueue.js");
+  const { connectRedis } = await import("../src/utils/redisClient.js");
   await connectRedis().catch(() => {});
-
-  const connection = redisUrl ? { url: redisUrl } : {};
-  const worker = new Worker(COMPANY_RESEARCH_QUEUE, processCompanyResearchJob, {
-    connection,
-    concurrency: 1,
-  });
-
-  worker.on("completed", (job) => {
-    console.log("[companyResearchWorker] completed", { id: job.id, name: job.name });
-  });
-
-  worker.on("failed", (job, err) => {
-    console.error("[companyResearchWorker] failed", {
-      id: job?.id,
-      name: job?.name,
-      code: err?.code || "research_failed",
-    });
-  });
+  const { loadRuntimeSecrets } = await import("../services/platformRuntimeSecrets.js");
+  await loadRuntimeSecrets().catch(() => {});
+  await startCompanyResearchWorker();
 }

@@ -10,6 +10,8 @@ const mockInvalidate = jest.fn();
 jest.unstable_mockModule("../../src/utils/redisHelpers.js", () => ({
   getJSON: (...args) => mockGetJSON(...args),
   setJSON: (...args) => mockSetJSON(...args),
+  addToSet: async () => true,
+  getSetMembers: async () => [],
 }));
 
 jest.unstable_mockModule("../../models/CompanyStatic.js", () => ({
@@ -114,6 +116,22 @@ describe("publishResearchSources", () => {
     expect(store.get(`${RESEARCH_JOB_KEY_PREFIX}${JOB_ID}`).value.status).toBe("review");
     expect(store.get(`${RESEARCH_JOB_KEY_PREFIX}${JOB_ID}`).value.sourcesPublication).toBeDefined();
     expect(mockInvalidate).toHaveBeenCalledWith(COMPANY_ID);
+  });
+
+  it("approves links after interview questions were published", async () => {
+    store.set(`${RESEARCH_JOB_KEY_PREFIX}${JOB_ID}`, {
+      value: reviewJob({ status: "published", publication: { insertedCount: 2, duplicateCount: 0 } }),
+      ttl: RESEARCH_JOB_TTL_SECONDS,
+    });
+
+    const result = await publishResearchSources({ jobId: JOB_ID });
+    expect(result).toMatchObject({
+      jobId: JOB_ID,
+      status: "published",
+      insertedSourceCount: 2,
+      duplicateSourceCount: 0,
+    });
+    expect(store.get(`${RESEARCH_JOB_KEY_PREFIX}${JOB_ID}`).value.sourcesPublication).toBeDefined();
   });
 
   it("skips duplicate URLs already in production", async () => {

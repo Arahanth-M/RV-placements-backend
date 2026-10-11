@@ -374,6 +374,7 @@ export async function publishResearchInterviewQuestions(input = {}) {
         delete setOnInsert[target];
         if (sourcesToInsert.length > 0) delete setOnInsert.researchSources;
         if (mcqsToInsert.length > 0) delete setOnInsert.mcqQuestions;
+        if (addPrepRole) delete setOnInsert.prepRoles;
         await CompanyPlatformContent.updateOne(
           { companyId },
           {
@@ -386,6 +387,7 @@ export async function publishResearchInterviewQuestions(input = {}) {
         console.error("[company-research] publish write failed", {
           jobId,
           code: "publish_failed",
+          message: error?.message,
         });
         throw new PublishResearchError("publish_failed");
       }
