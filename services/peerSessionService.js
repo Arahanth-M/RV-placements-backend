@@ -9,6 +9,8 @@ import crypto from "crypto";
 import PeerSession from "../models/PeerSession.js";
 import { collegeIdFromUser } from "../utils/collegeScope.js";
 import {
+  addCalendarEventAttendees,
+  addMeetSpaceMember,
   createGoogleMeetForSession,
   isGoogleMeetConfigured,
 } from "./googleMeetService.js";
@@ -143,13 +145,51 @@ export function normalizeGoogleMeetLink(raw) {
   return `https://meet.google.com${path}`;
 }
 
-/** Resolve Meet link: prefer Calendar API auto-create; optional pasted override. */
-async function resolveMeetLinkForCreate({ meetLinkRaw, topic, sessionType, slotStart, slotEnd }) {
+/**
+ * Silently grant Meet join rights (RESTRICTED space). Soft-warn on failure —
+ * session/accept still succeeds; user may need to knock.
+ * @param {"COHOST"|"MEMBER"|""} [role]
+ * @returns {Promise<{ ok: boolean, skipped?: boolean, error?: string }>}
+ */
+async function tryAddMeetMember(spaceName, email, contextLabel, role = "") {
+  const space = toSafeString(spaceName);
+  const mail = toSafeString(email).toLowerCase();
+  if (!space) {
+    return { ok: false, skipped: true, error: "missing_space" };
+  }
+  if (!mail) {
+    console.warn(
+      `[peerSession] skip Meet member (${contextLabel}): no email on user profile`
+    );
+    return { ok: false, skipped: true, error: "missing_email" };
+  }
+  const result = await addMeetSpaceMember({ spaceName: space, email: mail, role });
+  if (!result.ok && !result.skipped) {
+    console.warn(
+      `[peerSession] Meet member not added (${contextLabel}, ${mail}${
+        role ? `, ${role}` : ""
+      }):`,
+      result.error || "unknown"
+    );
+  }
+  return result;
+}
+
+/** Resolve Meet link: Calendar + silent attendees (organizer can join); optional pasted override. */
+async function resolveMeetLinkForCreate({
+  meetLinkRaw,
+  topic,
+  sessionType,
+  slotStart,
+  slotEnd,
+  hostEmail,
+}) {
   const pasted = toSafeString(meetLinkRaw);
   if (pasted) {
     return {
       meetLink: normalizeGoogleMeetLink(pasted),
       googleEventId: "",
+      googleSpaceName: "",
     };
   }
   if (!isGoogleMeetConfigured()) {
@@ -160,16 +200,30 @@ async function resolveMeetLinkForCreate({ meetLinkRaw, topic, sessionType, slotS
     );
   }
   const typeLabel = SESSION_TYPES[sessionType]?.label || "Peer session";
+  const hostMail = toSafeString(hostEmail).toLowerCase();
+  if (!hostMail) {
+    throw appError(
+      "Your account has no email — cannot create a Meet where you can join. Sign in again with Google.",
+      "HOST_EMAIL_REQUIRED",
+      400
+    );
+  }
   const created = await createGoogleMeetForSession({
     summary: `${typeLabel}: ${topic}`.slice(0, 200),
     description: `Peer session on Last Minute Placement Prep.\nType: ${typeLabel}\nTopic: ${topic}`,
     slotStart,
     slotEnd,
-    // No attendees — Meet link is shared in-app; avoids Google Calendar invite emails.
+    // Organizer as silent Calendar guest so they can enter (token account is Meet owner).
+    attendeeEmails: [hostMail],
   });
+  const spaceName = toSafeString(created.spaceName);
+  // googleEventId from Spaces path may be a space name — only store real Calendar event ids.
+  const eventId = toSafeString(created.eventId);
+  const looksLikeSpace = eventId.startsWith("spaces/");
   return {
     meetLink: created.meetLink,
-    googleEventId: created.eventId || "",
+    googleEventId: looksLikeSpace ? "" : eventId,
+    googleSpaceName: spaceName || (looksLikeSpace ? eventId : ""),
   };
 }
 
@@ -255,11 +309,15 @@ function publicSession(doc, viewerUserId = "") {
   const isHost = viewerUserId === raw.hostUserId;
   const pending = Boolean(viewerUserId && isPendingRequester(raw, viewerUserId));
   const window = meetWindow(raw);
-  const canSeeMeet = viewerIn && window.open && raw.status !== "cancelled";
+  // Organizer can open Meet anytime until the slot ends (setup + admit knocks).
+  // Accepted joiners unlock 5 minutes before start.
+  const canSeeMeet =
+    raw.status !== "cancelled" &&
+    ((isHost && !window.after) || (viewerIn && window.open));
 
   let meetLinkStatus = "hidden";
   let meetLinkMessage = "";
-  if (!viewerIn) {
+  if (!viewerIn && !isHost) {
     meetLinkStatus = pending ? "pending_approval" : "not_accepted";
     meetLinkMessage = pending
       ? "Waiting for the host to accept your request. The meeting link appears after approval, at session time."
@@ -267,14 +325,19 @@ function publicSession(doc, viewerUserId = "") {
   } else if (raw.status === "cancelled") {
     meetLinkStatus = "cancelled";
     meetLinkMessage = "This session was cancelled.";
-  } else if (window.before) {
+  } else if (window.after) {
+    meetLinkStatus = "expired";
+    meetLinkMessage = "This session’s meeting window has ended.";
+  } else if (isHost && canSeeMeet) {
+    meetLinkStatus = "available";
+    meetLinkMessage = window.before
+      ? "You’re the organizer — open Meet anytime to set up. Joiners unlock 5 minutes before start."
+      : "Session window is open — join with the link below.";
+  } else if (!isHost && window.before) {
     meetLinkStatus = "too_early";
     meetLinkMessage = `Meeting link unlocks 5 minutes before start (${new Date(
       window.start
     ).toLocaleString()}).`;
-  } else if (window.after) {
-    meetLinkStatus = "expired";
-    meetLinkMessage = "This session’s meeting window has ended.";
   } else if (canSeeMeet) {
     meetLinkStatus = "available";
     meetLinkMessage = "Session is live — join with the link below.";
@@ -390,12 +453,13 @@ export async function createPeerSession(input = {}) {
 
   await assertNoTimeConflict(actor.userId, slotStart, slotEnd);
 
-  const { meetLink, googleEventId } = await resolveMeetLinkForCreate({
+  const { meetLink, googleEventId, googleSpaceName } = await resolveMeetLinkForCreate({
     meetLinkRaw: input.meetLink,
     topic,
     sessionType,
     slotStart,
     slotEnd,
+    hostEmail: actor.email,
   });
 
   const inviteCode = await allocateInviteCode();
@@ -407,6 +471,7 @@ export async function createPeerSession(input = {}) {
     notes,
     meetLink,
     googleEventId: googleEventId || "",
+    googleSpaceName: googleSpaceName || "",
     inviteCode,
     slotStart,
     slotEnd,
@@ -423,6 +488,11 @@ export async function createPeerSession(input = {}) {
     status: "open",
     collegeId: actor.collegeId,
   });
+
+  // Best-effort Meet Spaces COHOST (Calendar attendee is the reliable join path).
+  if (googleSpaceName) {
+    await tryAddMeetMember(googleSpaceName, actor.email, "host-create", "COHOST");
+  }
 
   return publicSession(doc, actor.userId);
 }
@@ -605,6 +675,19 @@ export async function acceptJoinRequest(input = {}) {
   });
   syncOpenFullStatus(doc);
   await doc.save();
+
+  // Calendar guest + Meet member so accepted joiners enter without knocking.
+  if (doc.googleEventId && req.email) {
+    const cal = await addCalendarEventAttendees(doc.googleEventId, [req.email]);
+    if (!cal.ok && !cal.skipped) {
+      console.warn(
+        `[peerSession] Calendar attendee add failed on accept (${req.email}):`,
+        cal.error || "unknown"
+      );
+    }
+  }
+  await tryAddMeetMember(doc.googleSpaceName, req.email, "accept-join");
+
   return publicSession(doc, actor.userId);
 }
 

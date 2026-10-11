@@ -1,52 +1,34 @@
 import {
   INTERVIEW_DIFFICULTIES,
   PLATFORM_FRESHER_ROLES,
-  isPlatformFresherRole,
   isPlatformInterviewRoundType,
 } from "../../config/interviewCatalog.js";
 
 const MAX_MOCK_ROUNDS = 4;
 
-/**
- * Map free-text PrepPath role onto the /general fresher mock catalog.
- * Deterministic — never invents a role the interviews hub cannot start.
- */
-export function matchPlatformFresherRole(rawRole) {
-  const s = String(rawRole || "").trim();
-  if (!s) return "Software Engineer (SDE)";
-  const exact = PLATFORM_FRESHER_ROLES.find(
-    (role) => role.toLowerCase() === s.toLowerCase()
-  );
-  if (exact) return exact;
-
-  const n = s.toLowerCase();
-  if (/\bvlsi\b|hardware|rtl|verilog|vhdl|asic/.test(n)) {
-    return "VLSI/Hardware Engineer";
-  }
-  if (/\bembedded\b|firmware|\bmcu\b|\biot\b/.test(n)) {
-    return "Embedded Systems Engineer";
-  }
-  if (/\bconsultant\b|consulting/.test(n)) return "Consultant";
-  if (/\bproduct\b|business analyst|\bba\b/.test(n)) {
-    return "Business/Product Analyst";
-  }
-  if (/\bqa\b|sdet|test engineer|quality/.test(n)) return "QA/SDET";
-  if (/\bdevops\b|\bsre\b|cloud engineer|platform engineer/.test(n)) {
-    return "DevOps/Cloud Engineer";
-  }
-  if (/data analyst/.test(n)) return "Data Analyst";
-  if (/data scientist/.test(n)) return "Data Scientist";
-  if (/data engineer/.test(n)) return "Data Engineer";
-  if (/\bai\b|\bml\b|machine learning|deep learning/.test(n)) {
-    return "AI/ML Engineer";
-  }
-  if (/front-?end|react|ui engineer/.test(n)) return "Frontend Engineer";
-  if (/back-?end|server/.test(n)) return "Backend Engineer";
+export function matchPlatformFresherRole(role) {
+  const raw = String(role || "").trim();
+  if (PLATFORM_FRESHER_ROLES.includes(raw)) return raw;
+  const n = raw.toLowerCase();
+  if (/frontend|front-end|react|ui engineer/.test(n)) return "Frontend Engineer";
+  if (/backend|back-end|server/.test(n)) return "Backend Engineer";
   if (/full.?stack/.test(n)) return "Full Stack Engineer";
+  if (/\bml\b|machine learning|ai\/ml|ai engineer/.test(n)) return "AI/ML Engineer";
+  if (/data scientist/.test(n)) return "Data Scientist";
+  if (/data analyst|business analyst|product analyst/.test(n)) {
+    if (/product/.test(n)) return "Business/Product Analyst";
+    return "Data Analyst";
+  }
+  if (/data engineer/.test(n)) return "Data Engineer";
+  if (/\bqa\b|sdet|test engineer/.test(n)) return "QA/SDET";
+  if (/devops|sre|cloud engineer/.test(n)) return "DevOps/Cloud Engineer";
+  if (/consultant|consulting/.test(n)) return "Consultant";
   if (/\bget\b|graduate engineer|trainee/.test(n)) {
     return "Graduate Engineer Trainee (GET)";
   }
-  if (/\bsde\b|software|\bswe\b|developer/.test(n)) {
+  if (/embedded/.test(n)) return "Embedded Systems Engineer";
+  if (/vlsi|hardware|asic|fpga/.test(n)) return "VLSI/Hardware Engineer";
+  if (/sde|software/.test(n)) {
     return "Software Engineer (SDE)";
   }
   return "Software Engineer (SDE)";
@@ -60,41 +42,41 @@ function baseRoundsForRole(role, intern) {
   switch (role) {
     case "AI/ML Engineer":
       return intern
-        ? ["ML/AI Technical", "DSA", "HR"]
-        : ["ML/AI Technical", "DSA", "CS Fundamentals", "HR"];
+        ? ["ML/AI Technical", "DSA"]
+        : ["ML/AI Technical", "DSA", "CS Fundamentals"];
     case "Data Scientist":
-      return ["ML/AI Technical", "SQL", "HR"];
+      return ["ML/AI Technical", "SQL"];
     case "Data Analyst":
       return intern
-        ? ["SQL", "Aptitude", "HR"]
-        : ["SQL", "Aptitude", "Case Interview", "HR"];
+        ? ["SQL", "Aptitude"]
+        : ["SQL", "Aptitude", "Case Interview"];
     case "Data Engineer":
-      return ["SQL", "DSA", "HR"];
+      return ["SQL", "DSA"];
     case "QA/SDET":
-      return intern ? ["DSA", "Aptitude", "HR"] : ["DSA", "CS Fundamentals", "HR"];
+      return intern ? ["DSA", "Aptitude"] : ["DSA", "CS Fundamentals"];
     case "DevOps/Cloud Engineer":
-      return ["CS Fundamentals", "DSA", "HR"];
+      return ["CS Fundamentals", "DSA"];
     case "Business/Product Analyst":
-      return ["Case Interview", "Aptitude", "HR"];
+      return ["Case Interview", "Aptitude"];
     case "Consultant":
       return intern
-        ? ["Case Interview", "HR"]
-        : ["Case Interview", "Project/Resume Deep Dive", "HR"];
+        ? ["Case Interview", "Aptitude"]
+        : ["Case Interview", "Project/Resume Deep Dive"];
     case "Embedded Systems Engineer":
-      return ["Embedded Systems", "Core Technical", "HR"];
+      return ["Embedded Systems", "Core Technical"];
     case "VLSI/Hardware Engineer":
-      return ["Circuit Design", "Core Technical", "HR"];
+      return ["Circuit Design", "Core Technical"];
     case "Graduate Engineer Trainee (GET)":
       return intern
-        ? ["DSA", "Aptitude", "HR"]
-        : ["DSA", "CS Fundamentals", "Aptitude", "HR"];
+        ? ["DSA", "Aptitude"]
+        : ["DSA", "CS Fundamentals", "Aptitude"];
     case "Frontend Engineer":
-      return intern ? ["DSA", "Aptitude", "HR"] : ["DSA", "Web Dev", "HR"];
+      return intern ? ["DSA", "Aptitude"] : ["DSA", "Web Dev"];
     case "Backend Engineer":
     case "Full Stack Engineer":
     case "Software Engineer (SDE)":
     default:
-      return intern ? ["DSA", "Aptitude", "HR"] : ["DSA", "CS Fundamentals", "HR"];
+      return intern ? ["DSA", "Aptitude"] : ["DSA", "CS Fundamentals"];
   }
 }
 
@@ -121,11 +103,7 @@ function finalizeRounds(list) {
     if (out.includes(type) || out.length >= MAX_MOCK_ROUNDS) continue;
     out.push(type);
   }
-  if (out.length === 0) return ["DSA", "HR"];
-  if (out.length === 1) {
-    if (out[0] !== "HR") out.push("HR");
-    else out.unshift("DSA");
-  }
+  if (out.length === 0) return ["DSA"];
   return out.slice(0, MAX_MOCK_ROUNDS);
 }
 
@@ -185,7 +163,9 @@ export function suggestGeneralMockInterview({
   ];
   if ((flags.usedOA || flags.usedCoding) && softwareIsh(mappedRole)) rounds.unshift("DSA");
   if ((flags.usedOA || flags.usedCoding) && mappedRole === "Data Analyst") rounds.unshift("SQL");
-  if (flags.usedInterview || flags.usedExperiences) rounds.push("HR");
+  if (flags.usedInterview || flags.usedExperiences) {
+    rounds.push("Project/Resume Deep Dive");
+  }
   rounds = finalizeRounds(rounds);
 
   const suggestion = {
@@ -200,8 +180,5 @@ export function suggestGeneralMockInterview({
       intern,
     }),
   };
-  if (!isPlatformFresherRole(suggestion.role)) {
-    suggestion.role = "Software Engineer (SDE)";
-  }
   return suggestion;
 }

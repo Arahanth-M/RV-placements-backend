@@ -27,6 +27,8 @@ const peerSessionSchema = new mongoose.Schema(
     meetLink: { type: String, required: true, trim: true },
     /** Google Calendar event id when Meet was auto-created via Calendar API. */
     googleEventId: { type: String, trim: true, default: "" },
+    /** Meet Spaces resource name (spaces/xxx) when created via Meet REST API — used for members.create. */
+    googleSpaceName: { type: String, trim: true, default: "" },
     slotStart: { type: Date, required: true, index: true },
     slotEnd: { type: Date, required: true },
     maxParticipants: { type: Number, required: true, min: 2, max: 8 },

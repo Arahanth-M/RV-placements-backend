@@ -198,112 +198,247 @@ function ensureExpectedPoints(rawPoints, focus = "general") {
   return normalized;
 }
 
+const SECTION_LABELS =
+  "Situation|Task|Action|Result|Reflection|Motivation|Fit|Evidence|Aspiration";
+
+const PLACEHOLDER_RE =
+  /^(test|tests|testing|asdf|qwer|zxcv|n\/?a|na|nil|none|idk|tbd|todo|ok|okay|yes|no|hi|hello|abc|xyz|sample|dummy|lorem|ipsum)[\s.!?]*$/i;
+
 /** Heuristic STAR signals from answer text when evaluator subscores are missing/zero. */
 function extractLabeledSection(answer, label) {
   const text = toSafeString(answer);
   if (!text) return "";
   const re = new RegExp(
-    `${label}\\s*:\\s*([\\s\\S]*?)(?=\\n\\s*(?:Situation|Task|Action|Result|Reflection|Motivation|Fit|Evidence|Aspiration)\\s*:|$)`,
+    `${label}\\s*:\\s*([\\s\\S]*?)(?=\\n\\s*(?:${SECTION_LABELS})\\s*:|$)`,
     "i"
   );
   const match = text.match(re);
   return toSafeString(match?.[1]);
 }
 
+/** Body text only — strip STAR/Why section headers so labels can't inflate scores. */
+function stripAnswerLabels(answer) {
+  return toSafeString(answer)
+    .replace(new RegExp(`(^|\\n)\\s*(?:${SECTION_LABELS})\\s*:\\s*`, "gi"), "$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function contentWords(text) {
+  return toSafeString(text)
+    .toLowerCase()
+    .split(/[^a-z0-9']+/)
+    .filter((w) => w.length >= 2);
+}
+
+function isPlaceholderText(text) {
+  const raw = toSafeString(text).trim();
+  if (!raw) return true;
+  if (PLACEHOLDER_RE.test(raw)) return true;
+  const words = contentWords(raw);
+  if (words.length === 0) return true;
+  if (words.length <= 2 && words.every((w) => PLACEHOLDER_RE.test(w))) return true;
+  // Same token repeated (e.g. "test test test")
+  if (words.length >= 2 && new Set(words).size === 1 && PLACEHOLDER_RE.test(words[0])) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Reject / heavily penalize empty STAR boxes filled with "test", etc.
+ * @returns {{ ok: true } | { ok: false, code: string, message: string }}
+ */
+function validateCoachAnswerContent(answer, focus = "general") {
+  const why = isWhyCompanyFocus(focus);
+  const sections = why
+    ? [
+        { label: "Motivation", minWords: 8 },
+        { label: "Fit", minWords: 8 },
+        { label: "Evidence", minWords: 8 },
+        { label: "Aspiration", minWords: 6 },
+      ]
+    : [
+        { label: "Situation", minWords: 8 },
+        { label: "Task", minWords: 5 },
+        { label: "Action", minWords: 8 },
+        { label: "Result", minWords: 5 },
+      ];
+
+  const bodies = sections.map((s) => ({
+    ...s,
+    body: extractLabeledSection(answer, s.label),
+  }));
+  const filled = bodies.filter((s) => s.body);
+  if (filled.length < (why ? 4 : 4)) {
+    return {
+      ok: false,
+      code: "ANSWER_INCOMPLETE",
+      message: why
+        ? "Fill Motivation, Fit, Evidence, and Aspiration with real content."
+        : "Fill Situation, Task, Action, and Result with real content.",
+    };
+  }
+
+  const placeholders = filled.filter((s) => isPlaceholderText(s.body));
+  if (placeholders.length >= 2) {
+    return {
+      ok: false,
+      code: "ANSWER_PLACEHOLDER",
+      message:
+        "Answers like “test” don’t count. Write a real story with concrete details in each box.",
+    };
+  }
+
+  for (const s of filled) {
+    if (isPlaceholderText(s.body)) {
+      return {
+        ok: false,
+        code: "ANSWER_PLACEHOLDER",
+        message: `${s.label} looks like a placeholder. Write a real answer there.`,
+      };
+    }
+    const words = contentWords(s.body);
+    if (words.length < s.minWords) {
+      return {
+        ok: false,
+        code: "ANSWER_TOO_SHORT",
+        message: `${s.label} is too short — add more detail (a few real sentences).`,
+      };
+    }
+  }
+
+  const content = stripAnswerLabels(answer);
+  if (contentWords(content).length < 30) {
+    return {
+      ok: false,
+      code: "ANSWER_TOO_SHORT",
+      message: "Write a fuller answer across the boxes (not just a few words).",
+    };
+  }
+
+  return { ok: true };
+}
+
+function thinAnswerPenalty(answer) {
+  const content = stripAnswerLabels(answer);
+  const words = contentWords(content);
+  if (words.length === 0) return 0.05;
+  if (words.every((w) => PLACEHOLDER_RE.test(w))) return 0.08;
+  if (words.length < 20) return 0.2;
+  if (words.length < 35) return 0.45;
+  return 1;
+}
+
 function heuristicStarSubscores(answer) {
-  const lower = toSafeString(answer).toLowerCase();
-  const words = lower.split(/\s+/).filter(Boolean).length;
-  const lengthBoost = words >= 40 ? 0.15 : words >= 20 ? 0.08 : 0;
+  const content = stripAnswerLabels(answer);
+  const words = contentWords(content).length;
+  const lengthBoost = words >= 60 ? 0.12 : words >= 40 ? 0.06 : 0;
+  const situationSection = extractLabeledSection(answer, "Situation");
   const taskSection = extractLabeledSection(answer, "Task");
+  const actionSection = extractLabeledSection(answer, "Action");
   const resultSection = extractLabeledSection(answer, "Result");
   const reflectionSection = extractLabeledSection(answer, "Reflection");
+  const thin = thinAnswerPenalty(answer);
+
+  const sectionScore = (body, strongRe, midRe, strong, mid, weak) => {
+    if (isPlaceholderText(body) || contentWords(body).length < 4) return weak * thin;
+    const b = body.toLowerCase();
+    if (strongRe.test(b)) return clamp01((strong + lengthBoost) * thin);
+    if (midRe.test(b) || contentWords(body).length >= 12) return clamp01((mid + lengthBoost) * thin);
+    return clamp01(weak * thin);
+  };
 
   return {
-    situationClarity: clamp01(
-      (/situation|context|when i|during|project|internship|semester|team was|at my|company|situation:/.test(
-        lower
-      )
-        ? 0.72
-        : 0.32) + lengthBoost
+    situationClarity: sectionScore(
+      situationSection,
+      /when i|during|project|internship|semester|team|company|classmate|professor|deadline/,
+      /context|problem|challenge|class|work/,
+      0.72,
+      0.42,
+      0.12
     ),
-    taskClarity: clamp01(
-      (taskSection.length >= 12 ||
-      /task:|my (goal|job|role|responsibility)|needed to|had to|objective|responsible for/.test(
-        lower
-      )
-        ? 0.76
-        : taskSection.length >= 5
-          ? 0.55
-          : 0.28) + lengthBoost
+    taskClarity: sectionScore(
+      taskSection,
+      /my (goal|job|role|responsibility)|needed to|had to|objective|responsible for|assigned/,
+      /goal|need|should|must|aim/,
+      0.74,
+      0.4,
+      0.1
     ),
-    actionOwnership: clamp01(
-      (/\b(i|i'd|i’ll|i'll|my|myself)\b/.test(lower) &&
-      /led|owned|implemented|decided|coordinated|built|fixed|proposed|took|handled|spoke|negotiat|action:/.test(
-        lower
-      )
-        ? 0.78
-        : /\b(i|my)\b/.test(lower) || /action:|task:/.test(lower)
-          ? 0.55
-          : 0.28) + lengthBoost
+    actionOwnership: sectionScore(
+      actionSection,
+      /\b(i|i'd|i’ll|i'll|my)\b.*\b(led|owned|implemented|decided|coordinated|built|fixed|proposed|took|handled|spoke|negotiat)/,
+      /\b(i|my)\b/,
+      0.78,
+      0.38,
+      0.1
     ),
-    resultSpecificity: clamp01(
-      (resultSection.length >= 12 ||
-      /\d+|%|percent|improved|reduced|increased|outcome|result|impact|delivered|resolved|shipped|result:/.test(
-        lower
-      )
-        ? 0.75
-        : resultSection.length >= 5 || /result|outcome|finally|ended up|success/.test(lower)
-          ? 0.48
-          : 0.28) + lengthBoost
+    resultSpecificity: sectionScore(
+      resultSection,
+      /\d+|%|percent|improved|reduced|increased|delivered|resolved|shipped|outcome/,
+      /result|impact|finally|ended up|success|helped/,
+      0.75,
+      0.38,
+      0.1
     ),
-    reflection: clamp01(
-      (reflectionSection.length >= 10 ||
-      /learned|next time|would (do|have)|reflection|takeaway|realized|going forward|reflection:/.test(
-        lower
-      )
-        ? 0.7
-        : reflectionSection.length >= 4
-          ? 0.45
-          : 0.22) + lengthBoost * 0.5
+    reflection: sectionScore(
+      reflectionSection,
+      /learned|next time|would (do|have)|takeaway|realized|going forward/,
+      /learn|reflect|improve|better/,
+      0.7,
+      0.35,
+      0.08
     ),
   };
 }
 
 function heuristicWhySubscores(answer) {
-  const lower = toSafeString(answer).toLowerCase();
-  const words = lower.split(/\s+/).filter(Boolean).length;
-  const lengthBoost = words >= 40 ? 0.15 : words >= 20 ? 0.08 : 0;
+  const content = stripAnswerLabels(answer);
+  const words = contentWords(content).length;
+  const lengthBoost = words >= 60 ? 0.12 : words >= 40 ? 0.06 : 0;
+  const thin = thinAnswerPenalty(answer);
+
+  const bodyScore = (body, strongRe, midRe, strong, mid, weak) => {
+    if (isPlaceholderText(body) || contentWords(body).length < 4) return weak * thin;
+    const b = body.toLowerCase();
+    if (strongRe.test(b)) return clamp01((strong + lengthBoost) * thin);
+    if (midRe.test(b) || contentWords(body).length >= 12) return clamp01((mid + lengthBoost) * thin);
+    return clamp01(weak * thin);
+  };
 
   return {
-    situationClarity: clamp01(
-      (/motivat|excit|interest|attract|why|passion|care about|drawn to|mission|product|company/.test(
-        lower
-      )
-        ? 0.75
-        : 0.35) + lengthBoost
+    situationClarity: bodyScore(
+      extractLabeledSection(answer, "Motivation"),
+      /motivat|excit|interest|attract|passion|drawn to|mission|product/,
+      /why|care|like|want/,
+      0.75,
+      0.4,
+      0.12
     ),
-    actionOwnership: clamp01(
-      (/fit|skill|project|built|internship|course|strength|experience|i (can|have|bring)|my (background|interest)/.test(
-        lower
-      )
-        ? 0.74
-        : /\b(i|my)\b/.test(lower)
-          ? 0.5
-          : 0.28) + lengthBoost
+    actionOwnership: bodyScore(
+      extractLabeledSection(answer, "Fit"),
+      /skill|project|built|internship|course|strength|experience|i (can|have|bring)/,
+      /\b(i|my)\b|background|fit/,
+      0.74,
+      0.38,
+      0.1
     ),
-    resultSpecificity: clamp01(
-      (/for example|specifically|research|read about|product|feature|stack|domain|evidence:|\d+/.test(
-        lower
-      )
-        ? 0.76
-        : /because|example|detail/.test(lower)
-          ? 0.48
-          : 0.28) + lengthBoost
+    resultSpecificity: bodyScore(
+      extractLabeledSection(answer, "Evidence"),
+      /for example|specifically|research|read about|product|feature|stack|\d+/,
+      /because|example|detail|know/,
+      0.76,
+      0.38,
+      0.1
     ),
-    reflection: clamp01(
-      (/learn|contribute|grow|first (six|6) months|aspire|goal|want to|aspiration:/.test(lower)
-        ? 0.72
-        : 0.24) + lengthBoost * 0.5
+    reflection: bodyScore(
+      extractLabeledSection(answer, "Aspiration"),
+      /learn|contribute|grow|first (six|6) months|aspire|goal/,
+      /want to|hope|plan|future/,
+      0.72,
+      0.35,
+      0.08
     ),
   };
 }
@@ -322,15 +457,23 @@ function buildAnswerBreakdown(evaluationTrace = {}, answer = "", focus = "genera
   const heuristics = isWhyCompanyFocus(focus)
     ? heuristicWhySubscores(answer)
     : heuristicStarSubscores(answer);
+  const thin = thinAnswerPenalty(answer);
+  const contentThin = thin < 0.5;
 
   return keys.map((dim) => {
     const raw = Number(subscores[dim.subscoreKey]);
     const fromEval = Number.isFinite(raw) ? clamp01(raw) : 0;
     const heuristic = heuristics[dim.subscoreKey] || 0;
-    // Prefer evaluator signal when present; always keep a heuristic floor so labeled
-    // sections (Task / Result / Reflection) still get a visible bar.
-    const score01 =
-      fromEval >= 0.12 ? Math.max(fromEval, heuristic * 0.35) : Math.max(fromEval, heuristic);
+    // Prefer evaluator when it has a real signal. Do not invent high bars from STAR labels.
+    let score01;
+    if (fromEval >= 0.12) {
+      score01 = Math.max(fromEval, heuristic * 0.25);
+    } else if (contentThin) {
+      score01 = Math.min(heuristic, 0.18);
+    } else {
+      score01 = Math.max(fromEval, heuristic * 0.85);
+    }
+    score01 = clamp01(score01 * (contentThin ? Math.max(thin, 0.15) : 1));
     return {
       id: dim.id,
       label: dim.label,
@@ -766,14 +909,6 @@ export async function evaluateBehavioralCoachPractice(input = {}) {
     err.code = "INVALID_PRACTICE";
     throw err;
   }
-  if (answer.length < 20) {
-    const err = new Error(
-      "Write a fuller answer (at least a few sentences in the answer boxes)."
-    );
-    err.code = "ANSWER_TOO_SHORT";
-    throw err;
-  }
-
   const practice = await loadPractice(practiceId);
   if (!practice || practice.userId !== userId) {
     const err = new Error("Practice expired or not found. Start a new question.");
@@ -782,6 +917,13 @@ export async function evaluateBehavioralCoachPractice(input = {}) {
   }
 
   const focus = normalizeFocus(practice.focus);
+  const contentCheck = validateCoachAnswerContent(answer, focus);
+  if (!contentCheck.ok) {
+    const err = new Error(contentCheck.message);
+    err.code = contentCheck.code;
+    throw err;
+  }
+
   const expectedPoints = ensureExpectedPoints(practice.expectedPoints, focus);
 
   // Grade as bank-style behavioral — not "generated technical" (factuality checks zero out STAR stories).
@@ -800,7 +942,11 @@ export async function evaluateBehavioralCoachPractice(input = {}) {
   const trace = evaluation?.evaluationTrace || {};
   const starBreakdown = buildAnswerBreakdown(trace, answer, focus);
   const hints = coachingHints(starBreakdown, trace.missingRubricPoints);
-  const score = scoreFromStarBreakdown(starBreakdown);
+  let score = scoreFromStarBreakdown(starBreakdown);
+  // Hard cap for thin / near-placeholder content even if LLM is generous.
+  const thin = thinAnswerPenalty(answer);
+  if (thin < 0.35) score = Math.min(score, 2);
+  else if (thin < 0.55) score = Math.min(score, 4);
   const matchedRubricPoints = Array.isArray(trace.matchedRubricPoints)
     ? trace.matchedRubricPoints.slice(0, 8)
     : [];

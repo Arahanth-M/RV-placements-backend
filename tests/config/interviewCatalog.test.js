@@ -10,7 +10,7 @@ import { roundTypeImpliesCodeExecutionInterview } from "../../services/interview
 describe("general interview catalog", () => {
   it("keeps the platform catalog bounded to 15 fresher roles and 14 round types", () => {
     expect(PLATFORM_FRESHER_ROLES).toHaveLength(15);
-    expect(PLATFORM_INTERVIEW_ROUND_TYPES).toHaveLength(14);
+    expect(PLATFORM_INTERVIEW_ROUND_TYPES).toHaveLength(13);
     expect(PLATFORM_INTERVIEW_ROUND_TYPES).toEqual(
       expect.arrayContaining(CAMPUS_INTERVIEW_ROUND_TYPES)
     );
@@ -52,7 +52,7 @@ describe("general interview catalog", () => {
     });
   });
 
-  it("keeps platform-only rounds and the no-HR plan out of campus interviews", async () => {
+  it("keeps platform-only rounds out of campus interviews", async () => {
     await expect(
       generateInterviewPlanFromCustomRounds(
         [{ type: "Circuit Design", difficulty: "medium" }],
@@ -60,12 +60,11 @@ describe("general interview catalog", () => {
       )
     ).rejects.toThrow("not available");
 
-    await expect(
-      generateInterviewPlanFromCustomRounds(
-        [{ type: "DSA", difficulty: "medium" }],
-        { platform: false }
-      )
-    ).rejects.toThrow("At least one HR round");
+    const campusPlan = await generateInterviewPlanFromCustomRounds(
+      [{ type: "DSA", difficulty: "medium" }],
+      { platform: false }
+    );
+    expect(campusPlan.rounds.some((round) => round.type === "DSA")).toBe(true);
   });
 
   it("does not misclassify technical theory rounds as executable coding", () => {
