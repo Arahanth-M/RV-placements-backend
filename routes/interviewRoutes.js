@@ -2097,7 +2097,12 @@ router.post(
       if (code === "UNAUTHORIZED") {
         return res.status(401).json({ error: error.message });
       }
-      if (code === "ANSWER_TOO_SHORT" || code === "INVALID_PRACTICE") {
+      if (
+        code === "ANSWER_TOO_SHORT" ||
+        code === "ANSWER_PLACEHOLDER" ||
+        code === "ANSWER_INCOMPLETE" ||
+        code === "INVALID_PRACTICE"
+      ) {
         return res.status(400).json({ error: error.message, code });
       }
       if (code === "PRACTICE_NOT_FOUND") {

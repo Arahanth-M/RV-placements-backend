@@ -35,7 +35,7 @@ describe("suggestGeneralMockInterview", () => {
     });
     expect(suggestion.role).toBe("Software Engineer (SDE)");
     expect(suggestion.difficulty).toBe("easy");
-    expect(suggestion.rounds).toEqual(["DSA", "Aptitude", "HR"]);
+    expect(suggestion.rounds).toEqual(["DSA", "Aptitude"]);
     expect(suggestion.rounds.every((r) => PLATFORM_INTERVIEW_ROUND_TYPES.includes(r))).toBe(
       true
     );
@@ -50,7 +50,7 @@ describe("suggestGeneralMockInterview", () => {
       days: 5,
     });
     expect(suggestion.role).toBe("Frontend Engineer");
-    expect(suggestion.rounds).toEqual(["DSA", "Web Dev", "HR"]);
+    expect(suggestion.rounds).toEqual(["DSA", "Web Dev"]);
   });
 
   it("suggests FTE SDE rounds at medium by default", () => {
@@ -61,7 +61,7 @@ describe("suggestGeneralMockInterview", () => {
     });
     expect(suggestion.role).toBe("Backend Engineer");
     expect(suggestion.difficulty).toBe("medium");
-    expect(suggestion.rounds).toEqual(["DSA", "CS Fundamentals", "HR"]);
+    expect(suggestion.rounds).toEqual(["DSA", "CS Fundamentals"]);
     expect(suggestion.rounds.length).toBeGreaterThanOrEqual(2);
     expect(suggestion.rounds.length).toBeLessThanOrEqual(4);
   });

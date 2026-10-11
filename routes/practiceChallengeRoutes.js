@@ -9,6 +9,7 @@ import {
   submitChallengeSolution,
   getPracticeLeaderboard,
   getMyPracticeRank,
+  getMyPracticeHistory,
   ensureChallengesNow,
 } from "../services/practiceChallengeService.js";
 import {
@@ -75,6 +76,21 @@ router.get("/leaderboard/me", async (req, res) => {
     if (mapError(res, error)) return undefined;
     console.error("[practice-challenges] leaderboard/me failed:", error?.message || error);
     return res.status(500).json({ error: "Failed to load your practice rank" });
+  }
+});
+
+router.get("/history", async (req, res) => {
+  try {
+    const history = await getMyPracticeHistory({
+      user: req.user,
+      kind: req.query?.kind,
+      limit: req.query?.limit,
+    });
+    return res.json(history);
+  } catch (error) {
+    if (mapError(res, error)) return undefined;
+    console.error("[practice-challenges] history failed:", error?.message || error);
+    return res.status(500).json({ error: "Failed to load practice history" });
   }
 });
 

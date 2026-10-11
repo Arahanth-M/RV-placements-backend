@@ -5,7 +5,6 @@ export const CAMPUS_INTERVIEW_ROUND_TYPES = Object.freeze([
   "System Design",
   "SQL",
   "CS Fundamentals",
-  "HR",
 ]);
 
 /** Platform-only round types (excludes campus list + Web Dev). */
@@ -26,7 +25,6 @@ export const PLATFORM_INTERVIEW_ROUND_TYPES = Object.freeze([
   "Web Dev",
   "SQL",
   "CS Fundamentals",
-  "HR",
   ...PLATFORM_EXCLUSIVE_INTERVIEW_ROUND_TYPES,
 ]);
 

@@ -18,6 +18,7 @@ import {
   submitCollegeEnrollmentInterest,
 } from "../services/blockedLoginAttempts.js";
 import { createCollegeOnboardingRequest } from "../services/collegeOnboardingService.js";
+import { getCollegeFeaturesForUser } from "../services/collegeFeatureConfigService.js";
 
 const router = express.Router();
 
@@ -303,6 +304,19 @@ router.post(
     }
   }
 );
+
+router.get("/college-features", authJWT, async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: messages.ERROR.NOT_AUTHENTICATED });
+    }
+    const config = await getCollegeFeaturesForUser(req.user);
+    return res.json({ success: true, ...config });
+  } catch (err) {
+    console.error("GET /api/auth/college-features:", err?.message || err);
+    return res.status(500).json({ error: "Failed to load campus features" });
+  }
+});
 
 router.get("/current_user", authJWT, async (req, res) => {
   if (!req.user) {

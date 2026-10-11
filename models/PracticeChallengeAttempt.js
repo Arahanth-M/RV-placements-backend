@@ -30,11 +30,8 @@ const practiceChallengeAttemptSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-/** One best attempt row per user per problem on a challenge (upsert highest score). */
-practiceChallengeAttemptSchema.index(
-  { challengeId: 1, questionId: 1, userId: 1 },
-  { unique: true }
-);
+/** All submissions kept; leaderboard/stats use max score per user/problem. */
+practiceChallengeAttemptSchema.index({ challengeId: 1, questionId: 1, userId: 1, submittedAt: -1 });
 practiceChallengeAttemptSchema.index({ userId: 1, submittedAt: -1 });
 practiceChallengeAttemptSchema.index({ challengeId: 1, score: -1 });
 

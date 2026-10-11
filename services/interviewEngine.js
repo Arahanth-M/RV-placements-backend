@@ -126,11 +126,6 @@ const validateCustomRoundPlan = (rounds, { platform = false } = {}) => {
     };
   });
 
-  const hrCount = normalized.filter((round) => round.type === "HR").length;
-  if (!platform && hrCount < 1) {
-    throw new Error("At least one HR round is required in the interview plan.");
-  }
-
   const hardSystemDesignCount = normalized.filter(
     (round) => round.type === "System Design" && round.difficulty === "hard"
   ).length;

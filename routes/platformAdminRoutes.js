@@ -17,6 +17,10 @@ import {
   updateCollegeOnboardingRequest,
 } from "../services/collegeOnboardingService.js";
 import {
+  getCollegeFeatureConfig,
+  upsertCollegeFeatureConfig,
+} from "../services/collegeFeatureConfigService.js";
+import {
   approveSubmissionAndUpdateCompany,
   approveSubmissionsBatch,
   MAX_SUBMISSION_APPROVE_BATCH_SIZE,
@@ -570,6 +574,32 @@ router.delete("/companies/:id/research-sources", async (req, res) => {
   } catch (error) {
     const status = Number(error?.status) || 500;
     return res.status(status).json({ error: error?.message || "Server error" });
+  }
+});
+
+router.get("/colleges/:collegeId/features", async (req, res) => {
+  try {
+    const config = await getCollegeFeatureConfig(req.params.collegeId);
+    return res.json({ success: true, ...config });
+  } catch (error) {
+    console.error("[platform-admin] get college features:", error?.message || error);
+    return res.status(500).json({ error: "Failed to load college features" });
+  }
+});
+
+router.put("/colleges/:collegeId/features", async (req, res) => {
+  try {
+    const config = await upsertCollegeFeatureConfig(req.params.collegeId, {
+      selectedFeatures: req.body?.selectedFeatures,
+      collegeName: req.body?.collegeName,
+    });
+    return res.json({ success: true, ...config });
+  } catch (error) {
+    if (error?.code === "INVALID_FEATURES") {
+      return res.status(400).json({ error: error.message, code: error.code });
+    }
+    console.error("[platform-admin] put college features:", error?.message || error);
+    return res.status(500).json({ error: "Failed to save college features" });
   }
 });
 

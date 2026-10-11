@@ -5,6 +5,7 @@ import PracticeChallenge from "../models/PracticeChallenge.js";
 import PracticeChallengeAttempt from "../models/PracticeChallengeAttempt.js";
 import UserPracticeStats from "../models/UserPracticeStats.js";
 import InterviewQuestion from "../models/InterviewQuestion.js";
+import User1 from "../models/User1.js";
 import {
   executeCode,
   normalizeExecutionLanguage,
@@ -31,12 +32,26 @@ function appError(message, code, status = 400) {
   return err;
 }
 
+function resolveDisplayName(user = {}) {
+  const fromUsername = toSafeString(user.username);
+  const fromName = toSafeString(user.name);
+  const fromDisplay = toSafeString(user.displayName);
+  const email = toSafeString(user.email).toLowerCase();
+  const fromEmail = email.includes("@") ? email.split("@")[0] : "";
+  const picked = fromUsername || fromName || fromDisplay || fromEmail;
+  if (!picked || picked.toLowerCase() === "student") {
+    return fromEmail || picked || "Student";
+  }
+  return picked;
+}
+
 function actorFromUser(user = {}) {
   const userId = toSafeString(user.userId);
   if (!userId) throw appError("Unauthorized", "UNAUTHORIZED", 401);
   return {
     userId,
-    name: toSafeString(user.name) || toSafeString(user.displayName) || "Student",
+    // JWT claims use `username` (see jwtUserClaims) — not `name`.
+    name: resolveDisplayName(user),
     email: toSafeString(user.email).toLowerCase(),
   };
 }
@@ -233,10 +248,8 @@ async function ensureChallenge(kind) {
 }
 
 function publicProblem(p, attempt = null, questionDoc = null) {
-  const langs =
-    questionDoc?.dsaMetadata?.supportedLanguages?.length > 0
-      ? questionDoc.dsaMetadata.supportedLanguages
-      : ["python", "cpp", "java"];
+  // Always advertise all runner languages (do not narrow from DB metadata).
+  const langs = ["python", "cpp", "java"];
   const starter = questionDoc?.dsaMetadata?.starterCode || null;
   return {
     questionId: p.questionId,
@@ -262,6 +275,40 @@ async function loadQuestionDocs(questionIds) {
   return map;
 }
 
+/** Prefer highest score; tie-break by latest submission. */
+function pickBestAttempt(attempts = []) {
+  if (!attempts.length) return null;
+  return attempts.reduce((best, cur) => {
+    if (!best) return cur;
+    const bs = Number(best.score) || 0;
+    const cs = Number(cur.score) || 0;
+    if (cs > bs) return cur;
+    if (cs < bs) return best;
+    const bt = new Date(best.submittedAt || 0).getTime();
+    const ct = new Date(cur.submittedAt || 0).getTime();
+    return ct >= bt ? cur : best;
+  }, null);
+}
+
+let attemptIndexesReady = false;
+async function ensureAttemptIndexes() {
+  if (attemptIndexesReady) return;
+  attemptIndexesReady = true;
+  try {
+    // Legacy unique index blocked storing every re-submit.
+    await PracticeChallengeAttempt.collection.dropIndex(
+      "challengeId_1_questionId_1_userId_1"
+    );
+  } catch {
+    // already dropped / never existed
+  }
+  try {
+    await PracticeChallengeAttempt.syncIndexes();
+  } catch (err) {
+    console.warn("[practice-challenges] syncIndexes:", err?.message || err);
+  }
+}
+
 async function enrichChallengeForUser(doc, userId) {
   const qids = (doc.problems || []).map((p) => p.questionId);
   const [qmap, attempts] = await Promise.all([
@@ -270,14 +317,23 @@ async function enrichChallengeForUser(doc, userId) {
       ? PracticeChallengeAttempt.find({
           challengeId: doc._id,
           userId,
+          status: "submitted",
         }).lean()
       : Promise.resolve([]),
   ]);
-  const attemptByQ = new Map();
-  for (const a of attempts) attemptByQ.set(String(a.questionId), a);
+  const byQuestion = new Map();
+  for (const a of attempts) {
+    const qid = String(a.questionId);
+    if (!byQuestion.has(qid)) byQuestion.set(qid, []);
+    byQuestion.get(qid).push(a);
+  }
 
   const problems = (doc.problems || []).map((p) =>
-    publicProblem(p, attemptByQ.get(String(p.questionId)), qmap.get(String(p.questionId)))
+    publicProblem(
+      p,
+      pickBestAttempt(byQuestion.get(String(p.questionId)) || []),
+      qmap.get(String(p.questionId))
+    )
   );
   const solvedCount = problems.filter((p) => p.myBestScore != null && p.myBestScore > 0).length;
   const myPoints = problems.reduce((s, p) => s + (Number(p.myBestScore) || 0), 0);
@@ -437,7 +493,12 @@ async function updateUserStatsAfterSubmit({
       email: actor.email,
     });
   } else {
-    stats.displayName = actor.name || stats.displayName;
+    const nextName = actor.name || "";
+    if (nextName && nextName.toLowerCase() !== "student") {
+      stats.displayName = nextName;
+    } else if (!stats.displayName) {
+      stats.displayName = nextName || "Student";
+    }
     stats.email = actor.email || stats.email;
   }
 
@@ -491,6 +552,8 @@ export async function submitChallengeSolution(input = {}) {
   const language = normalizeExecutionLanguage(input.language || "python");
   if (!code) throw appError("Code is required", "CODE_REQUIRED");
 
+  await ensureAttemptIndexes();
+
   const { challenge, question } = await loadChallengeProblem(challengeId, questionId);
   const cases = allCases(question.testCases);
   if (cases.length === 0) throw appError("No test cases for this problem", "NO_TESTS");
@@ -505,45 +568,42 @@ export async function submitChallengeSolution(input = {}) {
   const timeMs = Date.now() - started;
   const score = scoreFromExecution(execution);
 
-  const existing = await PracticeChallengeAttempt.findOne({
+  const prior = await PracticeChallengeAttempt.find({
     challengeId: challenge._id,
     questionId,
     userId: actor.userId,
-  });
-  const previousScore = existing?.score || 0;
+    status: "submitted",
+  })
+    .select("score")
+    .lean();
+  const previousScore = prior.reduce((m, a) => Math.max(m, Number(a.score) || 0), 0);
 
-  // Keep best score (and its code)
-  let attempt;
-  if (!existing || score >= previousScore) {
-    attempt = await PracticeChallengeAttempt.findOneAndUpdate(
-      { challengeId: challenge._id, questionId, userId: actor.userId },
-      {
-        $set: {
-          language,
-          code,
-          score,
-          weightedPassRate: Number(execution.weightedPassRate) || 0,
-          passedVisible: Number(execution.visiblePassedCount) || 0,
-          passedHidden: Number(execution.hiddenPassedCount) || 0,
-          totalVisible: (execution.results || []).filter((r) => r?.isHidden !== true).length,
-          totalHidden: (execution.results || []).filter((r) => r?.isHidden === true).length,
-          status: "submitted",
-          timeMs,
-          executionStatus: String(execution.status || ""),
-          submittedAt: new Date(),
-        },
-      },
-      { upsert: true, new: true }
-    );
-  } else {
-    attempt = existing;
-  }
+  // Always append this submission (history keeps every answer).
+  const attempt = await PracticeChallengeAttempt.create({
+    challengeId: challenge._id,
+    questionId,
+    userId: actor.userId,
+    language,
+    code,
+    score,
+    weightedPassRate: Number(execution.weightedPassRate) || 0,
+    passedVisible: Number(execution.visiblePassedCount) || 0,
+    passedHidden: Number(execution.hiddenPassedCount) || 0,
+    totalVisible: (execution.results || []).filter((r) => r?.isHidden !== true).length,
+    totalHidden: (execution.results || []).filter((r) => r?.isHidden === true).length,
+    status: "submitted",
+    timeMs,
+    executionStatus: String(execution.status || ""),
+    submittedAt: new Date(),
+  });
+
+  const bestScore = Math.max(score, previousScore);
 
   await updateUserStatsAfterSubmit({
     actor,
     challenge,
     questionId,
-    newScore: Math.max(score, previousScore),
+    newScore: bestScore,
     previousScore,
   });
   await invalidatePracticeBoardCache();
@@ -566,9 +626,13 @@ export async function submitChallengeSolution(input = {}) {
     success: true,
     mode: "submit",
     language,
-    score: attempt.score,
-    bestScore: attempt.score,
-    improved: score >= previousScore,
+    /** This submission's score (may be lower than best on a worse re-submit). */
+    score,
+    /** Highest score across all submissions for this user/problem. */
+    bestScore,
+    attemptId: String(attempt._id),
+    improved: score > previousScore,
+    keptBest: score < previousScore,
     execution: {
       status: execution.status,
       passedCount: execution.passedCount,
@@ -584,6 +648,26 @@ export async function submitChallengeSolution(input = {}) {
   };
 }
 
+/** Sum of max score per (user, challenge, question) so re-submits don't inflate points. */
+function bestPointsAggregate(match) {
+  return [
+    { $match: match },
+    {
+      $group: {
+        _id: {
+          userId: "$userId",
+          challengeId: "$challengeId",
+          questionId: "$questionId",
+        },
+        score: { $max: "$score" },
+      },
+    },
+    { $group: { _id: "$_id.userId", points: { $sum: "$score" } } },
+    { $sort: { points: -1 } },
+    { $limit: BOARD_TOP_N },
+  ];
+}
+
 async function periodPointsForBoard(period) {
   const dayKey = istDayKey();
   const weekKey = istWeekKey();
@@ -591,20 +675,13 @@ async function periodPointsForBoard(period) {
     // Prefer attempts on today's daily challenge for accuracy
     const daily = await PracticeChallenge.findOne({ kind: "daily", periodKey: dayKey }).lean();
     if (!daily) return { periodKey: dayKey, rows: [] };
-    const agg = await PracticeChallengeAttempt.aggregate([
-      { $match: { challengeId: daily._id } },
-      { $group: { _id: "$userId", points: { $sum: "$score" } } },
-      { $sort: { points: -1 } },
-      { $limit: BOARD_TOP_N },
-    ]);
+    const agg = await PracticeChallengeAttempt.aggregate(
+      bestPointsAggregate({ challengeId: daily._id })
+    );
     return { periodKey: dayKey, rows: agg.map((r) => ({ userId: r._id, points: r.points })) };
   }
   if (period === "weekly") {
-    const weekly = await PracticeChallenge.findOne({ kind: "weekly", periodKey: weekKey }).lean();
-    const daily = await PracticeChallenge.findOne({ kind: "daily", periodKey: dayKey }).lean();
-    // Sum attempts for this week's weekly challenge; also include today's daily for mid-week activity
-    const challengeIds = [weekly?._id, daily?._id].filter(Boolean);
-    // Better: all daily challenges this week + weekly set
+    // All daily challenges this week + weekly set
     const weekWindow = istWeekWindow(weekKey);
     const challenges = await PracticeChallenge.find({
       $or: [
@@ -619,12 +696,9 @@ async function periodPointsForBoard(period) {
       .lean();
     const ids = challenges.map((c) => c._id);
     if (ids.length === 0) return { periodKey: weekKey, rows: [] };
-    const agg = await PracticeChallengeAttempt.aggregate([
-      { $match: { challengeId: { $in: ids } } },
-      { $group: { _id: "$userId", points: { $sum: "$score" } } },
-      { $sort: { points: -1 } },
-      { $limit: BOARD_TOP_N },
-    ]);
+    const agg = await PracticeChallengeAttempt.aggregate(
+      bestPointsAggregate({ challengeId: { $in: ids } })
+    );
     return { periodKey: weekKey, rows: agg.map((r) => ({ userId: r._id, points: r.points })) };
   }
   // all-time from stats
@@ -646,19 +720,46 @@ async function periodPointsForBoard(period) {
   };
 }
 
+function isBlankOrGenericName(name) {
+  const n = toSafeString(name);
+  return !n || n.toLowerCase() === "student";
+}
+
 async function attachDisplayNames(rows) {
-  const missing = rows.filter((r) => !r.displayName).map((r) => r.userId);
-  if (missing.length === 0) return rows;
-  const stats = await UserPracticeStats.find({ userId: { $in: missing } })
-    .select("userId displayName email currentStreak solvesTotal")
-    .lean();
-  const map = new Map(stats.map((s) => [s.userId, s]));
+  const allIds = [...new Set(rows.map((r) => r.userId).filter(Boolean))];
+  if (allIds.length === 0) return rows;
+
+  const needUserLookup = rows.some((r) => isBlankOrGenericName(r.displayName));
+  const [stats, users] = await Promise.all([
+    UserPracticeStats.find({ userId: { $in: allIds } })
+      .select("userId displayName email currentStreak solvesTotal")
+      .lean(),
+    needUserLookup
+      ? User1.find({ googleId: { $in: allIds } })
+          .select("googleId username email")
+          .lean()
+      : Promise.resolve([]),
+  ]);
+
+  const statsMap = new Map(stats.map((s) => [s.userId, s]));
+  const userById = new Map(users.map((u) => [String(u.googleId), u]));
+
   return rows.map((r) => {
-    const s = map.get(r.userId);
+    const s = statsMap.get(r.userId);
+    const u = userById.get(r.userId);
+    const fromUser =
+      toSafeString(u?.username) ||
+      (toSafeString(u?.email).includes("@") ? String(u.email).split("@")[0] : "");
+    const fromStats = toSafeString(s?.displayName);
+    let displayName = toSafeString(r.displayName);
+    if (isBlankOrGenericName(displayName)) displayName = fromStats;
+    if (isBlankOrGenericName(displayName)) displayName = fromUser;
+    if (isBlankOrGenericName(displayName)) displayName = "Student";
+
     return {
       ...r,
-      displayName: r.displayName || s?.displayName || "Student",
-      email: r.email || s?.email || "",
+      displayName,
+      email: r.email || s?.email || u?.email || "",
       currentStreak: r.currentStreak ?? s?.currentStreak ?? 0,
       solvesTotal: r.solvesTotal ?? s?.solvesTotal ?? 0,
     };
@@ -752,4 +853,123 @@ export async function getMyPracticeRank(input = {}) {
       solvesTotal: stats?.solvesTotal || 0,
     },
   };
+}
+
+/**
+ * Past daily/weekly submissions for the signed-in user (every submit, newest first).
+ * @param {{ user: object, kind?: string, limit?: number }} input
+ */
+export async function getMyPracticeHistory(input = {}) {
+  const actor = actorFromUser(input.user);
+  await ensureAttemptIndexes();
+
+  const kind = ["daily", "weekly"].includes(String(input.kind || "").toLowerCase())
+    ? String(input.kind).toLowerCase()
+    : "";
+  const limit = Math.min(40, Math.max(1, Number(input.limit) || 20));
+
+  const attempts = await PracticeChallengeAttempt.find({
+    userId: actor.userId,
+    status: "submitted",
+  })
+    .sort({ submittedAt: -1 })
+    .limit(500)
+    .lean();
+
+  if (attempts.length === 0) {
+    return { success: true, kind: kind || "all", entries: [] };
+  }
+
+  const challengeIds = [
+    ...new Map(attempts.map((a) => [String(a.challengeId), a.challengeId])).values(),
+  ];
+  const challengeFilter = { _id: { $in: challengeIds } };
+  if (kind) challengeFilter.kind = kind;
+
+  const challenges = await PracticeChallenge.find(challengeFilter).lean();
+  const challengeMap = new Map(challenges.map((c) => [String(c._id), c]));
+
+  const byChallenge = new Map();
+  for (const attempt of attempts) {
+    const cid = String(attempt.challengeId);
+    const ch = challengeMap.get(cid);
+    if (!ch) continue;
+
+    if (!byChallenge.has(cid)) {
+      byChallenge.set(cid, {
+        challengeId: cid,
+        kind: ch.kind,
+        periodKey: ch.periodKey,
+        opensAt: ch.opensAt,
+        closesAt: ch.closesAt,
+        problemMap: new Map(),
+      });
+    }
+
+    const entry = byChallenge.get(cid);
+    const qid = String(attempt.questionId);
+    if (!entry.problemMap.has(qid)) {
+      const meta = (ch.problems || []).find((p) => p.questionId === attempt.questionId);
+      entry.problemMap.set(qid, {
+        questionId: attempt.questionId,
+        title: meta?.title || attempt.questionId,
+        difficulty: meta?.difficulty || "",
+        points: meta?.points ?? 100,
+        submissions: [],
+      });
+    }
+
+    entry.problemMap.get(qid).submissions.push({
+      attemptId: String(attempt._id),
+      language: attempt.language || "python",
+      code: attempt.code || "",
+      score: attempt.score ?? 0,
+      submittedAt: attempt.submittedAt || attempt.updatedAt || null,
+      weightedPassRate: attempt.weightedPassRate ?? null,
+      passedVisible: attempt.passedVisible ?? 0,
+      passedHidden: attempt.passedHidden ?? 0,
+      totalVisible: attempt.totalVisible ?? 0,
+      totalHidden: attempt.totalHidden ?? 0,
+    });
+  }
+
+  const entries = [...byChallenge.values()]
+    .map((entry) => {
+      const problems = [...entry.problemMap.values()].map((p) => {
+        const submissions = [...p.submissions].sort(
+          (a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0)
+        );
+        const bestScore = submissions.reduce(
+          (m, s) => Math.max(m, Number(s.score) || 0),
+          0
+        );
+        return {
+          questionId: p.questionId,
+          title: p.title,
+          difficulty: p.difficulty,
+          points: p.points,
+          bestScore,
+          submissionCount: submissions.length,
+          submissions,
+        };
+      });
+      problems.sort((a, b) => {
+        const at = a.submissions[0]?.submittedAt || 0;
+        const bt = b.submissions[0]?.submittedAt || 0;
+        return new Date(bt) - new Date(at);
+      });
+      return {
+        challengeId: entry.challengeId,
+        kind: entry.kind,
+        periodKey: entry.periodKey,
+        opensAt: entry.opensAt,
+        closesAt: entry.closesAt,
+        problems,
+        myPoints: problems.reduce((sum, p) => sum + (Number(p.bestScore) || 0), 0),
+      };
+    })
+    .sort((a, b) => new Date(b.closesAt || 0) - new Date(a.closesAt || 0))
+    .slice(0, limit);
+
+  return { success: true, kind: kind || "all", entries };
 }
