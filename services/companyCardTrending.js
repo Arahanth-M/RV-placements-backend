@@ -18,6 +18,7 @@ import {
   trendingPinKey,
   trendingViewHourKey,
   stripCompanyListViews,
+  findAdminPinForCompanyCard,
 } from "./companyCardTrendingPure.js";
 
 export {
@@ -199,16 +200,24 @@ export async function getTrendingStatusForVisitIds(visitIds, at = new Date()) {
 export async function attachTrendingFlagsToCompanyList(list, at = new Date()) {
   const rows = Array.isArray(list) ? list : [];
   const ids = rows.map((c) => visitIdString(c?.placementCompanyVisitId)).filter(Boolean);
-  const flags = await getTrendingStatusForVisitIds(ids, at);
+  const [flags, pins] = await Promise.all([
+    getTrendingStatusForVisitIds(ids, at),
+    listPinnedTrendingCards(),
+  ]);
   return rows.map((c) => {
     const id = visitIdString(c?.placementCompanyVisitId);
     const flag = id ? flags[id] : null;
+    // The list card's visit id is the dream/FTE row. An admin pin on another
+    // visit of the same company+cluster (PPO, newer year, etc.) still applies.
+    const pin = findAdminPinForCompanyCard(c, pins);
+    const adminPinned = Boolean(pin) || flag?.reason === "admin";
+    const pinnedAt = pin?.pinnedAt || (flag?.reason === "admin" ? flag.pinnedAt : null);
     return {
       ...c,
-      trending: flag?.trending === true,
-      trendingReason: flag?.reason || null,
+      trending: adminPinned || flag?.trending === true,
+      trendingReason: adminPinned ? "admin" : flag?.reason || null,
       contentUpdatedAt:
-        laterDateIso(c.contentUpdatedAt, flag?.pinnedAt) || c.contentUpdatedAt || null,
+        laterDateIso(c.contentUpdatedAt, pinnedAt) || c.contentUpdatedAt || null,
     };
   });
 }
