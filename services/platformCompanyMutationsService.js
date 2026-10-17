@@ -75,17 +75,44 @@ async function saveDoc(oid, doc) {
   await invalidateCompanyDetailCache(String(oid));
 }
 
+const SOLUTION_LANGUAGES = ["cpp", "java", "python"];
+
 function applyQuestionUpdate(item, body) {
-  if (!item) return;
-  const { question, solution, intuition } = body || {};
-  if (question !== undefined && question !== null) {
-    item.question = text(question);
+  if (!item || !body || typeof body !== "object") return;
+  if (body.question !== undefined && body.question !== null) {
+    const question = text(body.question);
+    if (!question) {
+      const err = new Error("Question is required");
+      err.status = 400;
+      throw err;
+    }
+    item.question = question;
   }
-  if (solution !== undefined && solution !== null) {
-    item.answer = normalizeSolutionText(solution);
+  const hasStructuredSolutions =
+    body.solutions && typeof body.solutions === "object" && !Array.isArray(body.solutions);
+  if (body.explanation !== undefined && body.explanation !== null) {
+    item.answer = normalizeSolutionText(body.explanation);
+  } else if (
+    !hasStructuredSolutions &&
+    body.solution !== undefined &&
+    body.solution !== null
+  ) {
+    item.answer = normalizeSolutionText(body.solution);
   }
-  if (intuition !== undefined && intuition !== null) {
-    item.intuition = normalizeSolutionText(intuition);
+  if (body.intuition !== undefined && body.intuition !== null) {
+    item.intuition = normalizeSolutionText(body.intuition);
+  }
+  if (hasStructuredSolutions) {
+    const previous =
+      item.solutions && typeof item.solutions === "object" ? item.solutions : {};
+    const next = {};
+    for (const language of SOLUTION_LANGUAGES) {
+      next[language] =
+        body.solutions[language] !== undefined && body.solutions[language] !== null
+          ? normalizeSolutionText(body.solutions[language])
+          : normalizeSolutionText(previous[language]);
+    }
+    item.solutions = next;
   }
 }
 

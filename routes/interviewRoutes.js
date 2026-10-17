@@ -112,10 +112,13 @@ import {
 } from "../config/interviewLimits.js";
 import {
   evaluateMockAccess,
+  evaluateTestEmailOnceFeature,
   getGeneralAccessSnapshot,
+  markFreeBehavioralConsumed,
   markFreeMockConsumed,
   paywallPayload,
 } from "../services/billing/accessService.js";
+import { TEST_EMAIL_LIMIT_CODE } from "../services/testEmailService.js";
 import { PAYWALL_CODE } from "../config/billingPlans.js";
 import {
   getInterviewLimitRequestStatus,
@@ -659,14 +662,16 @@ router.get("/eligibility", async (req, res) => {
           limitRequest: { status: "none" },
         });
       }
-      const snapshot = await getGeneralAccessSnapshot(userId);
+      const snapshot = await getGeneralAccessSnapshot(userId, new Date(), req.user);
       const canStart = snapshot.unlimitedMocks || snapshot.freeMockRemaining > 0;
       return res.json({
         canStart,
         reason: canStart ? null : PAYWALL_CODE,
         message: canStart
           ? ""
-          : "Your free AI mock interview has been used. Unlock unlimited mocks to continue.",
+          : snapshot.isTestEmail
+            ? "This test email includes one AI mock interview, and that interview has already been used."
+            : "Your free AI mock interview has been used. Unlock unlimited mocks to continue.",
         completedCount: snapshot.mockStarts,
         nextAvailableAt: null,
         lastCompletedAt: null,
@@ -2057,10 +2062,24 @@ router.post(
       if (!userId) {
         return res.status(401).json({ error: "Unauthorized" });
       }
+      const gate = await evaluateTestEmailOnceFeature({
+        userId,
+        user: req.user,
+        feature: "behavioral",
+      });
+      if (!gate.allowed) {
+        return res.status(402).json({
+          error: gate.error?.message,
+          code: TEST_EMAIL_LIMIT_CODE,
+        });
+      }
       const result = await startBehavioralCoachPractice({
         userId,
         focus: req.body.focus,
       });
+      if (gate.limited) {
+        await markFreeBehavioralConsumed(userId).catch(() => {});
+      }
       recordDauActivitySafe(req.user, { action: "behavioral_coach" });
       return res.status(201).json({ success: true, ...result });
     } catch (error) {

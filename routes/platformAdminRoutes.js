@@ -57,6 +57,12 @@ import {
   setRuntimeSecret,
 } from "../services/platformRuntimeSecrets.js";
 import { listLlmBudgets, setLlmBudget } from "../services/platformLlmBudgets.js";
+import {
+  TEST_EMAIL_DURATION_HOURS,
+  listTestEmails,
+  revokeTestEmail,
+  setTestEmail,
+} from "../services/testEmailService.js";
 
 const router = express.Router();
 router.use(authJWT);
@@ -690,6 +696,50 @@ router.put("/colleges/:collegeId/features", async (req, res) => {
     }
     console.error("[platform-admin] put college features:", error?.message || error);
     return res.status(500).json({ error: "Failed to save college features" });
+  }
+});
+
+router.get("/test-emails", async (_req, res) => {
+  try {
+    const emails = await listTestEmails();
+    return res.json({
+      success: true,
+      emails,
+      durationOptions: TEST_EMAIL_DURATION_HOURS,
+    });
+  } catch (error) {
+    console.error("[platform-admin] list test emails:", error?.message || error);
+    return res.status(500).json({ error: "Failed to load test emails" });
+  }
+});
+
+router.put("/test-emails", async (req, res) => {
+  try {
+    const email = await setTestEmail({
+      email: req.body?.email,
+      durationHours: req.body?.durationHours,
+      createdBy: req.user?.email,
+    });
+    return res.json({ success: true, email });
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    if (status >= 500) {
+      console.error("[platform-admin] set test email:", error?.message || error);
+    }
+    return res.status(status).json({ error: error?.message || "Failed to save test email" });
+  }
+});
+
+router.delete("/test-emails", async (req, res) => {
+  try {
+    const email = await revokeTestEmail(req.body?.email || req.query?.email);
+    return res.json({ success: true, email });
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    if (status >= 500) {
+      console.error("[platform-admin] revoke test email:", error?.message || error);
+    }
+    return res.status(status).json({ error: error?.message || "Failed to revoke test email" });
   }
 });
 

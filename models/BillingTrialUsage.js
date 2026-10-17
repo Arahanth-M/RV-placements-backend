@@ -7,6 +7,8 @@ const billingTrialUsageSchema = new mongoose.Schema(
     freePrepConsumed: { type: Boolean, default: false },
     freeMockConsumedAt: { type: Date },
     freePrepConsumedAt: { type: Date },
+    freeBehavioralConsumed: { type: Boolean, default: false },
+    freeBehavioralConsumedAt: { type: Date },
   },
   { timestamps: true }
 );

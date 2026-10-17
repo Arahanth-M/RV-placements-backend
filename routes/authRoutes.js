@@ -19,7 +19,8 @@ import {
 } from "../services/blockedLoginAttempts.js";
 import { createCollegeOnboardingRequest } from "../services/collegeOnboardingService.js";
 import { getCollegeFeaturesForUser } from "../services/collegeFeatureConfigService.js";
-import { productionLoginAllowed } from "../utils/productionLoginLock.js";
+import { isProductionLoginAllowed } from "../utils/productionLoginLock.js";
+import { loadTestEmailAccess } from "../services/billing/accessService.js";
 
 const router = express.Router();
 
@@ -163,7 +164,7 @@ router.get(
 router.get(
   "/google/callback",
   (req, res, next) => {
-    passport.authenticate("google", { session: false }, (err, user, info) => {
+    passport.authenticate("google", { session: false }, async (err, user, info) => {
       if (err) {
         return redirectToAuthCallback(req, res, "login=failed");
       }
@@ -196,7 +197,7 @@ router.get(
         return redirectToAuthCallback(req, res, "login=failed");
       }
 
-      if (!productionLoginAllowed(user.email)) {
+      if (!(await isProductionLoginAllowed(user.email))) {
         return redirectToAuthCallback(req, res, "login=failed&reason=closed");
       }
 
@@ -349,11 +350,19 @@ router.get("/current_user", authJWT, async (req, res) => {
     }
   }
 
+  let testEmailAccess = null;
+  try {
+    testEmailAccess = await loadTestEmailAccess(claims);
+  } catch (error) {
+    console.error("current_user testEmailAccess:", error?.message || error);
+  }
+
   res.json({
     ...claims,
     createdAt: createdAt || claims.createdAt,
     isNewUser: isNewUser || false,
     spcCluster,
+    testEmailAccess,
   });
 });
 

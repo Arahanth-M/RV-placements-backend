@@ -4,6 +4,7 @@ import {
   PRODUCTION_LOGIN_MESSAGE,
   productionLoginAllowed,
 } from "../utils/productionLoginLock.js";
+import { isActiveTestEmail } from "../services/testEmailService.js";
 
 const getBearerToken = (req) => {
   const auth = req.headers.authorization;
@@ -26,7 +27,7 @@ function shouldLogJwtAuthSteps() {
   return v !== "0" && v !== "false";
 }
 
-export default function authJWT(req, res, next) {
+export default async function authJWT(req, res, next) {
   let token = req.cookies?.token;
   if (!token) {
     token = getBearerToken(req);
@@ -57,13 +58,24 @@ export default function authJWT(req, res, next) {
       console.log("userId extracted:", decoded.userId);
     }
 
-    if (!productionLoginAllowed(decoded.email)) {
+    if (productionLoginAllowed(decoded.email)) {
+      req.user = decoded;
+      return next();
+    }
+
+    let testEmailAllowed = false;
+    try {
+      testEmailAllowed = await isActiveTestEmail(decoded.email);
+    } catch {
+      testEmailAllowed = false;
+    }
+    if (!testEmailAllowed) {
       res.clearCookie("token", { path: "/" });
       return res.status(401).json({ error: PRODUCTION_LOGIN_MESSAGE });
     }
 
     req.user = decoded;
-    next();
+    return next();
   } catch {
     console.log("JWT failed");
     return res.status(401).json({ error: messages.ERROR.NOT_AUTHENTICATED });

@@ -11,6 +11,7 @@ import {
   evaluatePrepPathAccess,
   paywallPayload,
 } from "../services/billing/accessService.js";
+import { getActiveTestEmail } from "../services/testEmailService.js";
 import { getTeaserCompanyIndex } from "../services/billing/teaserCompanies.js";
 import {
   confirmCheckoutPayment,
@@ -22,6 +23,17 @@ import {
 const router = express.Router();
 
 const getUserId = (req) => String(req.user?.userId || "").trim();
+
+async function rejectActiveTestEmailPurchase(req, res) {
+  const grant = await getActiveTestEmail(req.user?.email);
+  if (!grant) return false;
+  res.status(403).json({
+    error:
+      "Test email access cannot buy a plan. It includes one use of each feature until the window ends.",
+    code: "TEST_EMAIL",
+  });
+  return true;
+}
 
 function sendBillingError(res, err) {
   const status = Number(err?.status) || 500;
@@ -62,7 +74,7 @@ router.get("/access", authJWT, authorize(["student", "admin", "spc"]), async (re
   try {
     const userId = getUserId(req);
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
-    const snapshot = await getGeneralAccessSnapshot(userId);
+    const snapshot = await getGeneralAccessSnapshot(userId, new Date(), req.user);
     const teasers = await getTeaserCompanyIndex();
     const teaserCompanyIds = {};
     const teaserCompanies = [];
@@ -134,6 +146,10 @@ router.get("/access", authJWT, authorize(["student", "admin", "spc"]), async (re
       },
       freeMockRemaining: snapshot.freeMockRemaining,
       freePrepRemaining: snapshot.freePrepRemaining,
+      isTestEmail: snapshot.isTestEmail === true,
+      testEmailExpiresAt: snapshot.testEmailExpiresAt,
+      freeChallengeRemaining: snapshot.freeChallengeRemaining,
+      freeBehavioralRemaining: snapshot.freeBehavioralRemaining,
       teaserCompanyIds,
       teaserCompanies,
       company,
@@ -147,6 +163,7 @@ router.post("/quote", authJWT, authorize(["student", "admin", "spc"]), async (re
   try {
     const userId = getUserId(req);
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    if (await rejectActiveTestEmailPurchase(req, res)) return undefined;
     const result = await quoteForUser({
       userId,
       planId: req.body?.planId,
@@ -162,6 +179,7 @@ router.post("/orders", authJWT, authorize(["student", "admin", "spc"]), async (r
   try {
     const userId = getUserId(req);
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    if (await rejectActiveTestEmailPurchase(req, res)) return undefined;
     const result = await createBillingOrder({
       userId,
       email: req.user?.email,

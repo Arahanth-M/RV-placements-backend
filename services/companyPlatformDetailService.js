@@ -23,6 +23,7 @@ function mapQuestionArrays(items) {
   const solutionsLegacy = [];
   const solutionsByLang = [];
   const intuitions = [];
+  const explanations = [];
   const prepRoleKeys = [];
   const kinds = [];
 
@@ -38,11 +39,20 @@ function mapQuestionArrays(items) {
     solutionsLegacy.push(cpp || java || python || answer);
     solutionsByLang.push({ cpp, java, python });
     intuitions.push(text(item?.intuition));
+    explanations.push(answer);
     prepRoleKeys.push(text(item?.prepRoleKey));
     kinds.push(text(item?.kind) || "non_coding");
   }
 
-  return { questions, solutionsLegacy, solutionsByLang, intuitions, prepRoleKeys, kinds };
+  return {
+    questions,
+    solutionsLegacy,
+    solutionsByLang,
+    intuitions,
+    explanations,
+    prepRoleKeys,
+    kinds,
+  };
 }
 
 function mapMcqQuestionsForClient(items) {
@@ -159,10 +169,12 @@ export async function getCompanyPlatformDetailById(companyId) {
     onlineQuestions_solution: oa.solutionsLegacy,
     onlineQuestions_solutions: oa.solutionsByLang,
     onlineQuestions_intuition: oa.intuitions,
+    onlineQuestions_explanation: oa.explanations,
     interviewQuestions: iq.questions,
     interviewQuestions_solution: iq.solutionsLegacy,
     interviewQuestions_solutions: iq.solutionsByLang,
     interviewQuestions_intuition: iq.intuitions,
+    interviewQuestions_explanation: iq.explanations,
     interviewQuestions_prepRoleKey: iq.prepRoleKeys,
     onlineQuestions_prepRoleKey: [
       ...oa.prepRoleKeys,

@@ -63,7 +63,7 @@ describe("production login lock", () => {
     };
     const next = jest.fn();
 
-    authJWT(req, res, next);
+    await authJWT(req, res, next);
 
     expect(next).not.toHaveBeenCalled();
     expect(res.clearCookie).toHaveBeenCalledWith("token", { path: "/" });
@@ -92,7 +92,7 @@ describe("production login lock", () => {
     };
     const next = jest.fn();
 
-    authJWT(req, res, next);
+    await authJWT(req, res, next);
 
     expect(next).toHaveBeenCalled();
     expect(res.status).not.toHaveBeenCalled();

@@ -63,7 +63,7 @@ router.get("/quota", async (req, res) => {
     const userId = getAuthenticatedUserId(req);
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
     if (isPlatformPrepScope(req)) {
-      const snapshot = await getGeneralAccessSnapshot(userId);
+      const snapshot = await getGeneralAccessSnapshot(userId, new Date(), req.user);
       return res.json({
         success: true,
         quota: {
@@ -226,7 +226,7 @@ router.post("/generate", (req, res) => {
 
       if (platformScope) {
         await markFreePrepConsumed(userId).catch(() => {});
-        const snapshot = await getGeneralAccessSnapshot(userId);
+        const snapshot = await getGeneralAccessSnapshot(userId, new Date(), req.user);
         quota = {
           unlimited: snapshot.unlimitedPrepPath,
           limit: snapshot.unlimitedPrepPath ? null : 1,

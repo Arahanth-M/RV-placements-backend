@@ -17,6 +17,8 @@ import {
   practiceChallengeSubmitSchema,
 } from "../validations/practiceChallenge.validation.js";
 import { recordDauActivitySafe } from "../services/dau/recordDauActivity.js";
+import { evaluateTestEmailOnceFeature } from "../services/billing/accessService.js";
+import { TEST_EMAIL_LIMIT_CODE } from "../services/testEmailService.js";
 
 const router = express.Router();
 
@@ -152,6 +154,18 @@ router.post(
   validateRequest(practiceChallengeSubmitSchema),
   async (req, res) => {
     try {
+      const userId = String(req.user?.userId || req.user?._id || "").trim();
+      const gate = await evaluateTestEmailOnceFeature({
+        userId,
+        user: req.user,
+        feature: "challenge",
+      });
+      if (!gate.allowed) {
+        return res.status(402).json({
+          error: gate.error?.message,
+          code: TEST_EMAIL_LIMIT_CODE,
+        });
+      }
       const result = await submitChallengeSolution({
         user: req.user,
         challengeId: req.params.challengeId,

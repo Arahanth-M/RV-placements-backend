@@ -18,6 +18,7 @@ describe("getCompanyPlatformDetailById", () => {
           question: "Two Sum",
           solutions: { cpp: "cpp-code", java: "java-code", python: "py-code" },
           intuition: "hash map",
+          answer: "Use a hash map.",
         },
       ],
       interviewQuestions: [
@@ -48,6 +49,8 @@ describe("getCompanyPlatformDetailById", () => {
       python: "py-code",
     });
     expect(payload.onlineQuestions_intuition[0]).toBe("hash map");
+    expect(payload.onlineQuestions_explanation[0]).toBe("Use a hash map.");
+    expect(payload.interviewQuestions_explanation[0]).toBe("HTTP API style");
     expect(payload.interviewQuestions).toEqual(["What is REST?"]);
     expect(payload.interviewProcess[0].content).toBe("Two rounds, then HR.");
     expect(payload.Must_Do_Topics).toContain("Arrays");

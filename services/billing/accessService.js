@@ -2,6 +2,8 @@ import CompanyStatic from "../../models/CompanyStatic.js";
 import InterviewSession from "../../models/InterviewSession.js";
 import PrepPathPlan from "../../models/PrepPathPlan.js";
 import BillingTrialUsage from "../../models/BillingTrialUsage.js";
+import PracticeChallengeAttempt from "../../models/PracticeChallengeAttempt.js";
+import BehavioralCoachAttempt from "../../models/BehavioralCoachAttempt.js";
 import { classifyGeneralCompanyCategory } from "../../utils/generalCompanyCategory.js";
 import {
   PAYWALL_CODE,
@@ -10,6 +12,11 @@ import {
 } from "../../config/billingPlans.js";
 import { listActiveEntitlements, summarizeEntitlements } from "./entitlementService.js";
 import { isTeaserCompanyId } from "./teaserCompanies.js";
+import {
+  TEST_EMAIL_LIMIT_CODE,
+  getActiveTestEmail,
+  usageAnchorFromGrant,
+} from "../testEmailService.js";
 
 export function isBillingAdmin(user) {
   if (!user) return false;
@@ -91,20 +98,96 @@ export async function markFreePrepConsumed(userId) {
   );
 }
 
-export async function getGeneralAccessSnapshot(userId, now = new Date()) {
-  const [entitlements, mockStarts, prepPlans, trial] = await Promise.all([
-    listActiveEntitlements(userId, now),
-    countPlatformMockStarts(userId),
-    countPrepPathPlans(userId),
-    BillingTrialUsage.findOne({ userId: String(userId || "").trim() }).lean(),
-  ]);
-  const summary = summarizeEntitlements(entitlements, now);
-  const mockUsed = Boolean(trial?.freeMockConsumed) || mockStarts > 0;
-  const prepUsed = Boolean(trial?.freePrepConsumed) || prepPlans > 0;
+export async function markFreeBehavioralConsumed(userId) {
+  const id = String(userId || "").trim();
+  if (!id) return;
+  await BillingTrialUsage.findOneAndUpdate(
+    { userId: id },
+    { $set: { freeBehavioralConsumed: true, freeBehavioralConsumedAt: new Date() } },
+    { upsert: true }
+  );
+}
+
+function summaryWithoutPaidGrants() {
+  return {
+    allCards: false,
+    allCardsUntil: null,
+    mocks: false,
+    mocksUntil: null,
+    prepPath: false,
+    prepPathUntil: null,
+    categories: {},
+  };
+}
+
+function testEmailAccessPayload(grant, snapshot) {
+  if (!grant || !snapshot?.isTestEmail) return null;
+  return {
+    active: true,
+    expiresAt: grant.expiresAt,
+    durationHours: Number(grant.durationHours) || null,
+    mockRemaining: snapshot.freeMockRemaining,
+    prepRemaining: snapshot.freePrepRemaining,
+    challengeRemaining: snapshot.freeChallengeRemaining,
+    behavioralRemaining: snapshot.freeBehavioralRemaining,
+  };
+}
+
+export async function loadTestEmailAccess(user, now = new Date()) {
+  if (isBillingAdmin(user) || !user?.email) return null;
+  const grant = await getActiveTestEmail(user.email, now);
+  if (!grant) return null;
+  const userId = String(user.userId || user._id || "").trim();
+  const snapshot = await getGeneralAccessSnapshot(userId, now, user);
+  return testEmailAccessPayload(grant, snapshot);
+}
+
+export async function getGeneralAccessSnapshot(userId, now = new Date(), user = null) {
+  const id = String(userId || "").trim();
+  const grant =
+    user?.email && !isBillingAdmin(user) ? await getActiveTestEmail(user.email, now) : null;
+  const anchor = grant ? usageAnchorFromGrant(grant) : null;
+  const sinceGrant = anchor ? { $gte: anchor } : null;
+
+  const [entitlements, mockStarts, prepPlans, trial, challengeStarts, behavioralStarts] =
+    await Promise.all([
+      listActiveEntitlements(id, now),
+      grant
+        ? InterviewSession.countDocuments({
+            userId: id,
+            contentScope: "platform",
+            createdAt: sinceGrant,
+          })
+        : countPlatformMockStarts(id),
+      grant
+        ? PrepPathPlan.countDocuments({ userId: id, createdAt: sinceGrant })
+        : countPrepPathPlans(id),
+      BillingTrialUsage.findOne({ userId: id }).lean(),
+      grant
+        ? PracticeChallengeAttempt.countDocuments({
+            userId: id,
+            status: "submitted",
+            createdAt: sinceGrant,
+          })
+        : Promise.resolve(0),
+      grant
+        ? BehavioralCoachAttempt.countDocuments({ userId: id, createdAt: sinceGrant })
+        : Promise.resolve(0),
+    ]);
+
+  const summary = grant ? summaryWithoutPaidGrants() : summarizeEntitlements(entitlements, now);
+  const behavioralMarked =
+    Boolean(grant) &&
+    trial?.freeBehavioralConsumedAt &&
+    new Date(trial.freeBehavioralConsumedAt) >= anchor;
+  const mockUsed = grant ? mockStarts > 0 : Boolean(trial?.freeMockConsumed) || mockStarts > 0;
+  const prepUsed = grant ? prepPlans > 0 : Boolean(trial?.freePrepConsumed) || prepPlans > 0;
   const freeMockRemaining = summary.mocks ? 0 : mockUsed ? 0 : 1;
   const freePrepRemaining = summary.prepPath ? 0 : prepUsed ? 0 : 1;
+  const challengeUsed = grant ? challengeStarts > 0 : false;
+  const behavioralUsed = grant ? behavioralStarts > 0 || behavioralMarked : false;
   return {
-    entitlements,
+    entitlements: grant ? [] : entitlements,
     summary,
     mockStarts,
     prepPlans,
@@ -112,6 +195,11 @@ export async function getGeneralAccessSnapshot(userId, now = new Date()) {
     freePrepRemaining,
     unlimitedMocks: summary.mocks,
     unlimitedPrepPath: summary.prepPath,
+    isTestEmail: Boolean(grant),
+    testEmailExpiresAt: grant?.expiresAt || null,
+    testEmailDurationHours: grant ? Number(grant.durationHours) || null : null,
+    freeChallengeRemaining: grant ? (challengeUsed ? 0 : 1) : null,
+    freeBehavioralRemaining: grant ? (behavioralUsed ? 0 : 1) : null,
   };
 }
 
@@ -127,7 +215,7 @@ export async function evaluateCompanyCardAccess({ userId, companyId, user, now =
     throw err;
   }
   const isTeaser = await isTeaserCompanyId(company._id);
-  const snapshot = await getGeneralAccessSnapshot(userId, now);
+  const snapshot = await getGeneralAccessSnapshot(userId, now, user);
   if (isTeaser || hasCategoryAccess(snapshot.summary, company.categoryId)) {
     return { allowed: true, isTeaser, bypass: false, company, snapshot };
   }
@@ -154,6 +242,23 @@ export async function evaluateCompanyCardAccess({ userId, companyId, user, now =
 
 export async function evaluateMockAccess({ userId, companyId, user, now = new Date() }) {
   const card = await evaluateCompanyCardAccess({ userId, companyId, user, now });
+  // A test email's one mock can be for any company, not only the free card in each category.
+  if (card.snapshot?.isTestEmail) {
+    if (card.snapshot.freeMockRemaining > 0) {
+      return { ...card, mockAllowed: true, error: null };
+    }
+    return {
+      ...card,
+      mockAllowed: false,
+      error: createPaywallError({
+        feature: PAYWALL_FEATURES.MOCKS,
+        message:
+          "This test email includes one AI mock interview, and that interview has already been used.",
+        suggestedPlans: [],
+        categoryId: card.company?.categoryId || "",
+      }),
+    };
+  }
   if (!card.allowed) return { ...card, mockAllowed: false };
   if (card.bypass || card.snapshot?.unlimitedMocks || card.snapshot?.freeMockRemaining > 0) {
     return { ...card, mockAllowed: true };
@@ -163,9 +268,10 @@ export async function evaluateMockAccess({ userId, companyId, user, now = new Da
     mockAllowed: false,
     error: createPaywallError({
       feature: PAYWALL_FEATURES.MOCKS,
-      message:
-        "Your free AI mock interview has been used. Unlock unlimited mocks to continue.",
-      suggestedPlans: [PLAN_IDS.MOCKS, PLAN_IDS.ALL_PREMIUM],
+      message: card.snapshot?.isTestEmail
+        ? "This test email includes one AI mock interview, and that interview has already been used."
+        : "Your free AI mock interview has been used. Unlock unlimited mocks to continue.",
+      suggestedPlans: card.snapshot?.isTestEmail ? [] : [PLAN_IDS.MOCKS, PLAN_IDS.ALL_PREMIUM],
       categoryId: card.company?.categoryId || "",
     }),
   };
@@ -196,8 +302,10 @@ export async function evaluatePrepPathAccess({ userId, companyId, user, now = ne
     prepAllowed: false,
     error: createPaywallError({
       feature: PAYWALL_FEATURES.PREP_PATH,
-      message: "Your free PrepPath plan has been used. Unlock PrepPath to generate more.",
-      suggestedPlans: [PLAN_IDS.PREP_PATH, PLAN_IDS.ALL_PREMIUM],
+      message: card.snapshot?.isTestEmail
+        ? "This test email includes one PrepPath, and that plan has already been generated."
+        : "Your free PrepPath plan has been used. Unlock PrepPath to generate more.",
+      suggestedPlans: card.snapshot?.isTestEmail ? [] : [PLAN_IDS.PREP_PATH, PLAN_IDS.ALL_PREMIUM],
       categoryId: card.company?.categoryId || "",
     }),
   };
@@ -216,6 +324,28 @@ export function alreadyOwnsPlan(summary, planId, categoryId = "") {
     return hasCategoryAccess(summary, categoryId);
   }
   return false;
+}
+
+export async function evaluateTestEmailOnceFeature({ userId, user, feature, now = new Date() }) {
+  if (isBillingAdmin(user)) return { limited: false, allowed: true, snapshot: null };
+  const grant = await getActiveTestEmail(user?.email, now);
+  if (!grant) return { limited: false, allowed: true, snapshot: null };
+  const snapshot = await getGeneralAccessSnapshot(userId, now, user);
+  if (!snapshot.isTestEmail) return { limited: false, allowed: true, snapshot };
+  const remaining =
+    feature === "challenge" ? snapshot.freeChallengeRemaining : snapshot.freeBehavioralRemaining;
+  if (remaining > 0) return { limited: true, allowed: true, snapshot };
+  const message =
+    feature === "challenge"
+      ? "This test email includes one practice challenge, and that challenge has already been submitted."
+      : "This test email includes one behavioural coach session, and that session has already been used.";
+  const error = createPaywallError({
+    feature,
+    message,
+    suggestedPlans: [],
+  });
+  error.code = TEST_EMAIL_LIMIT_CODE;
+  return { limited: true, allowed: false, snapshot, error };
 }
 
 export function paywallPayload(error) {
