@@ -61,5 +61,35 @@ export async function connectRedis() {
   return connectingPromise;
 }
 
+export function isRedisOpen() {
+  return Boolean(redisUrl) && redis.isOpen === true;
+}
+
+/**
+ * Ensure Redis is connected before features that require it (trending pins, etc.).
+ * @throws {Error & { statusCode?: number }}
+ */
+export async function ensureRedisConnected() {
+  if (!redisUrl) {
+    const err = new Error(
+      "REDIS_URL is not set. backend-main must use REMOTE_REDIS_URL (see compose.main.yml)."
+    );
+    err.statusCode = 503;
+    throw err;
+  }
+  if (redis.isOpen) {
+    return true;
+  }
+  await connectRedis();
+  if (!redis.isOpen) {
+    const err = new Error(
+      "Redis is unavailable. Start the interview stack (Redis) and set REMOTE_REDIS_URL for backend-main — locally redis://host.docker.internal:6380, production redis://<server2-private-ip>:6379."
+    );
+    err.statusCode = 503;
+    throw err;
+  }
+  return true;
+}
+
 export { redisUrl };
 export default redis;

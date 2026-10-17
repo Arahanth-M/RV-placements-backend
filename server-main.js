@@ -4,7 +4,7 @@
  */
 import "./config/mongoCollections.js";
 import { connectDB } from "./config/db.js";
-import { connectRedis } from "./src/utils/redisClient.js";
+import { connectRedis, isRedisOpen } from "./src/utils/redisClient.js";
 import { config, routes } from "./config/constants.js";
 import {
   createExpressApp,
@@ -56,6 +56,12 @@ app.use(routes.DAU, dauRouter);
 if (process.env.NODE_ENV !== "test") {
   connectDB(config.MONGO_URI).then(async () => {
     await connectRedis().catch(() => {});
+    if (!isRedisOpen()) {
+      console.warn(
+        "[backend-main] Redis is not connected. Trending pins, DAU time, caches, and queues need REMOTE_REDIS_URL " +
+          "(local: redis://host.docker.internal:6380 after compose.interview.yml; prod: redis://<server2-private-ip>:6379)."
+      );
+    }
     const { startNotificationSseSubscriber } = await import(
       "./services/realtime/notificationEmitter.js"
     );

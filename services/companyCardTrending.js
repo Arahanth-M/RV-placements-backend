@@ -1,8 +1,9 @@
 /**
- * Company-card trending flags stored only in Redis (24h admin pin + recent view velocity).
+ * Company-card trending flags stored in Redis (24h admin pin + recent view velocity).
  * Does not write company / visit / submission Mongo documents.
  */
 import redis from "../utils/redis.js";
+import { ensureRedisConnected } from "../src/utils/redisClient.js";
 import { getJSON, setJSON, getSetMembers, addToSet, deleteKey } from "../src/utils/redisHelpers.js";
 import { touchCardContentUpdated } from "./companyCardContentUpdated.js";
 import CompanyVisit from "../models/CompanyVisit.js";
@@ -87,6 +88,36 @@ function pinExpiresAtFromNow(now = new Date()) {
   return new Date(now.getTime() + TRENDING_PIN_TTL_SECONDS * 1000);
 }
 
+function pinPayloadIsActive(payload, atMs = Date.now()) {
+  if (!payload || typeof payload !== "object") return false;
+  const exp = payload.expiresAt ? new Date(payload.expiresAt).getTime() : 0;
+  return !exp || exp > atMs;
+}
+
+function redisUnavailableError(message = "Failed to store trending pin in Redis.") {
+  const err = new Error(message);
+  err.statusCode = 503;
+  return err;
+}
+
+/** @throws {Error & { statusCode?: number }} */
+async function writePinToRedis(payload) {
+  await ensureRedisConnected();
+  const id = visitIdString(payload?.visitId);
+  if (!id || !payload) {
+    const err = new Error("visitId required");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const stored = await setJSON(trendingPinKey(id), payload, TRENDING_PIN_TTL_SECONDS);
+  const indexed = await addToSet(PIN_INDEX_KEY, id, TRENDING_PIN_TTL_SECONDS + 60);
+  if (!stored || !indexed) {
+    await deleteKey(trendingPinKey(id));
+    throw redisUnavailableError();
+  }
+}
+
 export async function pinVisitTrending(visitId, now = new Date()) {
   const id = visitIdString(visitId);
   if (!id) {
@@ -120,8 +151,7 @@ export async function pinVisitTrending(visitId, now = new Date()) {
     expiresAt: pinExpiresAtFromNow(now).toISOString(),
   };
 
-  await setJSON(trendingPinKey(id), payload, TRENDING_PIN_TTL_SECONDS);
-  await addToSet(PIN_INDEX_KEY, id, TRENDING_PIN_TTL_SECONDS + 60);
+  await writePinToRedis(payload);
   await touchCardContentUpdated({ companyId: visit.companyId, visitId: id, at: now });
   return payload;
 }
@@ -146,12 +176,12 @@ export async function getPinnedTrending(visitId) {
   if (!id) return null;
   const row = await getJSON(trendingPinKey(id));
   if (!row || typeof row !== "object") return null;
-  const exp = row.expiresAt ? new Date(row.expiresAt).getTime() : 0;
-  if (exp && exp <= Date.now()) return null;
+  if (!pinPayloadIsActive(row)) return null;
   return row;
 }
 
 export async function listPinnedTrendingCards() {
+  await ensureRedisConnected();
   const ids = await getSetMembers(PIN_INDEX_KEY);
   const rows = [];
   const stale = [];
@@ -160,7 +190,7 @@ export async function listPinnedTrendingCards() {
     if (pin) rows.push(pin);
     else stale.push(id);
   }
-    if (stale.length) {
+  if (stale.length) {
     try {
       for (const id of stale) {
         await redis.sRem(PIN_INDEX_KEY, id);
@@ -202,7 +232,7 @@ export async function attachTrendingFlagsToCompanyList(list, at = new Date()) {
   const ids = rows.map((c) => visitIdString(c?.placementCompanyVisitId)).filter(Boolean);
   const [flags, pins] = await Promise.all([
     getTrendingStatusForVisitIds(ids, at),
-    listPinnedTrendingCards(),
+    listPinnedTrendingCards().catch(() => []),
   ]);
   return rows.map((c) => {
     const id = visitIdString(c?.placementCompanyVisitId);

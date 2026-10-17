@@ -1031,6 +1031,10 @@ adminRouter.get("/trending-cards", async (_req, res) => {
     const items = await listPinnedTrendingCards();
     return res.json({ items, pinHours: 24 });
   } catch (err) {
+    const status = Number(err?.statusCode) || 500;
+    if (status === 503) {
+      return res.status(503).json({ error: err.message || "Redis unavailable" });
+    }
     console.error("GET /api/admin/trending-cards:", err);
     return res.status(500).json({ error: "Server error" });
   }
@@ -1062,8 +1066,11 @@ adminRouter.post(
       });
     } catch (err) {
       const status = Number(err?.statusCode) || 500;
-      if (status < 500) {
+      if (status >= 400 && status < 500) {
         return res.status(status).json({ error: err.message });
+      }
+      if (status === 503) {
+        return res.status(503).json({ error: err.message || "Redis unavailable" });
       }
       console.error("POST /api/admin/trending-cards:", err);
       return res.status(500).json({ error: "Server error" });
