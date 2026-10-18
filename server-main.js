@@ -32,6 +32,7 @@ import logoRouter from "./routes/logo.js";
 import experienceRouter from "./routes/experienceRoutes.js";
 import billingRouter from "./routes/billingRoutes.js";
 import interviewQuestionBankRouter from "./routes/interviewQuestionBankRoutes.js";
+import practiceChallengeRouter from "./routes/practiceChallengeRoutes.js";
 import driveCalendarRouter from "./routes/driveCalendarRoutes.js";
 import { createHealthHandler } from "./server/healthHandler.js";
 
@@ -61,6 +62,8 @@ app.use(routes.PREP_PATH, prepPathRouter);
 app.use(routes.DAU, dauRouter);
 app.use(routes.BILLING, billingRouter);
 app.use(routes.INTERVIEW_QUESTION_BANK, interviewQuestionBankRouter);
+// Live clients still call this path. Edge nginx sends it here, not to backend-interview.
+app.use(routes.PRACTICE_CHALLENGES_LEGACY, practiceChallengeRouter);
 app.use(routes.DRIVE_CALENDAR, driveCalendarRouter);
 
 if (process.env.NODE_ENV !== "test") {

@@ -95,7 +95,9 @@ export const routes = {
   LEADERBOARD: '/api/leaderboard',
   INTERVIEW: '/api/interview',
   INTERVIEW_QUESTION_BANK: '/api/interview-question-bank',
-  PRACTICE_CHALLENGES: '/api/practice-challenges',
+  // Under /api/interview so prod nginx forwards it to the interview host (code judge).
+  PRACTICE_CHALLENGES: '/api/interview/practice-challenges',
+  PRACTICE_CHALLENGES_LEGACY: '/api/practice-challenges',
   DRIVE_CALENDAR: '/api/drive-calendar',
   RESUME: '/api/resume',
   PREP_PATH: '/api/prep-path',

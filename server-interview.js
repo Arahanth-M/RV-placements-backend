@@ -1,5 +1,5 @@
 /**
- * Phase 2 — backend-interview: /api/interview only. Default local port 7777.
+ * Phase 2 — backend-interview: /api/interview (including practice challenges). Default local port 7777.
  * Legacy monolith remains at server.js.
  */
 import "./config/mongoCollections.js";
@@ -17,8 +17,10 @@ applySharedHttpMiddleware(app, { bypassGlobalLimiterForInterviewPrefix: true });
 
 app.get("/health", createHealthHandler("backend-interview"));
 
-app.use(routes.INTERVIEW, interviewRouter);
+// Longer prefix first so practice routes are not swallowed by interview auth/beta middleware.
 app.use(routes.PRACTICE_CHALLENGES, practiceChallengeRouter);
+app.use(routes.PRACTICE_CHALLENGES_LEGACY, practiceChallengeRouter);
+app.use(routes.INTERVIEW, interviewRouter);
 
 if (process.env.NODE_ENV !== "test") {
   connectDB(config.MONGO_URI).then(async () => {
