@@ -10,6 +10,11 @@ import {
   executeCode,
   normalizeExecutionLanguage,
 } from "./codeExecution/executeCode.js";
+import {
+  buildFailedVisibleTestsFromRows,
+  buildHiddenTestResultsFromRows,
+  normalizeIsHidden,
+} from "./codeExecution/executionUtils.js";
 import { deleteKey, getJSON, setJSON } from "../src/utils/redisHelpers.js";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
@@ -247,10 +252,24 @@ async function ensureChallenge(kind) {
   return doc;
 }
 
+function visibleTestCasesFromQuestion(testCases) {
+  return (Array.isArray(testCases) ? testCases : [])
+    .filter((testcase) => testcase && testcase.isHidden !== true)
+    .map((testcase) => ({
+      input: testcase.input ?? null,
+      expectedOutput: testcase.expectedOutput ?? null,
+      weight: Number(testcase.weight) || 1,
+    }));
+}
+
 function publicProblem(p, attempt = null, questionDoc = null) {
   // Always advertise all runner languages (do not narrow from DB metadata).
   const langs = ["python", "cpp", "java"];
   const starter = questionDoc?.dsaMetadata?.starterCode || null;
+  const complexity = questionDoc?.complexity;
+  const hasComplexity = Boolean(
+    complexity && (String(complexity.time || "").trim() || String(complexity.space || "").trim())
+  );
   return {
     questionId: p.questionId,
     title: p.title,
@@ -258,9 +277,17 @@ function publicProblem(p, attempt = null, questionDoc = null) {
     points: p.points,
     topics: p.topics || [],
     question: questionDoc?.question || "",
+    questionUrl: String(questionDoc?.url || "").trim(),
     functionSignature: questionDoc?.dsaMetadata?.functionSignature || "",
     supportedLanguages: langs,
     starterCode: starter,
+    visibleTestCases: visibleTestCasesFromQuestion(questionDoc?.testCases),
+    complexity: hasComplexity
+      ? {
+          time: String(complexity.time || "").trim(),
+          space: String(complexity.space || "").trim(),
+        }
+      : null,
     myBestScore: attempt?.score ?? null,
     mySubmittedAt: attempt?.submittedAt || null,
     myLanguage: attempt?.language || null,
@@ -608,8 +635,9 @@ export async function submitChallengeSolution(input = {}) {
   });
   await invalidatePracticeBoardCache();
 
-  const publicResults = (execution.results || []).map((r) => {
-    if (r?.isHidden) {
+  const resultRows = Array.isArray(execution.results) ? execution.results : [];
+  const publicResults = resultRows.map((r) => {
+    if (normalizeIsHidden(r?.isHidden)) {
       return { passed: r.passed, isHidden: true };
     }
     return {
@@ -621,6 +649,10 @@ export async function submitChallengeSolution(input = {}) {
       error: r.error,
     };
   });
+  const hiddenTestResults = buildHiddenTestResultsFromRows(resultRows);
+  const failedTests = buildFailedVisibleTestsFromRows(resultRows);
+  const visibleTotalCount = resultRows.filter((r) => normalizeIsHidden(r?.isHidden) !== true).length;
+  const hiddenTotalCount = resultRows.filter((r) => normalizeIsHidden(r?.isHidden) === true).length;
 
   return {
     success: true,
@@ -637,12 +669,20 @@ export async function submitChallengeSolution(input = {}) {
       status: execution.status,
       passedCount: execution.passedCount,
       failedCount: execution.failedCount,
+      totalCount: resultRows.length,
       visiblePassedCount: execution.visiblePassedCount,
+      visibleTotalCount,
       hiddenPassedCount: execution.hiddenPassedCount,
+      hiddenTotalCount,
       weightedPassRate: execution.weightedPassRate,
       results: publicResults,
+      /** Same shape as mock-interview post-submit: pass/fail per hidden case, details only on failures. */
+      hiddenTestResults,
+      failedTests,
       error: execution.error || "",
       executionTime: execution.executionTime,
+      userDebugOutput:
+        typeof execution.userDebugOutput === "string" ? execution.userDebugOutput : "",
     },
     challenge: await enrichChallengeForUser(challenge, actor.userId),
   };
