@@ -33,6 +33,7 @@ import { listPlatformPrepCatalog } from "../services/platformPrepCatalogService.
 import {
   getCompanyPlatformDetailById,
   isPlatformCompanyScope,
+  stripPaidPlatformDetailTabs,
 } from "../services/companyPlatformDetailService.js";
 import {
   getPlatformContentForEditor,
@@ -421,21 +422,22 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
           user: req.user,
         });
         if (!access.allowed) {
+          const preview = await getCompanyPlatformDetailById(id);
+          if (!preview) {
+            return res.status(404).json({ error: "Company not found" });
+          }
           const body = paywallPayload(access.error);
-          return res.status(402).json({
-            ...body,
-            locked: true,
-            company: access.company
-              ? {
-                  _id: access.company._id,
-                  name: access.company.name,
-                  logo: access.company.logo,
-                  business_model: access.company.business_model,
-                  category: access.company.categoryId,
-                  isTeaser: false,
-                }
-              : null,
-          });
+          return res.json(
+            omitViewsUnlessAdmin(
+              {
+                ...stripPaidPlatformDetailTabs(preview),
+                isTeaser: false,
+                tabsLocked: true,
+                paywall: body,
+              },
+              req
+            )
+          );
         }
       } catch (accessErr) {
         if (accessErr?.code === "COMPANY_NOT_FOUND") {

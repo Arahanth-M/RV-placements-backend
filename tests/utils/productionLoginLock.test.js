@@ -28,23 +28,23 @@ describe("production login lock", () => {
     expect(productionLoginAllowed("owner@gmail.com")).toBe(true);
   });
 
-  it("allows only the platform admin email on localhost", async () => {
+  it("allows every email on localhost", async () => {
     process.env.NODE_ENV = "development";
     const { productionLoginAllowed } = await import("../../utils/productionLoginLock.js");
     expect(productionLoginAllowed("owner@gmail.com")).toBe(true);
-    expect(productionLoginAllowed("student@rvce.edu.in")).toBe(false);
+    expect(productionLoginAllowed("student@rvce.edu.in")).toBe(true);
   });
 
-  it("allows only the platform admin email in production", async () => {
+  it("allows every email in production", async () => {
     process.env.NODE_ENV = "production";
     const { productionLoginAllowed } = await import("../../utils/productionLoginLock.js");
     expect(productionLoginAllowed("owner@gmail.com")).toBe(true);
     expect(productionLoginAllowed("OWNER@gmail.com")).toBe(true);
-    expect(productionLoginAllowed("student@rvce.edu.in")).toBe(false);
-    expect(productionLoginAllowed("campus@rvce.edu.in")).toBe(false);
+    expect(productionLoginAllowed("student@rvce.edu.in")).toBe(true);
+    expect(productionLoginAllowed("campus@rvce.edu.in")).toBe(true);
   });
 
-  it("rejects an existing session for any other email in production", async () => {
+  it("keeps an existing student session in production", async () => {
     process.env.NODE_ENV = "production";
     const authJWT = (await import("../../middleware/authJWT.js")).default;
     const token = jwt.sign(
@@ -65,12 +65,9 @@ describe("production login lock", () => {
 
     await authJWT(req, res, next);
 
-    expect(next).not.toHaveBeenCalled();
-    expect(res.clearCookie).toHaveBeenCalledWith("token", { path: "/" });
-    expect(res.status).toHaveBeenCalledWith(401);
-    expect(res.json).toHaveBeenCalledWith({
-      error: "Login through ur official college emailId",
-    });
+    expect(next).toHaveBeenCalled();
+    expect(res.clearCookie).not.toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
   });
 
   it("keeps the platform admin session in production", async () => {

@@ -1,7 +1,8 @@
 import express from "express";
 import jwt from "jsonwebtoken";
 import passport from "passport";
-import { config, urls, messages, adminIdentityFromEmail } from "../config/constants.js";
+import { config, urls, messages, adminIdentityFromEmail, isPlatformOwnerEmail } from "../config/constants.js";
+import { isRvceCollegeEmail } from "../utils/collegeScope.js";
 import authJWT from "../middleware/authJWT.js";
 import validateRequest from "../middleware/validateRequest.js";
 import { buildJwtPayloadFromUser } from "../utils/jwtUserClaims.js";
@@ -132,8 +133,10 @@ router.get("/google", captureOAuthClientOrigin, (req, res, next) => {
   const googleOpts = {
     session: false,
     scope: ["profile", "email"],
-    ...(campusFlow ? { hd: "rvce.edu.in" } : {}),
   };
+  if (String(req.query?.prompt || "") === "select_account") {
+    googleOpts.prompt = "select_account";
+  }
   return passport.authenticate("google", googleOpts)(req, res, next);
 });
 
@@ -201,6 +204,22 @@ router.get(
         return redirectToAuthCallback(req, res, "login=failed&reason=closed");
       }
 
+      const signedInIdentity = adminIdentityFromEmail(user.email);
+      if (signedInIdentity) {
+        setTokenCookie(res, user, {
+          isAdminSession: true,
+          adminScope: signedInIdentity.adminScope,
+          isSuperAdmin: signedInIdentity.isSuperAdmin,
+        });
+        return redirectToAuthCallback(
+          req,
+          res,
+          signedInIdentity.isSuperAdmin
+            ? "login=success&admin=true&scope=platform"
+            : "login=success&admin=true"
+        );
+      }
+
       const flow = req.cookies?.oauth_flow || "";
       const isPlatformAdminLogin = flow === "platform_admin";
       const isAdminLogin = flow === "admin" || isPlatformAdminLogin;
@@ -230,10 +249,16 @@ router.get(
 
       setTokenCookie(res, user, { isAdminSession: false });
 
+      const campusCollegeUnlisted =
+        flow === "campus" &&
+        !isRvceCollegeEmail(user.email) &&
+        !isPlatformOwnerEmail(user.email);
+      const campusQuery = campusCollegeUnlisted ? "&campus=unlisted" : "";
+
       if (isSignup) {
-        return redirectToAuthCallback(req, res, "signup=success");
+        return redirectToAuthCallback(req, res, `signup=success${campusQuery}`);
       }
-      return redirectToAuthCallback(req, res, "login=success");
+      return redirectToAuthCallback(req, res, `login=success${campusQuery}`);
     })(req, res, next);
   }
 );

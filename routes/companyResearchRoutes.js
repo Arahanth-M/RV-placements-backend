@@ -14,6 +14,7 @@ import {
   startResearchJob,
   updateResearchJobItem,
   deleteResearchJobItem,
+  appendResearchJobItem,
 } from "../services/companyResearch/researchJobService.js";
 import { suggestFresherRoles } from "../services/companyResearch/suggestFresherRoles.js";
 import { listRvceVisitRoles } from "../services/companyResearch/rvceVisitRoles.js";
@@ -209,6 +210,35 @@ router.post("/company-research/:jobId/publish-sources", async (req, res) => {
       error: {
         code: "publish_failed",
         message: "Research sources could not be published.",
+      },
+    });
+  }
+});
+
+router.post("/company-research/:jobId/items", async (req, res) => {
+  try {
+    const result = await appendResearchJobItem({
+      jobId: req.params.jobId,
+      question: req.body?.question,
+      style: req.body?.style,
+    });
+    return res.status(201).json(result);
+  } catch (error) {
+    const code = error?.code || "item_update_failed";
+    const status = Number.isInteger(error?.status) ? error.status : 500;
+    if (error?.name === "ResearchItemUpdateError" || status !== 500) {
+      return res.status(status).json({
+        error: {
+          code,
+          message: error?.message || "This question could not be added.",
+        },
+      });
+    }
+    console.error("[company-research] item append failed", { code });
+    return res.status(500).json({
+      error: {
+        code: "item_update_failed",
+        message: "This question could not be added.",
       },
     });
   }
