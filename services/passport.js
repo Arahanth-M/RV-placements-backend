@@ -48,15 +48,14 @@ passport.use(
           return done(null, false, { reason: "not_allowed" });
         }
 
-        // Localhost and production only accept the platform admin while payments are still being tested.
         if (!(await isProductionLoginAllowed(normalizedEmail))) {
           return done(null, false, { reason: "closed" });
         }
 
-        const isCampusLogin = flow === "campus" || flow === "spc";
-
         // Campus admin stays college-email gated. Platform owners may use any Google account
-        // on the owner allowlist. /general student Google login has no domain gate.
+        // on the owner allowlist. Student campus login is not domain-gated: an email whose
+        // college has no campus shell still signs in, and the client sends them to /general.
+        // /general student Google login has no domain gate.
         if (
           isAdminLogin &&
           !isPlatformAdminLogin &&
@@ -81,7 +80,11 @@ passport.use(
           return done(null, false, { reason: "domain", attemptId });
         }
 
-        if (isCampusLogin && !isRvceCollegeEmail(normalizedEmail)) {
+        if (
+          flow === "spc" &&
+          !isRvceCollegeEmail(normalizedEmail) &&
+          !isPlatformOwnerEmail(normalizedEmail)
+        ) {
           let attemptId = "";
           try {
             attemptId = await recordBlockedLoginAttempt({

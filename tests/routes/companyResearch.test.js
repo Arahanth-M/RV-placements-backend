@@ -356,6 +356,34 @@ describe("company research API", () => {
     await request(app).delete(`/api/admin/platform/company-research/${jobId}/items/0`).expect(409);
   });
 
+  it("adds a manual question to a review job before answers are generated", async () => {
+    const jobId = "33333333-3333-4333-8333-333333333333";
+    await mockSetJSON(`${RESEARCH_JOB_KEY_PREFIX}${jobId}`, {
+      jobId,
+      status: "review",
+      companyId: "amazon-id",
+      companyName: "Amazon",
+      field: "interviewQuestions",
+      result: {
+        items: [{ question: "Explain CAP theorem.", kind: "non_coding", answer: "" }],
+      },
+    });
+
+    const added = await request(app)
+      .post(`/api/admin/platform/company-research/${jobId}/items`)
+      .send({ question: "Design a rate limiter.", style: "coding" })
+      .expect(201);
+
+    expect(added.body.index).toBe(1);
+    expect(added.body.item).toMatchObject({
+      question: "Design a rate limiter.",
+      kind: "coding",
+      manual: true,
+      answer: "",
+    });
+    expect(added.body.items).toHaveLength(2);
+  });
+
   it("queues interview experiences without running research and rejects OA research", async () => {
     const response = await postResearch({
       companyId: "amazon-id",

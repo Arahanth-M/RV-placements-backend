@@ -210,6 +210,36 @@ export async function getCompanyPlatformDetailById(companyId) {
   return payload;
 }
 
+const PAID_PLATFORM_DETAIL_KEYS = [
+  "onlineQuestions",
+  "onlineQuestions_solution",
+  "onlineQuestions_solutions",
+  "onlineQuestions_intuition",
+  "onlineQuestions_explanation",
+  "onlineQuestions_prepRoleKey",
+  "onlineQuestions_kind",
+  "interviewQuestions",
+  "interviewQuestions_solution",
+  "interviewQuestions_solutions",
+  "interviewQuestions_intuition",
+  "interviewQuestions_explanation",
+  "interviewQuestions_prepRoleKey",
+  "interviewProcess",
+  "internshipExperience",
+  "prev_coding_ques",
+  "mcqQuestions",
+];
+
+/** About, quick links, and must-do stay on the payload. Other prep tabs are emptied. */
+export function stripPaidPlatformDetailTabs(payload) {
+  if (!payload || typeof payload !== "object") return payload;
+  const next = { ...payload };
+  for (const key of PAID_PLATFORM_DETAIL_KEYS) {
+    next[key] = [];
+  }
+  return next;
+}
+
 export function isPlatformCompanyScope(query) {
   return String(query?.scope || "").trim().toLowerCase() === "platform";
 }

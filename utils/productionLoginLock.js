@@ -4,9 +4,9 @@ import { isActiveTestEmail } from "../services/testEmailService.js";
 /** Shown for every rejected login while the platform is still being tested. */
 export const PRODUCTION_LOGIN_MESSAGE = "Login through ur official college emailId";
 
-/** Temporary lock on localhost and production. Automated tests stay open. */
+/** Temporary owner-only lock is off. Every Google account may sign in. */
 export function productionLoginRestricted() {
-  return process.env.NODE_ENV !== "test";
+  return false;
 }
 
 export function productionLoginAllowed(email) {

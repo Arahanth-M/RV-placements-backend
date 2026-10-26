@@ -443,6 +443,49 @@ export async function deleteResearchJobItem(input = {}) {
   return { jobId, index, items };
 }
 
+/**
+ * Add one question to a review job before answers are generated.
+ * @param {{ jobId?: string, question?: string, style?: string }} input
+ */
+export async function appendResearchJobItem(input = {}) {
+  const jobId = String(input.jobId || "").trim();
+  const question = String(input.question || "").replace(/\s+/g, " ").trim();
+  const current = await getResearchJob(jobId);
+  if (!current) throw itemUpdateError("job_not_found", "Research job was not found.", 404);
+  if (current.status !== "review") {
+    throw itemUpdateError("not_reviewable", "Research job is not in review.", 409);
+  }
+  if (current.field === "interviewExperiences") {
+    throw itemUpdateError("invalid_item", "Add experiences from the experience review.", 400);
+  }
+  if (!question) throw itemUpdateError("invalid_item", "Enter a question.", 400);
+  if (question.length > 2000) {
+    throw itemUpdateError("invalid_item", "That question is too long.", 400);
+  }
+  const style = String(input.style || "non_coding").trim().toLowerCase();
+  const item = {
+    question,
+    answer: "",
+    intuition: "",
+    evidence: "",
+    manual: true,
+    sourceTitle: "Added manually",
+    sourceUrl: "",
+  };
+  if (current.field === "onlineQuestions") {
+    item.form = style === "coding" || style === "sql" ? style : "non_coding";
+    if (item.form === "coding" || item.form === "sql") item.kind = item.form;
+  } else {
+    item.kind = style === "coding" ? "coding" : "non_coding";
+  }
+  const items = Array.isArray(current.result?.items)
+    ? current.result.items.map((row) => ({ ...row }))
+    : [];
+  items.push(item);
+  await replaceResearchJobResultItems(jobId, items);
+  return { jobId, index: items.length - 1, item, items };
+}
+
 export async function replaceResearchJobResultItems(jobId, items) {
   const current = await getResearchJob(jobId);
   if (!current) {
