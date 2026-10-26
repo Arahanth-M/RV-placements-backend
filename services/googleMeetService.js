@@ -52,6 +52,26 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function googleErrorText(err) {
+  const data = err?.response?.data;
+  return [
+    data?.error,
+    data?.error_description,
+    data?.error?.status,
+    data?.error?.message,
+    err?.message,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** Refresh tokens die when the Google account revokes the app or the token is rotated. */
+function revokedMeetTokenMessage(err) {
+  const raw = googleErrorText(err).toLowerCase();
+  if (!raw.includes("invalid_grant") && !raw.includes("expired or revoked")) return "";
+  return "Google Meet refresh token is expired or revoked. From RV-placements-backend run: node scripts/getGoogleMeetRefreshToken.js — sign in with the Meet account, paste the new GOOGLE_MEET_REFRESH_TOKEN into .env, and restart the backend.";
+}
+
 export function isGoogleMeetConfigured() {
   const hasOauth =
     Boolean(env("GOOGLE_CLIENT_ID")) &&
@@ -95,15 +115,21 @@ function buildAuthClient(scopes = [MEET_SCOPE, CALENDAR_SCOPE]) {
 }
 
 async function getAccessToken(auth) {
-  if (typeof auth.getAccessToken === "function") {
-    const token = await auth.getAccessToken();
-    const access =
-      typeof token === "string" ? token : token?.token || token?.access_token || "";
-    if (access) return access;
-  }
-  if (typeof auth.authorize === "function") {
-    const creds = await auth.authorize();
-    if (creds?.access_token) return creds.access_token;
+  try {
+    if (typeof auth.getAccessToken === "function") {
+      const token = await auth.getAccessToken();
+      const access =
+        typeof token === "string" ? token : token?.token || token?.access_token || "";
+      if (access) return access;
+    }
+    if (typeof auth.authorize === "function") {
+      const creds = await auth.authorize();
+      if (creds?.access_token) return creds.access_token;
+    }
+  } catch (err) {
+    const revoked = revokedMeetTokenMessage(err);
+    if (revoked) throw appError(revoked, "MEET_AUTH_FAILED", 503);
+    throw err;
   }
   throw appError("Could not refresh Google access token", "MEET_AUTH_FAILED", 503);
 }
@@ -518,6 +544,9 @@ export async function createGoogleMeetForSession(input = {}) {
       );
       return created;
     } catch (err) {
+      if (err?.code === "MEET_AUTH_FAILED") throw err;
+      const revoked = revokedMeetTokenMessage(err);
+      if (revoked) throw appError(revoked, "MEET_AUTH_FAILED", 503);
       console.warn(
         "[googleMeet] Calendar+attendees path failed, trying Spaces API:",
         err?.message || err
@@ -537,6 +566,9 @@ export async function createGoogleMeetForSession(input = {}) {
       return space;
     }
   } catch (err) {
+    if (err?.code === "MEET_AUTH_FAILED") throw err;
+    const revoked = revokedMeetTokenMessage(err);
+    if (revoked) throw appError(revoked, "MEET_AUTH_FAILED", 503);
     console.warn(
       "[googleMeet] Meet API path error (falling back to Calendar):",
       err?.message || err
@@ -550,7 +582,15 @@ export async function createGoogleMeetForSession(input = {}) {
   } catch (err) {
     const msg = err?.message || String(err);
     console.error("[googleMeet] calendar.events.insert failed:", msg);
-    if (err?.code === "MEET_LINK_MISSING" || err?.code === "INVALID_SLOT") throw err;
+    if (
+      err?.code === "MEET_LINK_MISSING" ||
+      err?.code === "INVALID_SLOT" ||
+      err?.code === "MEET_AUTH_FAILED"
+    ) {
+      throw err;
+    }
+    const revoked = revokedMeetTokenMessage(err);
+    if (revoked) throw appError(revoked, "MEET_AUTH_FAILED", 503);
     throw appError(
       "Could not create Google Meet link. Enable Google Meet API + Calendar API, re-run getGoogleMeetRefreshToken.js, and restart the backend.",
       "MEET_CREATE_FAILED",
