@@ -325,4 +325,5 @@ export async function savePlatformContentFromEditor(companyId, body) {
     { upsert: true, new: true }
   );
 
-  return getPlatformContentForEditor(company
+  return getPlatformContentForEditor(companyId);
+}
