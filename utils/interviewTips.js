@@ -103,12 +103,87 @@ const questionSignalTips = [
   },
 ];
 
+const COMPANY_TIP_FRAMINGS = [
+  (companyName, topic) =>
+    `${companyName} lists “${topic}” as a must-do. Show how you would use it on this question, not only that you have heard of it.`,
+  (companyName, topic) =>
+    `What ${companyName} expects: a clear take on ${topic}. State the approach, then the trade-off they would ask about next.`,
+  (companyName, topic) =>
+    `Interviewers at ${companyName} look for ${topic}. If it fits this question, walk through the steps and the edge cases.`,
+  (companyName, topic) =>
+    `Keep ${topic} in view — it is on ${companyName}'s must-do list. Tie your reasoning back to how a candidate there should handle it.`,
+];
+
+/**
+ * Must-do lines from a company card / platform or visit payload.
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+export function normalizeExpectationTopics(raw) {
+  const source = Array.isArray(raw) ? raw : [];
+  const seen = new Set();
+  const out = [];
+  for (const item of source) {
+    const text =
+      typeof item === "string"
+        ? item.trim()
+        : item && typeof item === "object" && typeof item.topic === "string"
+          ? item.topic.trim()
+          : "";
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+  }
+  return out.slice(0, 12);
+}
+
+function topicMatchesQuestion(topic, question) {
+  const q = String(question || "").toLowerCase();
+  const t = String(topic || "").toLowerCase();
+  if (!q || !t) return false;
+  if (t.length >= 4 && q.includes(t)) return true;
+  const words = t.split(/[^a-z0-9+#]+/).filter((word) => word.length >= 5);
+  if (!words.length) return false;
+  const hits = words.filter((word) => q.includes(word));
+  return hits.length > 0 && hits.length / words.length >= 0.5;
+}
+
+function buildCompanyExpectationTips({
+  companyName,
+  topics,
+  currentQuestion,
+  desiredCount,
+}) {
+  const name = companyName || "This company";
+  const ranked = [...topics].sort((a, b) => {
+    const aHit = topicMatchesQuestion(a, currentQuestion) ? 1 : 0;
+    const bHit = topicMatchesQuestion(b, currentQuestion) ? 1 : 0;
+    return bHit - aHit;
+  });
+  const preview = ranked.slice(0, 4).join(", ");
+  const tips = [
+    `${name} expects candidates to be ready on ${preview}. Use that bar while you answer.`,
+  ];
+
+  for (let framing = 0; framing < COMPANY_TIP_FRAMINGS.length && tips.length < desiredCount; framing += 1) {
+    for (const topic of ranked) {
+      if (tips.length >= desiredCount) break;
+      tips.push(COMPANY_TIP_FRAMINGS[framing](name, topic));
+    }
+  }
+
+  return uniqueTips(tips).slice(0, desiredCount);
+}
+
 export function buildInterviewTips({
   roundType,
   difficulty,
   currentQuestion,
   companyName,
   currentQuestionIndex,
+  mustDoTopics,
   desiredCount = 8,
 }) {
   const safeRoundType = normalizeText(roundType, "General");
@@ -116,6 +191,20 @@ export function buildInterviewTips({
   const safeQuestion = normalizeText(currentQuestion);
   const safeCompanyName = normalizeText(companyName);
   const questionNumber = Number(currentQuestionIndex) + 1;
+  const count = Math.max(4, Number(desiredCount) || 8);
+  const expectationTopics = normalizeExpectationTopics(mustDoTopics);
+
+  if (expectationTopics.length > 0) {
+    return {
+      tips: buildCompanyExpectationTips({
+        companyName: safeCompanyName,
+        topics: expectationTopics,
+        currentQuestion: safeQuestion,
+        desiredCount: count,
+      }),
+      companySpecific: true,
+    };
+  }
 
   const baseTips = tipsByRoundType[safeRoundType] || defaultTips;
   const extraTips = [];
@@ -143,5 +232,8 @@ export function buildInterviewTips({
   }
 
   const orderedTips = uniqueTips([...extraTips, ...baseTips, ...defaultTips]);
-  return orderedTips.slice(0, Math.max(4, Number(desiredCount) || 8));
+  return {
+    tips: orderedTips.slice(0, count),
+    companySpecific: false,
+  };
 }

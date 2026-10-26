@@ -46,6 +46,10 @@ async function loadOrCreate(companyId) {
   return doc;
 }
 
+function submissionPrepRoleKey(submission) {
+  return String(submission?.prepRoleKey ?? "").trim().slice(0, 80);
+}
+
 function questionExists(list, questionText) {
   const key = String(questionText || "")
     .toLowerCase()
@@ -81,6 +85,7 @@ export async function applySubmissionToPlatformContent(companyId, submission, me
     const solutionText = parsed.solution ? sanitizeSubmissionText(parsed.solution) : "";
     const coding = looksLikeCoding(sanitizedQuestion, solutionText);
     const item = {
+      prepRoleKey: submissionPrepRoleKey(submission),
       kind: coding ? "coding" : "non_coding",
       question: sanitizedQuestion,
       intuition: "",
@@ -106,7 +111,11 @@ export async function applySubmissionToPlatformContent(companyId, submission, me
       (item) => String(item?.content || "").trim() === sanitized
     );
     if (exists) return;
-    doc.interviewExperiences.push({ content: sanitized, ...meta });
+    doc.interviewExperiences.push({
+      content: sanitized,
+      prepRoleKey: submissionPrepRoleKey(submission),
+      ...meta,
+    });
     await doc.save();
     return;
   }
@@ -122,7 +131,11 @@ export async function applySubmissionToPlatformContent(companyId, submission, me
       (item) => String(item?.content || "").trim() === sanitized
     );
     if (exists) return;
-    doc.internshipExperiences.push({ content: sanitized, ...meta });
+    doc.internshipExperiences.push({
+      content: sanitized,
+      prepRoleKey: submissionPrepRoleKey(submission),
+      ...meta,
+    });
     await doc.save();
     return;
   }

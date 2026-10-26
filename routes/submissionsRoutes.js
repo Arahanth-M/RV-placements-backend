@@ -123,6 +123,7 @@ submissionRouter.post(
       placementListContext,
       companyVisitId: rawCompanyVisitId,
       contentScope: rawContentScope,
+      prepRoleKey: rawPrepRoleKey,
     } = req.body;
 
     if (!companyId || !type || !content) {
@@ -142,11 +143,13 @@ submissionRouter.post(
       String(rawContentScope || "").trim().toLowerCase() === "platform"
         ? "platform"
         : undefined;
+    const prepRoleKey = String(rawPrepRoleKey ?? "").trim().slice(0, 80);
 
     const newSubmission = new Submission({
       companyId,
       type,
       content,
+      prepRoleKey,
       ...(contentScope === "platform" ? {} : { placementYear }),
       ...(contentScope === "platform" ? {} : placementListContext ? { placementListContext } : {}),
       ...(contentScope === "platform" ? {} : companyVisitId ? { companyVisitId } : {}),

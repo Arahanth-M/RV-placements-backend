@@ -37,6 +37,12 @@ import {
 } from "../services/placementHubSettingsService.js";
 import { listAdminStudentRequests } from "../services/adminStudentRequestsService.js";
 import {
+  contentExperienceKey,
+  deleteInterviewExperienceLikes,
+  experienceLikeKey,
+  rekeyInterviewExperienceLike,
+} from "../services/interviewExperienceLikeService.js";
+import {
   approveInterviewLimitRequest,
   dismissInterviewLimitRequest,
 } from "../services/interviewLimitRequestService.js";
@@ -1820,6 +1826,7 @@ adminRouter.put(
     const { content } = req.body || {};
     if (content === undefined || content === null) return res.status(400).json({ error: "content required" });
     const sanitized = sanitizeText(content);
+    const previousLikeKey = experienceLikeKey(arr[index]);
     let newEntry = arr[index];
     try {
       const parsed = typeof newEntry === "string" ? JSON.parse(newEntry) : {};
@@ -1839,6 +1846,11 @@ adminRouter.put(
       placementListContext,
       companyVisitIdHint,
       placementCluster
+    );
+    await rekeyInterviewExperienceLike(
+      req.params.id,
+      previousLikeKey,
+      contentExperienceKey(sanitized)
     );
     const out = (
       await getCompanyMergedForAdminById(
@@ -1875,6 +1887,7 @@ adminRouter.delete("/companies/:id/interview-process/:index", forbidRvitmAdminCo
     if (isNaN(index) || index < 0) return res.status(400).json({ error: "Invalid index" });
     if (!merged.interviewProcess || !Array.isArray(merged.interviewProcess) || index >= merged.interviewProcess.length)
       return res.status(404).json({ error: "Entry not found" });
+    const removedLikeKey = experienceLikeKey(merged.interviewProcess[index]);
     merged.interviewProcess = [...merged.interviewProcess];
     merged.interviewProcess.splice(index, 1);
     await ensureAdminVisitForYear(req.params.id, y);
@@ -1886,6 +1899,7 @@ adminRouter.delete("/companies/:id/interview-process/:index", forbidRvitmAdminCo
       companyVisitIdHint,
       placementCluster
     );
+    await deleteInterviewExperienceLikes(req.params.id, removedLikeKey);
     const out = (
       await getCompanyMergedForAdminById(
         req.params.id,

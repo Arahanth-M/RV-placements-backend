@@ -67,6 +67,10 @@ import {
 } from "../utils/placementCluster.js";
 import { getPlacementHubSettingsForApi } from "../services/placementHubSettingsService.js";
 import { attachExperienceEntryDatesFromDb } from "../services/experienceEntryDatesAttach.js";
+import {
+  attachInterviewExperienceLikes,
+  toggleInterviewExperienceLike,
+} from "../services/interviewExperienceLikeService.js";
 import mongoose from "mongoose";
 import { getAuthUserModel } from "../utils/authUserModel.js";
 dotenv.config();
@@ -99,6 +103,12 @@ function omitViewsUnlessAdmin(payload, req) {
   const next = { ...payload };
   delete next.views;
   return next;
+}
+
+async function companyDetailForViewer(payload, req) {
+  const email = String(req.user?.email || "").trim().toLowerCase();
+  const withLikes = await attachInterviewExperienceLikes(payload, email);
+  return omitViewsUnlessAdmin(withLikes, req);
 }
 
 const companyRouter = express.Router();
@@ -460,7 +470,7 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
         ).catch(() => {});
       }
       return res.json(
-        omitViewsUnlessAdmin(
+        await companyDetailForViewer(
           { ...platformPayload, isTeaser: access?.isTeaser === true },
           req
         )
@@ -530,7 +540,7 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
           companyOid
         );
         return res.json(
-          omitViewsUnlessAdmin(
+          await companyDetailForViewer(
             {
               ...withExperienceDates,
               category: categorized.category,
@@ -654,7 +664,7 @@ companyRouter.get("/:id", authJWT, async (req, res) => {
       companyOid
     );
     return res.json(
-      omitViewsUnlessAdmin(
+      await companyDetailForViewer(
         {
           ...withExperienceDates,
           category: categorized.category,
@@ -732,6 +742,27 @@ companyRouter.get("/:id/detail-request/status", authJWT, async (req, res) => {
   } catch (error) {
     console.error("❌ Error fetching detail request status:", error);
     return res.status(500).json({ error: "Error fetching request status" });
+  }
+});
+
+companyRouter.post("/:id/interview-experiences/like", authJWT, async (req, res) => {
+  try {
+    if (!req.user?.email) {
+      return res.status(401).json({ error: "You must be logged in to like an interview experience" });
+    }
+    const result = await toggleInterviewExperienceLike(
+      req.params.id,
+      req.body?.experienceKey,
+      req.user.email
+    );
+    recordDauActivitySafe(req.user, { action: "helpful" });
+    return res.json(result);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    if (status >= 500) {
+      console.error("❌ Error liking interview experience:", error);
+    }
+    return res.status(status).json({ error: error?.message || "Error updating like" });
   }
 });
 

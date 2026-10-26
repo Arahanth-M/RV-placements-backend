@@ -68,10 +68,29 @@ const questionItemSchema = new mongoose.Schema(
   { _id: true }
 );
 
+const polishedRoundSchema = new mongoose.Schema(
+  {
+    order: { type: Number, default: 1 },
+    type: { type: String, trim: true, default: "" },
+    title: { type: String, trim: true, default: "" },
+    details: { type: String, trim: true, default: "" },
+  },
+  { _id: false }
+);
+
+const polishedContentSchema = new mongoose.Schema(
+  {
+    overview: { type: String, trim: true, default: "" },
+    rounds: { type: [polishedRoundSchema], default: [] },
+  },
+  { _id: false }
+);
+
 const experienceItemSchema = new mongoose.Schema(
   {
     prepRoleKey: { type: String, trim: true, default: "" },
     content: { type: String, trim: true, default: "" },
+    polishedContent: { type: polishedContentSchema, default: undefined },
     status: {
       type: String,
       enum: ["pending", "approved"],

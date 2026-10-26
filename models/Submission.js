@@ -136,6 +136,13 @@ const submissionSchema = new mongoose.Schema({
     enum: ["visit", "platform"],
     required: false,
   },
+  /** Role pill selected on a `/general` company tab. Empty means General. */
+  prepRoleKey: {
+    type: String,
+    trim: true,
+    default: "",
+    maxlength: 80,
+  },
 });
 
 const Submission = mongoose.model("Submission", submissionSchema);

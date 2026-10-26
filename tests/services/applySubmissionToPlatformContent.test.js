@@ -73,4 +73,26 @@ describe("applySubmissionToPlatformContent", () => {
     expect(platform.interviewQuestions).toHaveLength(1);
     expect(platform.interviewQuestions[0].answer).toBe("Representational state");
   });
+
+  it("keeps the selected prep role on an approved interview experience", async () => {
+    const { staticRow } = await seedApprovedSplitCompany({
+      name: "Platform Role Exp",
+    });
+    await applySubmissionToPlatformContent(
+      staticRow._id,
+      {
+        type: "interviewProcess",
+        prepRoleKey: "sde",
+        submittedBy: { name: "A", email: "a@gmail.com" },
+      },
+      "Round 1: DSA onsite"
+    );
+
+    const platform = await CompanyPlatformContent.findOne({
+      companyId: staticRow._id,
+    }).lean();
+    expect(platform.interviewExperiences).toHaveLength(1);
+    expect(platform.interviewExperiences[0].content).toBe("Round 1: DSA onsite");
+    expect(platform.interviewExperiences[0].prepRoleKey).toBe("sde");
+  });
 });

@@ -59,15 +59,7 @@ describe("attachPlatformPrepCoverageToCompanyList", () => {
       { key: "sde", label: "SDE", oa: 2, interview: 1, experiences: 1 },
       { key: "analyst", label: "Analyst", oa: 1, interview: 4, experiences: 2 },
     ]);
-    expect(row.researchSources).toEqual([
-      {
-        prepRoleKey: "",
-        title: "GFG Interview",
-        url: "https://www.geeksforgeeks.org/walmart",
-        snippet: "Prep notes",
-        score: 0.88,
-      },
-    ]);
+    expect(row.researchSources).toEqual([{ prepRoleKey: "" }]);
   });
 
   it("uses zeros when a company has no platform document", async () => {

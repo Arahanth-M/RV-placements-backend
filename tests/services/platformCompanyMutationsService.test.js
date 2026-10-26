@@ -1,5 +1,8 @@
 import CompanyPlatformContent from "../../models/CompanyPlatformContent.js";
-import { updatePlatformQuestion } from "../../services/platformCompanyMutationsService.js";
+import {
+  updatePlatformExperience,
+  updatePlatformQuestion,
+} from "../../services/platformCompanyMutationsService.js";
 import { getCompanyPlatformDetailById } from "../../services/companyPlatformDetailService.js";
 import { seedApprovedSplitCompany } from "../helpers/seedSplitCompany.js";
 
@@ -40,5 +43,41 @@ describe("updatePlatformQuestion", () => {
       java: "java revised",
       python: "python revised",
     });
+  });
+});
+
+describe("updatePlatformExperience", () => {
+  it("replaces the stored overview and rounds, not only the plain text", async () => {
+    const { staticRow } = await seedApprovedSplitCompany({ name: "Edit Experience Co" });
+    await CompanyPlatformContent.create({
+      companyId: staticRow._id,
+      interviewExperiences: [
+        {
+          status: "approved",
+          prepRoleKey: "sde",
+          content: "Old overview\n\nRound 1: OA\nOld title\n\nOld details",
+          polishedContent: {
+            overview: "Old overview",
+            rounds: [{ order: 1, type: "OA", title: "Old title", details: "Old details" }],
+          },
+        },
+      ],
+    });
+
+    await updatePlatformExperience(String(staticRow._id), "interviewExperiences", 0, {
+      content: "New overview\n\nRound 1: Technical\nNew title\n\nNew details",
+      polishedContent: {
+        overview: "New overview",
+        rounds: [{ order: 1, type: "Technical", title: "New title", details: "New details" }],
+      },
+    });
+
+    const payload = await getCompanyPlatformDetailById(String(staticRow._id));
+    expect(payload.interviewProcess[0].content).toContain("New overview");
+    expect(payload.interviewProcess[0].polishedContent).toEqual({
+      overview: "New overview",
+      rounds: [{ order: 1, type: "Technical", title: "New title", details: "New details" }],
+    });
+    expect(payload.interviewProcess[0].prepRoleKey).toBe("sde");
   });
 });

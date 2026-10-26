@@ -83,7 +83,24 @@ function mapExperienceItem(raw) {
   if (reviewedBy) item.reviewedBy = reviewedBy;
   if (raw.createdAt) item.createdAt = raw.createdAt;
   if (raw.approvedAt) item.approvedAt = raw.approvedAt;
+  const polished = mapPolishedContent(raw.polishedContent);
+  if (polished) item.polishedContent = polished;
   return item;
+}
+
+export function mapPolishedContent(raw) {
+  if (!raw || typeof raw !== "object") return undefined;
+  const overview = text(raw.overview);
+  const rounds = (Array.isArray(raw.rounds) ? raw.rounds : [])
+    .map((round, index) => ({
+      order: Number(round?.order) || index + 1,
+      type: text(round?.type),
+      title: text(round?.title),
+      details: text(round?.details),
+    }))
+    .filter((round) => round.type || round.title || round.details);
+  if (!overview && rounds.length === 0) return undefined;
+  return { overview, rounds };
 }
 
 function mapMustDoItem(raw) {
@@ -185,6 +202,7 @@ function serializeExperience(item) {
     reviewedBy: item?.reviewedBy || null,
     createdAt: item?.createdAt || null,
     approvedAt: item?.approvedAt || null,
+    polishedContent: item?.polishedContent || null,
   };
 }
 
@@ -307,5 +325,4 @@ export async function savePlatformContentFromEditor(companyId, body) {
     { upsert: true, new: true }
   );
 
-  return getPlatformContentForEditor(companyId);
-}
+  return getPlatformContentForEditor(company

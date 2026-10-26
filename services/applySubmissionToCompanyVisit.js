@@ -82,8 +82,10 @@ function jsonEntryExistsInStringArray(array, content, contentKeys = ["content"])
 }
 
 function buildSubmitterJsonEntry(submission, content) {
+  const prepRoleKey = String(submission?.prepRoleKey ?? "").trim();
   return JSON.stringify({
     content,
+    ...(prepRoleKey ? { prepRoleKey } : {}),
     submittedBy: {
       name: submission.submittedBy?.name,
       email: submission.submittedBy?.email,

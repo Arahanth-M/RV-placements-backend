@@ -5,7 +5,7 @@ import {
   platformPrepCoverageByRoleFromDoc,
   platformPrepCoverageFromDoc,
 } from "../utils/platformPrepCoverage.js";
-import { mapResearchSourcesForClient } from "../utils/researchSources.js";
+import { mapResearchSourceRoleRefs } from "../utils/researchSources.js";
 
 function asObjectId(value) {
   try {
@@ -94,7 +94,7 @@ export async function attachPlatformPrepCoverageToCompanyList(list) {
         "internshipExperiences.status": 1,
         "internshipExperiences.content": 1,
         "internshipExperiences.prepRoleKey": 1,
-        researchSources: 1,
+        "researchSources.prepRoleKey": 1,
       })
       .lean();
   } catch {
@@ -119,7 +119,7 @@ export async function attachPlatformPrepCoverageToCompanyList(list) {
     if (!id) continue;
     coverageById.set(id, platformPrepCoverageFromDoc(doc));
     coverageByRoleById.set(id, platformPrepCoverageByRoleFromDoc(doc));
-    sourcesById.set(id, mapResearchSourcesForClient(doc));
+    sourcesById.set(id, mapResearchSourceRoleRefs(doc));
     prepMetaById.set(id, {
       prepRoles: mapPrepRolesForClient(doc?.prepRoles),
       onlineQuestions_prepRoleKey: [

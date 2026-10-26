@@ -87,12 +87,14 @@ function mapExperiences(items) {
       const content = text(item?.content);
       if (!content) return null;
       return {
+        id: item?._id ? String(item._id) : "",
         content,
         prepRoleKey: text(item?.prepRoleKey),
         isAnonymous: item?.isAnonymous === true,
         submittedBy: item?.submittedBy,
         approvedAt: item?.approvedAt,
         createdAt: item?.createdAt,
+        polishedContent: item?.polishedContent || null,
       };
     })
     .filter(Boolean);

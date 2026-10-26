@@ -63,6 +63,7 @@ import {
   discardInProgressSession,
   startRound,
   resolveInterviewCompanyName,
+  resolveInterviewMergedCompanyForSession,
   collectTopicsForCompletedCodingRound,
 } from "../services/interviewSessionService.js";
 import {
@@ -111,6 +112,7 @@ import {
   isInterviewWeeklyLimitEnabled,
 } from "../config/interviewLimits.js";
 import {
+  evaluateCompanyCardAccess,
   evaluateMockAccess,
   evaluateTestEmailOnceFeature,
   getGeneralAccessSnapshot,
@@ -1488,12 +1490,38 @@ router.get("/interview-status/:sessionId", async (req, res) => {
 
     const roundType = session.rounds[currentRoundIndex]?.type;
     const companyName = await resolveInterviewCompanyName(session, new Map());
+    let expectationTopics = [];
+    try {
+      const expectationCompanyId = String(
+        session.companyId?._id || session.companyId || ""
+      ).trim();
+      let canUseExpectations = true;
+      if (String(session.contentScope || "") === "platform" && expectationCompanyId) {
+        const cardAccess = await evaluateCompanyCardAccess({
+          userId: String(req.user?.userId || ""),
+          companyId: expectationCompanyId,
+          user: req.user,
+        });
+        canUseExpectations = cardAccess.allowed === true;
+      }
+      if (canUseExpectations) {
+        const companyPayload = await resolveInterviewMergedCompanyForSession(session);
+        expectationTopics =
+          companyPayload?.Must_Do_Topics || companyPayload?.must_do_topics || [];
+      }
+    } catch (expectationErr) {
+      console.warn(
+        "[interview-status] company expectation lookup failed",
+        expectationErr?.message || expectationErr
+      );
+    }
     const selectedTips = buildInterviewTips({
       roundType,
       difficulty: currentRoundDoc?.difficulty || session.difficultyLevel,
       currentQuestion: effectiveCurrentQuestion || prevQuestion?.question || "",
       companyName,
       currentQuestionIndex,
+      mustDoTopics: expectationTopics,
       desiredCount: 8,
     });
     const activeQuestionId = String(slotNow?.questionId || "").trim();
@@ -1727,7 +1755,8 @@ router.get("/interview-status/:sessionId", async (req, res) => {
       mcq: mcqPayload,
       previewSqlContext,
       isProcessing,
-      tips: selectedTips,
+      tips: selectedTips.tips,
+      tipsCompanySpecific: selectedTips.companySpecific === true,
       totalRounds: session.totalRounds || 0,
       roundCompleted,
       nextRoundAvailable,

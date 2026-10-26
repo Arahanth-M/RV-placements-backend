@@ -3,6 +3,11 @@ import CompanyStatic from "../models/CompanyStatic.js";
 import CompanyPlatformContent from "../models/CompanyPlatformContent.js";
 import { invalidateCompanyDetailCache } from "./companyDetailCache.js";
 import { normalizeSolutionText } from "../utils/normalizeSolutionText.js";
+import {
+  deleteInterviewExperienceLikes,
+  platformExperienceKey,
+} from "./interviewExperienceLikeService.js";
+import { mapPolishedContent } from "./platformContentEditorService.js";
 
 function asId(value) {
   try {
@@ -173,8 +178,20 @@ export async function updatePlatformExperience(companyId, field, uiIndex, body) 
     err.status = 404;
     throw err;
   }
+  const row = doc[field][hit.arrayIndex];
   if (body?.content !== undefined && body?.content !== null) {
-    doc[field][hit.arrayIndex].content = text(body.content);
+    const nextContent = text(body.content);
+    if (!nextContent) {
+      const err = new Error("content required");
+      err.status = 400;
+      throw err;
+    }
+    row.content = nextContent;
+  }
+  if (body && Object.prototype.hasOwnProperty.call(body, "polishedContent")) {
+    const polished = mapPolishedContent(body.polishedContent);
+    if (polished) row.polishedContent = polished;
+    else row.set("polishedContent", undefined);
   }
   doc.markModified(field);
   await saveDoc(oid, doc);
@@ -196,9 +213,13 @@ export async function deletePlatformExperience(companyId, field, uiIndex) {
     err.status = 404;
     throw err;
   }
+  const removed = doc[field][hit.arrayIndex];
   doc[field].splice(hit.arrayIndex, 1);
   doc.markModified(field);
   await saveDoc(oid, doc);
+  if (removed?._id) {
+    await deleteInterviewExperienceLikes(oid, platformExperienceKey(removed._id));
+  }
   return { message: "Experience deleted" };
 }
 
