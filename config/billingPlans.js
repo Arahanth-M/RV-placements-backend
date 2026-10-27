@@ -2,6 +2,12 @@
 
 export const BILLING_DURATION_MONTHS = 6;
 
+/** Lifetime free-tier allowances on /general (no paid PrepPath / mocks entitlement). */
+export const FREE_TIER_MOCK_LIMIT = 1;
+export const FREE_TIER_PREP_PATH_LIMIT = 1;
+/** Test-email grants keep a single PrepPath for the grant window. */
+export const TEST_EMAIL_PREP_PATH_LIMIT = 1;
+
 export const PLAN_IDS = Object.freeze({
   ALL_CARDS: "all_cards",
   CATEGORY: "category",

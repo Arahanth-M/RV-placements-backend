@@ -6,9 +6,12 @@ import PracticeChallengeAttempt from "../../models/PracticeChallengeAttempt.js";
 import BehavioralCoachAttempt from "../../models/BehavioralCoachAttempt.js";
 import { classifyGeneralCompanyCategory } from "../../utils/generalCompanyCategory.js";
 import {
+  FREE_TIER_MOCK_LIMIT,
+  FREE_TIER_PREP_PATH_LIMIT,
   PAYWALL_CODE,
   PAYWALL_FEATURES,
   PLAN_IDS,
+  TEST_EMAIL_PREP_PATH_LIMIT,
 } from "../../config/billingPlans.js";
 import { listActiveEntitlements, summarizeEntitlements } from "./entitlementService.js";
 import { isTeaserCompanyId } from "./teaserCompanies.js";
@@ -181,9 +184,15 @@ export async function getGeneralAccessSnapshot(userId, now = new Date(), user = 
     trial?.freeBehavioralConsumedAt &&
     new Date(trial.freeBehavioralConsumedAt) >= anchor;
   const mockUsed = grant ? mockStarts > 0 : Boolean(trial?.freeMockConsumed) || mockStarts > 0;
-  const prepUsed = grant ? prepPlans > 0 : Boolean(trial?.freePrepConsumed) || prepPlans > 0;
-  const freeMockRemaining = summary.mocks ? 0 : mockUsed ? 0 : 1;
-  const freePrepRemaining = summary.prepPath ? 0 : prepUsed ? 0 : 1;
+  const freeMockRemaining = summary.mocks
+    ? 0
+    : mockUsed
+      ? 0
+      : FREE_TIER_MOCK_LIMIT;
+  const freePrepLimit = grant ? TEST_EMAIL_PREP_PATH_LIMIT : FREE_TIER_PREP_PATH_LIMIT;
+  const freePrepRemaining = summary.prepPath
+    ? 0
+    : Math.max(0, freePrepLimit - Math.max(0, Number(prepPlans) || 0));
   const challengeUsed = grant ? challengeStarts > 0 : false;
   const behavioralUsed = grant ? behavioralStarts > 0 || behavioralMarked : false;
   return {
@@ -304,7 +313,7 @@ export async function evaluatePrepPathAccess({ userId, companyId, user, now = ne
       feature: PAYWALL_FEATURES.PREP_PATH,
       message: card.snapshot?.isTestEmail
         ? "This test email includes one PrepPath, and that plan has already been generated."
-        : "Your free PrepPath plan has been used. Unlock PrepPath to generate more.",
+        : "Your free PrepPath plans have been used. Unlock PrepPath to generate more.",
       suggestedPlans: card.snapshot?.isTestEmail ? [] : [PLAN_IDS.PREP_PATH, PLAN_IDS.ALL_PREMIUM],
       categoryId: card.company?.categoryId || "",
     }),

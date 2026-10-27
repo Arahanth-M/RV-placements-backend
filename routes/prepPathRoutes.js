@@ -20,7 +20,32 @@ import {
   markFreePrepConsumed,
   paywallPayload,
 } from "../services/billing/accessService.js";
-import { PAYWALL_CODE } from "../config/billingPlans.js";
+import {
+  FREE_TIER_PREP_PATH_LIMIT,
+  PAYWALL_CODE,
+  TEST_EMAIL_PREP_PATH_LIMIT,
+} from "../config/billingPlans.js";
+
+function platformPrepQuotaFromSnapshot(snapshot) {
+  const unlimited = Boolean(snapshot?.unlimitedPrepPath);
+  const limit = unlimited
+    ? null
+    : snapshot?.isTestEmail
+      ? TEST_EMAIL_PREP_PATH_LIMIT
+      : FREE_TIER_PREP_PATH_LIMIT;
+  const remaining = unlimited ? null : Number(snapshot?.freePrepRemaining) || 0;
+  const used = unlimited
+    ? Number(snapshot?.prepPlans) || 0
+    : Math.min(limit, Math.max(0, (limit || 0) - remaining));
+  return {
+    unlimited,
+    limit,
+    used,
+    remaining,
+    lifetimeFree: true,
+    freePrepRemaining: Number(snapshot?.freePrepRemaining) || 0,
+  };
+}
 
 const router = express.Router();
 
@@ -66,14 +91,7 @@ router.get("/quota", async (req, res) => {
       const snapshot = await getGeneralAccessSnapshot(userId, new Date(), req.user);
       return res.json({
         success: true,
-        quota: {
-          unlimited: snapshot.unlimitedPrepPath,
-          limit: snapshot.unlimitedPrepPath ? null : 1,
-          used: snapshot.unlimitedPrepPath ? snapshot.prepPlans : snapshot.freePrepRemaining > 0 ? 0 : 1,
-          remaining: snapshot.unlimitedPrepPath ? null : snapshot.freePrepRemaining,
-          lifetimeFree: true,
-          freePrepRemaining: snapshot.freePrepRemaining,
-        },
+        quota: platformPrepQuotaFromSnapshot(snapshot),
       });
     }
     const quota = await getPrepPathQuota(userId);
@@ -225,16 +243,11 @@ router.post("/generate", (req, res) => {
       });
 
       if (platformScope) {
-        await markFreePrepConsumed(userId).catch(() => {});
         const snapshot = await getGeneralAccessSnapshot(userId, new Date(), req.user);
-        quota = {
-          unlimited: snapshot.unlimitedPrepPath,
-          limit: snapshot.unlimitedPrepPath ? null : 1,
-          used: snapshot.unlimitedPrepPath ? snapshot.prepPlans : snapshot.freePrepRemaining > 0 ? 0 : 1,
-          remaining: snapshot.unlimitedPrepPath ? null : snapshot.freePrepRemaining,
-          lifetimeFree: true,
-          freePrepRemaining: snapshot.freePrepRemaining,
-        };
+        if (!snapshot.unlimitedPrepPath && snapshot.freePrepRemaining <= 0) {
+          await markFreePrepConsumed(userId).catch(() => {});
+        }
+        quota = platformPrepQuotaFromSnapshot(snapshot);
       }
 
       return res.status(201).json({ success: true, plan, quota, peerDemand });
