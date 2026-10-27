@@ -14,6 +14,7 @@ import {
 import {
   collegeIdFromUser,
   normalizeCollegeId,
+  withCampusVisitSubmissionScope,
   withCollegeEmailScope,
 } from "../utils/collegeScope.js";
 
@@ -98,13 +99,12 @@ async function aggregateSubmissionsByDay(
 ) {
   return Submission.aggregate([
     {
-      $match: withCollegeEmailScope(
+      $match: withCampusVisitSubmissionScope(
         {
           ...match,
           [fieldName]: { $gte: startDate },
         },
-        collegeId,
-        "submittedBy.email"
+        collegeId
       ),
     },
     {
@@ -148,7 +148,7 @@ function mergeSeries(days, seriesMap) {
 async function aggregateTopSubmittedCompanies(limit = 5, collegeId) {
   return Submission.aggregate([
     {
-      $match: withCollegeEmailScope({}, collegeId, "submittedBy.email"),
+      $match: withCampusVisitSubmissionScope({}, collegeId),
     },
     {
       $group: {
@@ -256,8 +256,9 @@ export async function computeAdminStatsSnapshot(collegeIdRaw = null) {
   const todayStart = startOfDay(new Date());
   const sevenDayStart = addDays(todayStart, -6);
   const userMatch = withCollegeEmailScope({}, collegeId, "email");
+  // Campus dashboard stats ignore `/general` platform contributions.
   const submissionMatch = (extra = {}) =>
-    withCollegeEmailScope(extra, collegeId, "submittedBy.email");
+    withCampusVisitSubmissionScope(extra, collegeId);
 
   const [
     totalUsers,

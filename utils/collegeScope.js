@@ -183,6 +183,87 @@ export function withCollegeEmailScope(
 }
 
 /**
+ * Positive institutional email match for one campus (excludes `/general` non-college emails).
+ * RVCE → `*@rvce.edu.in` only; RVITM → `*.rvitm@rvei.edu.in` (+ test list).
+ * Unlike {@link mongoMatchEmailFieldForCollege}, RVCE does **not** include Gmail/unknown.
+ *
+ * @param {unknown} collegeIdRaw
+ * @param {string} [emailFieldPath="email"]
+ * @returns {Record<string, unknown>}
+ */
+export function mongoMatchInstitutionalEmailForCollege(
+  collegeIdRaw,
+  emailFieldPath = "email"
+) {
+  const collegeId = normalizeCollegeId(collegeIdRaw);
+  const field = String(emailFieldPath || "email").trim() || "email";
+  if (collegeId === COLLEGE_ID_RVITM) {
+    return mongoMatchEmailFieldForCollege(COLLEGE_ID_RVITM, field);
+  }
+  const escapeDots = (value) => String(value).replace(/\./g, "\\.");
+  return {
+    [field]: {
+      $regex: `${escapeDots(RVCE_EMAIL_SUFFIX)}$`,
+      $options: "i",
+    },
+  };
+}
+
+/**
+ * Merge a base match with institutional-only college email scope.
+ * @param {Record<string, unknown>|null|undefined} baseMatch
+ * @param {unknown} collegeIdRaw
+ * @param {string} [emailFieldPath="email"]
+ * @returns {Record<string, unknown>}
+ */
+export function withInstitutionalCollegeEmailScope(
+  baseMatch,
+  collegeIdRaw,
+  emailFieldPath = "email"
+) {
+  const scope = mongoMatchInstitutionalEmailForCollege(collegeIdRaw, emailFieldPath);
+  const base =
+    baseMatch && typeof baseMatch === "object" && Object.keys(baseMatch).length > 0
+      ? baseMatch
+      : null;
+  if (!base) return scope;
+  return { $and: [base, scope] };
+}
+
+/**
+ * Mongo fragment: exclude `/general` platform contributions (`contentScope: "platform"`).
+ * Missing / null / `"visit"` contentScope still match (legacy campus submissions).
+ * @returns {{ contentScope: { $ne: "platform" } }}
+ */
+export function mongoMatchCampusVisitSubmissions() {
+  return { contentScope: { $ne: "platform" } };
+}
+
+/**
+ * True when a submission targets `company_platform_content` (/general), not campus visits.
+ * @param {{ contentScope?: unknown }|null|undefined} submission
+ * @returns {boolean}
+ */
+export function isPlatformContentSubmission(submission) {
+  return String(submission?.contentScope || "").trim().toLowerCase() === "platform";
+}
+
+/**
+ * Campus-admin submission scope: college email + not `/general` platform content.
+ * @param {Record<string, unknown>|null|undefined} baseMatch
+ * @param {unknown} collegeIdRaw
+ * @returns {Record<string, unknown>}
+ */
+export function withCampusVisitSubmissionScope(baseMatch, collegeIdRaw) {
+  const campusOnly = mongoMatchCampusVisitSubmissions();
+  const base =
+    baseMatch && typeof baseMatch === "object" && Object.keys(baseMatch).length > 0
+      ? { $and: [baseMatch, campusOnly] }
+      : campusOnly;
+  return withCollegeEmailScope(base, collegeIdRaw, "submittedBy.email");
+}
+
+/**
  * Effective college on a role / got-in row (missing → rvce).
  * @param {unknown} row
  * @returns {string}

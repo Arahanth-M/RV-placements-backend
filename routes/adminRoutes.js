@@ -3,7 +3,9 @@ import {
   COLLEGE_ID_RVITM,
   collegeIdFromUser,
   emailBelongsToCollege,
+  isPlatformContentSubmission,
   normalizeCollegeId,
+  withCampusVisitSubmissionScope,
   withCollegeEmailScope,
 } from "../utils/collegeScope.js";
 import express from "express";
@@ -814,6 +816,12 @@ async function enrichSubmissionVisitMeta(docs) {
 
 /** @returns {boolean} true when response already sent (forbidden) */
 function rejectIfSubmissionOutsideAdminCollege(submission, req, res) {
+  if (isPlatformContentSubmission(submission)) {
+    res.status(403).json({
+      error: "General platform submissions are reviewed by platform admins only.",
+    });
+    return true;
+  }
   const collegeId = collegeIdFromUser(req.user);
   if (emailBelongsToCollege(submission?.submittedBy?.email, collegeId)) {
     return false;
@@ -871,7 +879,8 @@ submissionModRouter.get("/submissions", async (req, res) => {
     const collegeId = collegeIdFromUser(req.user);
     const { status } = req.query;
     const baseQuery = status ? { status } : {};
-    let query = withCollegeEmailScope(baseQuery, collegeId, "submittedBy.email");
+    // Campus queue: college submitters only; never `/general` platform contributions.
+    let query = withCampusVisitSubmissionScope(baseQuery, collegeId);
     const { page, limit, skip } = parseAdminPagination(req.query);
 
     if (isSpcActor(req.user)) {
@@ -925,14 +934,11 @@ submissionModRouter.get("/submissions", async (req, res) => {
 // Full submission (e.g. admin modal)
 submissionModRouter.get("/submissions/:id", async (req, res) => {
   try {
-    const collegeId = collegeIdFromUser(req.user);
     const submission = await Submission.findById(req.params.id).populate({ path: "companyId", select: "name", model: "CompanyStatic" });
     if (!submission) {
       return res.status(404).json({ error: "Submission not found" });
     }
-    if (!emailBelongsToCollege(submission?.submittedBy?.email, collegeId)) {
-      return res.status(403).json({ error: "Submission is outside your college scope." });
-    }
+    if (rejectIfSubmissionOutsideAdminCollege(submission, req, res)) return;
     if (await rejectIfSubmissionOutsideSpcCluster(submission, req, res)) return;
     const [enrichedSubmission] = await enrichSubmissionVisitMeta([submission]);
     res.json(enrichedSubmission);
@@ -1291,7 +1297,10 @@ submissionModRouter.post("/submissions/approve-batch", async (req, res) => {
         }
       })
       .filter(Boolean);
-    let scopedQuery = withCollegeEmailScope({ _id: { $in: objectIds } }, collegeId, "submittedBy.email");
+    let scopedQuery = withCampusVisitSubmissionScope(
+      { _id: { $in: objectIds } },
+      collegeId
+    );
     if (isSpcActor(req.user)) {
       if (!req.spcCluster) {
         return res.status(403).json({ error: SPC_CLUSTER_NOT_ASSIGNED_MESSAGE });

@@ -10,6 +10,7 @@ import { getJSON, setJSON, deleteKey, deleteKeysByPrefix } from "../src/utils/re
 import {
   DEFAULT_COLLEGE_ID,
   normalizeCollegeId,
+  withCampusVisitSubmissionScope,
   withCollegeEmailScope,
 } from "../utils/collegeScope.js";
 
@@ -42,8 +43,9 @@ function isValidStatsPayload(value) {
 export async function computeAdminDashboardStats(collegeIdRaw = null) {
   const collegeId = normalizeCollegeId(collegeIdRaw ?? DEFAULT_COLLEGE_ID);
   const userMatch = withCollegeEmailScope({}, collegeId, "email");
+  // Campus dashboard badge/counts: exclude `/general` platform submissions.
   const submissionMatch = (extra = {}) =>
-    withCollegeEmailScope(extra, collegeId, "submittedBy.email");
+    withCampusVisitSubmissionScope(extra, collegeId);
 
   const [
     totalUsers,

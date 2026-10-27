@@ -4,14 +4,39 @@ import Student from "../models/Student.js";
 import Submission from "../models/Submission.js";
 import authJWT from "../middleware/authJWT.js";
 import { redisUrl } from "../src/utils/redisClient.js";
-import { deleteKey, getJSON, setJSON } from "../src/utils/redisHelpers.js";
+import { deleteKeysByPrefix, getJSON, setJSON } from "../src/utils/redisHelpers.js";
+import {
+  collegeIdFromUser,
+  mongoMatchCampusVisitSubmissions,
+  normalizeCollegeId,
+  withInstitutionalCollegeEmailScope,
+} from "../utils/collegeScope.js";
+
+/** Campus leaderboard day windows: institutional emails + visit-scoped submissions only. */
+function withCampusLeaderboardSubmissionScope(baseMatch, collegeIdRaw) {
+  const campusOnly = mongoMatchCampusVisitSubmissions();
+  const base =
+    baseMatch && typeof baseMatch === "object" && Object.keys(baseMatch).length > 0
+      ? { $and: [baseMatch, campusOnly] }
+      : campusOnly;
+  return withInstitutionalCollegeEmailScope(base, collegeIdRaw, "submittedBy.email");
+}
 
 const leaderboardRouter = express.Router();
-const LEADERBOARD_CACHE_KEY = "rv:leaderboard:top_contributors:v10";
+/** Per-college cache: `…:v11:{collegeId}` — bump version when payload shape changes. */
+const LEADERBOARD_CACHE_KEY_PREFIX = "rv:leaderboard:top_contributors:v11:";
 const LEADERBOARD_TTL_SECONDS = 3 * 60 * 60; // 3 hours
 const PREVIOUS_DAY_TOP_CACHE_KEY_PREFIX = "rv:leaderboard:previous_day_top";
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 const LEADERBOARD_LOCK_MESSAGE = "Access to the leaderboard is restricted by the organization. Please contact the admin team for access.";
+
+function leaderboardCacheKey(collegeIdRaw) {
+  return `${LEADERBOARD_CACHE_KEY_PREFIX}${normalizeCollegeId(collegeIdRaw)}`;
+}
+
+function previousDayTopCacheKey(collegeIdRaw, previousDayKey) {
+  return `${PREVIOUS_DAY_TOP_CACHE_KEY_PREFIX}:${normalizeCollegeId(collegeIdRaw)}:${previousDayKey}`;
+}
 
 async function ensureLeaderboardAccess(req, res) {
   const isAdminSession = req.user?.isAdminSession === true || req.user?.role === "admin";
@@ -67,18 +92,20 @@ function getPreviousDayRangeIST() {
   };
 }
 
+/** Invalidate all campus leaderboard caches (all colleges). */
 export async function invalidateLeaderboardCache() {
   if (!redisUrl) return;
-  await deleteKey(LEADERBOARD_CACHE_KEY);
+  await deleteKeysByPrefix(LEADERBOARD_CACHE_KEY_PREFIX);
 }
 
-// GET /api/leaderboard/previous-day-top - previous IST day's top approved contributor
+// GET /api/leaderboard/previous-day-top - previous IST day's top approved campus contributor
 leaderboardRouter.get("/previous-day-top", authJWT, async (req, res) => {
   try {
     if (!(await ensureLeaderboardAccess(req, res))) {
       return;
     }
 
+    const collegeId = collegeIdFromUser(req.user);
     const {
       now,
       previousDayStart,
@@ -86,7 +113,7 @@ leaderboardRouter.get("/previous-day-top", authJWT, async (req, res) => {
       nextDayStart,
       previousDayKey,
     } = getPreviousDayRangeIST();
-    const cacheKey = `${PREVIOUS_DAY_TOP_CACHE_KEY_PREFIX}:${previousDayKey}`;
+    const cacheKey = previousDayTopCacheKey(collegeId, previousDayKey);
 
     if (redisUrl) {
       const cachedPreviousDayTop = await getJSON(cacheKey);
@@ -95,13 +122,17 @@ leaderboardRouter.get("/previous-day-top", authJWT, async (req, res) => {
       }
     }
 
-    const [top] = await Submission.aggregate([
+    // Campus only: institutional submitters + visit-scoped submissions (exclude /general).
+    const dayMatch = withCampusLeaderboardSubmissionScope(
       {
-        $match: {
-          status: "approved",
-          approvedAt: { $gte: previousDayStart, $lt: currentDayStart },
-        },
+        status: "approved",
+        approvedAt: { $gte: previousDayStart, $lt: currentDayStart },
       },
+      collegeId
+    );
+
+    const [top] = await Submission.aggregate([
+      { $match: dayMatch },
       {
         $group: {
           _id: "$submittedBy.email",
@@ -159,21 +190,27 @@ leaderboardRouter.get("/previous-day-top", authJWT, async (req, res) => {
   }
 });
 
-// GET /api/leaderboard - top contributors by points (optional auth for visibility)
+// GET /api/leaderboard - top campus contributors by points (college-scoped)
 leaderboardRouter.get("/", authJWT, async (req, res) => {
   try {
     if (!(await ensureLeaderboardAccess(req, res))) {
       return;
     }
 
+    const collegeId = collegeIdFromUser(req.user);
+    const cacheKey = leaderboardCacheKey(collegeId);
+
     if (redisUrl) {
-      const cachedLeaderboard = await getJSON(LEADERBOARD_CACHE_KEY);
+      const cachedLeaderboard = await getJSON(cacheKey);
       if (Array.isArray(cachedLeaderboard)) {
         return res.json(cachedLeaderboard);
       }
     }
 
-    const users = await User1.find({})
+    // Institutional campus emails only — never /general (Gmail / non-college) users.
+    const users = await User1.find(
+      withInstitutionalCollegeEmailScope({}, collegeId, "email")
+    )
       .select("googleId username profilePicture points")
       .sort({ points: -1 })
       .limit(10)
@@ -188,7 +225,7 @@ leaderboardRouter.get("/", authJWT, async (req, res) => {
     }));
 
     if (redisUrl) {
-      await setJSON(LEADERBOARD_CACHE_KEY, leaderboard, LEADERBOARD_TTL_SECONDS);
+      await setJSON(cacheKey, leaderboard, LEADERBOARD_TTL_SECONDS);
     }
 
     res.json(leaderboard);
