@@ -48,7 +48,7 @@ describe("platform admin routes", () => {
     expect(response.body).toHaveProperty("onboardingOpen");
   });
 
-  it("lists visitors newest login first for a platform owner", async () => {
+  it("lists general and campus visitors in separate audience filters", async () => {
     await User1.create([
       {
         email: "early@gmail.com",
@@ -75,26 +75,33 @@ describe("platform admin routes", () => {
       adminScope: "platform",
       isSuperAdmin: true,
     });
-    const response = await request(app)
+    const general = await request(app)
       .get("/api/admin/platform/visitors")
       .set("Cookie", [`token=${token}`])
       .expect(200);
 
-    expect(response.body.total).toBe(2);
-    expect(response.body.items.map((row) => row.email)).toEqual([
-      "late@gmail.com",
-      "student@rvce.edu.in",
-    ]);
-    expect(response.body.items[0]).toMatchObject({
+    expect(general.body.audience).toBe("general");
+    expect(general.body.total).toBe(1);
+    expect(general.body.items.map((row) => row.email)).toEqual(["late@gmail.com"]);
+    expect(general.body.items[0]).toMatchObject({
       username: "Late",
       audience: "general",
       lastLoginAt: "2026-10-03T15:30:00.000Z",
     });
-    expect(response.body.items[1].audience).toBe("campus");
+
+    const campus = await request(app)
+      .get("/api/admin/platform/visitors")
+      .query({ audience: "campus" })
+      .set("Cookie", [`token=${token}`])
+      .expect(200);
+    expect(campus.body.audience).toBe("campus");
+    expect(campus.body.total).toBe(1);
+    expect(campus.body.items.map((row) => row.email)).toEqual(["student@rvce.edu.in"]);
+    expect(campus.body.items[0].audience).toBe("campus");
 
     const search = await request(app)
       .get("/api/admin/platform/visitors")
-      .query({ q: "late" })
+      .query({ q: "late", audience: "general" })
       .set("Cookie", [`token=${token}`])
       .expect(200);
     expect(search.body.items.map((row) => row.email)).toEqual(["late@gmail.com"]);

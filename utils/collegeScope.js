@@ -83,13 +83,14 @@ export function emailBelongsToCollege(email, collegeIdRaw) {
 }
 
 /**
- * Mongo match for `/general` users: exclude onboarded campus institutional emails.
+ * Institutional email clauses (RVCE + RVITM + local test RVITM list).
  * @param {string} [emailFieldPath="email"]
- * @returns {Record<string, unknown>}
+ * @returns {Record<string, unknown>[]}
  */
-export function mongoMatchPlatformUsers(emailFieldPath = "email") {
+function institutionalEmailClauses(emailFieldPath = "email") {
   const field = String(emailFieldPath || "email").trim() || "email";
   const escapeDots = (value) => String(value).replace(/\./g, "\\.");
+  /** @type {Record<string, unknown>[]} */
   const clauses = [
     { [field]: { $regex: `${escapeDots(RVCE_EMAIL_SUFFIX)}$`, $options: "i" } },
     { [field]: { $regex: `${escapeDots(RVITM_EMAIL_SUFFIX)}$`, $options: "i" } },
@@ -98,7 +99,26 @@ export function mongoMatchPlatformUsers(emailFieldPath = "email") {
   if (testEmails.length > 0) {
     clauses.push({ [field]: { $in: testEmails } });
   }
-  return { $nor: clauses };
+  return clauses;
+}
+
+/**
+ * Mongo match for `/general` users: exclude onboarded campus institutional emails.
+ * @param {string} [emailFieldPath="email"]
+ * @returns {Record<string, unknown>}
+ */
+export function mongoMatchPlatformUsers(emailFieldPath = "email") {
+  return { $nor: institutionalEmailClauses(emailFieldPath) };
+}
+
+/**
+ * Mongo match for campus-dashboard users (institutional college emails only).
+ * @param {string} [emailFieldPath="email"]
+ * @returns {Record<string, unknown>}
+ */
+export function mongoMatchCampusUsers(emailFieldPath = "email") {
+  const clauses = institutionalEmailClauses(emailFieldPath);
+  return clauses.length === 1 ? clauses[0] : { $or: clauses };
 }
 
 /**

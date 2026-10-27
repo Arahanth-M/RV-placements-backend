@@ -11,7 +11,11 @@ import Entitlement from "../models/Entitlement.js";
 import CollegeOnboardingRequest from "../models/CollegeOnboardingRequest.js";
 import InterviewSession from "../models/InterviewSession.js";
 import PrepPathPlan from "../models/PrepPathPlan.js";
-import { isAllowedCollegeEmail, mongoMatchPlatformUsers } from "../utils/collegeScope.js";
+import {
+  isAllowedCollegeEmail,
+  mongoMatchCampusUsers,
+  mongoMatchPlatformUsers,
+} from "../utils/collegeScope.js";
 import {
   listCollegeOnboardingRequests,
   updateCollegeOnboardingRequest,
@@ -173,10 +177,21 @@ router.get("/visitors", async (req, res) => {
   try {
     const { page, limit, skip } = parseAdminPagination(req.query);
     const q = String(req.query?.q || "").trim().slice(0, 80);
-    const filter = { lastLoginAt: { $gte: VISITOR_LOGIN_AFTER } };
+    const audienceRaw = String(req.query?.audience || "general").trim().toLowerCase();
+    const audience = audienceRaw === "campus" ? "campus" : "general";
+    const audienceMatch =
+      audience === "campus"
+        ? mongoMatchCampusUsers("email")
+        : mongoMatchPlatformUsers("email");
+
+    /** @type {Record<string, unknown>} */
+    const filter = {
+      lastLoginAt: { $gte: VISITOR_LOGIN_AFTER },
+      $and: [audienceMatch],
+    };
     if (q) {
       const pattern = new RegExp(escapeVisitorSearch(q), "i");
-      filter.$or = [{ email: pattern }, { username: pattern }];
+      filter.$and.push({ $or: [{ email: pattern }, { username: pattern }] });
     }
     const [total, rows] = await Promise.all([
       User1.countDocuments(filter),
@@ -200,6 +215,7 @@ router.get("/visitors", async (req, res) => {
       page,
       limit,
       totalPages: Math.max(1, Math.ceil(total / limit)),
+      audience,
     });
   } catch (error) {
     console.error("GET /api/admin/platform/visitors:", error?.message || error);
