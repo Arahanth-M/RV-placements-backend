@@ -14,6 +14,7 @@ const entitlementSchema = new mongoose.Schema(
       allCards: { type: Boolean, default: false },
       mocks: { type: Boolean, default: false },
       prepPath: { type: Boolean, default: false },
+      behavioralCoach: { type: Boolean, default: false },
     },
     startsAt: { type: Date, required: true },
     expiresAt: { type: Date, required: true, index: true },

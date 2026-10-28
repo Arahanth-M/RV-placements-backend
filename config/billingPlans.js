@@ -5,6 +5,9 @@ export const BILLING_DURATION_MONTHS = 6;
 /** Lifetime free-tier allowances on /general (no paid PrepPath / mocks entitlement). */
 export const FREE_TIER_MOCK_LIMIT = 1;
 export const FREE_TIER_PREP_PATH_LIMIT = 1;
+export const FREE_TIER_BEHAVIORAL_LIMIT = 1;
+/** Paid behavioural coach: max question generations per rolling clock-hour window. */
+export const BEHAVIORAL_COACH_HOURLY_LIMIT = 3;
 /** Test-email grants keep a single PrepPath for the grant window. */
 export const TEST_EMAIL_PREP_PATH_LIMIT = 1;
 
@@ -21,42 +24,52 @@ export const BILLING_PLANS = Object.freeze({
   [PLAN_IDS.CATEGORY]: {
     id: PLAN_IDS.CATEGORY,
     name: "Unlock one category",
-    description: "Company-card details for every company in one category. No AI mocks or PrepPath.",
-    priceInr: 199,
+    description:
+      "Company-card details for every company in one category, plus unlimited behavioural coach (up to 3 questions per hour). No AI mocks or PrepPath.",
+    priceInr: 299,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: true,
     catalog: true,
-    grants: { allCards: false, mocks: false, prepPath: false, category: true },
+    grants: {
+      allCards: false,
+      mocks: false,
+      prepPath: false,
+      category: true,
+      behavioralCoach: true,
+    },
   },
   [PLAN_IDS.PREP_PATH]: {
     id: PLAN_IDS.PREP_PATH,
     name: "Unlimited PrepPath",
-    description: "Unlimited PrepPath plus all company cards for 6 months.",
+    description:
+      "Unlimited PrepPath plus all company cards and unlimited behavioural coach for 6 months.",
     priceInr: 499,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
     catalog: true,
-    grants: { allCards: true, mocks: false, prepPath: true },
+    grants: { allCards: true, mocks: false, prepPath: true, behavioralCoach: true },
   },
   [PLAN_IDS.MOCKS]: {
     id: PLAN_IDS.MOCKS,
     name: "Unlimited AI mock interviews",
-    description: "Unlimited AI mocks plus all company cards for 6 months.",
+    description:
+      "Unlimited AI mocks plus all company cards and unlimited behavioural coach for 6 months.",
     priceInr: 499,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
     catalog: true,
-    grants: { allCards: true, mocks: true, prepPath: false },
+    grants: { allCards: true, mocks: true, prepPath: false, behavioralCoach: true },
   },
   [PLAN_IDS.ALL_PREMIUM]: {
     id: PLAN_IDS.ALL_PREMIUM,
     name: "All premium features",
-    description: "All company cards, unlimited AI mocks, and unlimited PrepPath.",
+    description:
+      "All company cards, unlimited AI mocks, unlimited PrepPath, and unlimited behavioural coach.",
     priceInr: 699,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
     catalog: true,
-    grants: { allCards: true, mocks: true, prepPath: true },
+    grants: { allCards: true, mocks: true, prepPath: true, behavioralCoach: true },
   },
   /** Retired — kept so existing entitlements and orders still resolve. */
   [PLAN_IDS.ALL_CARDS]: {
@@ -67,7 +80,7 @@ export const BILLING_PLANS = Object.freeze({
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
     catalog: false,
-    grants: { allCards: true, mocks: false, prepPath: false },
+    grants: { allCards: true, mocks: false, prepPath: false, behavioralCoach: true },
   },
   [PLAN_IDS.MOCKS_PREP]: {
     id: PLAN_IDS.MOCKS_PREP,
@@ -77,7 +90,7 @@ export const BILLING_PLANS = Object.freeze({
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
     catalog: false,
-    grants: { allCards: false, mocks: true, prepPath: true },
+    grants: { allCards: false, mocks: true, prepPath: true, behavioralCoach: true },
   },
 });
 
@@ -98,10 +111,12 @@ export const PLAN_UPGRADE_OVERLAP = Object.freeze({
 });
 
 export const PAYWALL_CODE = "PAYWALL";
+export const BEHAVIORAL_HOURLY_LIMIT_CODE = "BEHAVIORAL_HOURLY_LIMIT";
 export const PAYWALL_FEATURES = Object.freeze({
   COMPANY_DETAIL: "company_detail",
   MOCKS: "mocks",
   PREP_PATH: "prep_path",
+  BEHAVIORAL_COACH: "behavioral_coach",
 });
 
 export function getBillingPlan(planId) {

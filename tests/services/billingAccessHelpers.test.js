@@ -1,4 +1,8 @@
-import { hasCategoryAccess, alreadyOwnsPlan } from "../../services/billing/accessService.js";
+import {
+  hasBehavioralCoachAccess,
+  hasCategoryAccess,
+  alreadyOwnsPlan,
+} from "../../services/billing/accessService.js";
 import { PLAN_IDS } from "../../config/billingPlans.js";
 import { summarizeEntitlements } from "../../services/billing/entitlementService.js";
 
@@ -64,5 +68,26 @@ describe("billing access helpers", () => {
     expect(
       alreadyOwnsPlan({ allCards: true, mocks: true, prepPath: true, categories: {} }, PLAN_IDS.ALL_PREMIUM)
     ).toBe(true);
+  });
+
+  it("unlocks behavioural coach for category or all-cards entitlements", () => {
+    const now = new Date();
+    const later = new Date(now.getTime() + 86400000);
+    const categorySummary = summarizeEntitlements(
+      [
+        {
+          grants: { allCards: false, mocks: false, prepPath: false },
+          categoryId: "fintech",
+          expiresAt: later,
+        },
+      ],
+      now
+    );
+    expect(categorySummary.behavioralCoach).toBe(true);
+    expect(hasBehavioralCoachAccess(categorySummary)).toBe(true);
+    expect(hasBehavioralCoachAccess({ allCards: true, categories: {} })).toBe(true);
+    expect(hasBehavioralCoachAccess({ behavioralCoach: false, allCards: false, categories: {} })).toBe(
+      false
+    );
   });
 });

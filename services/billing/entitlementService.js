@@ -24,6 +24,7 @@ export function summarizeEntitlements(rows, now = new Date()) {
   let allCardsUntil = null;
   let mocksUntil = null;
   let prepPathUntil = null;
+  let behavioralCoachUntil = null;
   const categories = {};
 
   const later = (current, next) => {
@@ -42,9 +43,14 @@ export function summarizeEntitlements(rows, now = new Date()) {
     }
     if (row.grants?.mocks) mocksUntil = later(mocksUntil, row.expiresAt);
     if (row.grants?.prepPath) prepPathUntil = later(prepPathUntil, row.expiresAt);
+    if (row.grants?.behavioralCoach || row.grants?.allCards || row.grants?.mocks || row.grants?.prepPath) {
+      behavioralCoachUntil = later(behavioralCoachUntil, row.expiresAt);
+    }
     const categoryId = String(row.categoryId || "").trim();
     if (categoryId) {
       categories[categoryId] = later(categories[categoryId] || null, row.expiresAt);
+      // Category unlocks also include unlimited behavioural coach (incl. older ₹199 purchases).
+      behavioralCoachUntil = later(behavioralCoachUntil, row.expiresAt);
     }
   }
 
@@ -55,6 +61,8 @@ export function summarizeEntitlements(rows, now = new Date()) {
     mocksUntil,
     prepPath: Boolean(prepPathUntil),
     prepPathUntil,
+    behavioralCoach: Boolean(behavioralCoachUntil),
+    behavioralCoachUntil,
     categories,
   };
 }
@@ -93,6 +101,7 @@ export async function grantEntitlementFromPlan({
       allCards: Boolean(plan.grants.allCards),
       mocks: Boolean(plan.grants.mocks),
       prepPath: Boolean(plan.grants.prepPath),
+      behavioralCoach: Boolean(plan.grants.behavioralCoach),
     },
     startsAt,
     expiresAt,

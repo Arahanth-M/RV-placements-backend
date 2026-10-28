@@ -6,6 +6,9 @@ import PracticeChallengeAttempt from "../../models/PracticeChallengeAttempt.js";
 import BehavioralCoachAttempt from "../../models/BehavioralCoachAttempt.js";
 import { classifyGeneralCompanyCategory } from "../../utils/generalCompanyCategory.js";
 import {
+  BEHAVIORAL_COACH_HOURLY_LIMIT,
+  BEHAVIORAL_HOURLY_LIMIT_CODE,
+  FREE_TIER_BEHAVIORAL_LIMIT,
   FREE_TIER_MOCK_LIMIT,
   FREE_TIER_PREP_PATH_LIMIT,
   PAYWALL_CODE,
@@ -15,6 +18,7 @@ import {
 } from "../../config/billingPlans.js";
 import { listActiveEntitlements, summarizeEntitlements } from "./entitlementService.js";
 import { isTeaserCompanyId } from "./teaserCompanies.js";
+import { checkBehavioralCoachHourlyLimit } from "./behavioralCoachRateLimit.js";
 import {
   TEST_EMAIL_LIMIT_CODE,
   getActiveTestEmail,
@@ -119,8 +123,18 @@ function summaryWithoutPaidGrants() {
     mocksUntil: null,
     prepPath: false,
     prepPathUntil: null,
+    behavioralCoach: false,
+    behavioralCoachUntil: null,
     categories: {},
   };
+}
+
+/** Unlimited behavioural coach: paid category unlock, all-cards plans, or explicit grant. */
+export function hasBehavioralCoachAccess(summary) {
+  if (summary?.behavioralCoach) return true;
+  if (summary?.allCards) return true;
+  const cats = summary?.categories || {};
+  return Object.keys(cats).some((key) => Boolean(cats[key]));
 }
 
 function testEmailAccessPayload(grant, snapshot) {
@@ -175,10 +189,11 @@ export async function getGeneralAccessSnapshot(userId, now = new Date(), user = 
         : Promise.resolve(0),
       grant
         ? BehavioralCoachAttempt.countDocuments({ userId: id, createdAt: sinceGrant })
-        : Promise.resolve(0),
+        : BehavioralCoachAttempt.countDocuments({ userId: id }),
     ]);
 
   const summary = grant ? summaryWithoutPaidGrants() : summarizeEntitlements(entitlements, now);
+  const unlimitedBehavioralCoach = grant ? false : hasBehavioralCoachAccess(summary);
   const behavioralMarked =
     Boolean(grant) &&
     trial?.freeBehavioralConsumedAt &&
@@ -194,7 +209,14 @@ export async function getGeneralAccessSnapshot(userId, now = new Date(), user = 
     ? 0
     : Math.max(0, freePrepLimit - Math.max(0, Number(prepPlans) || 0));
   const challengeUsed = grant ? challengeStarts > 0 : false;
-  const behavioralUsed = grant ? behavioralStarts > 0 || behavioralMarked : false;
+  const behavioralUsed = grant
+    ? behavioralStarts > 0 || behavioralMarked
+    : Boolean(trial?.freeBehavioralConsumed) || behavioralStarts > 0;
+  const freeBehavioralRemaining = unlimitedBehavioralCoach
+    ? 0
+    : behavioralUsed
+      ? 0
+      : FREE_TIER_BEHAVIORAL_LIMIT;
   return {
     entitlements: grant ? [] : entitlements,
     summary,
@@ -204,11 +226,12 @@ export async function getGeneralAccessSnapshot(userId, now = new Date(), user = 
     freePrepRemaining,
     unlimitedMocks: summary.mocks,
     unlimitedPrepPath: summary.prepPath,
+    unlimitedBehavioralCoach,
     isTestEmail: Boolean(grant),
     testEmailExpiresAt: grant?.expiresAt || null,
     testEmailDurationHours: grant ? Number(grant.durationHours) || null : null,
     freeChallengeRemaining: grant ? (challengeUsed ? 0 : 1) : null,
-    freeBehavioralRemaining: grant ? (behavioralUsed ? 0 : 1) : null,
+    freeBehavioralRemaining,
   };
 }
 
@@ -355,6 +378,95 @@ export async function evaluateTestEmailOnceFeature({ userId, user, feature, now 
   });
   error.code = TEST_EMAIL_LIMIT_CODE;
   return { limited: true, allowed: false, snapshot, error };
+}
+
+/**
+ * Free tier: 1 lifetime question+eval.
+ * Paid (category / all-cards / explicit grant): unlimited, rate-limited to 3 starts/hour.
+ * Test emails: 1 session for the grant window.
+ */
+export async function evaluateBehavioralCoachAccess({ userId, user, now = new Date() }) {
+  if (isBillingAdmin(user)) {
+    return {
+      allowed: true,
+      limited: false,
+      unlimited: true,
+      consumeFree: false,
+      snapshot: null,
+    };
+  }
+
+  const testGate = await evaluateTestEmailOnceFeature({
+    userId,
+    user,
+    feature: "behavioral",
+    now,
+  });
+  if (testGate.limited) {
+    return {
+      allowed: testGate.allowed,
+      limited: true,
+      unlimited: false,
+      consumeFree: testGate.allowed,
+      snapshot: testGate.snapshot,
+      error: testGate.error,
+    };
+  }
+
+  const snapshot = await getGeneralAccessSnapshot(userId, now, user);
+  if (snapshot.unlimitedBehavioralCoach) {
+    const rate = await checkBehavioralCoachHourlyLimit(userId, now);
+    if (!rate.allowed) {
+      const error = new Error(
+        `You can generate up to ${BEHAVIORAL_COACH_HOURLY_LIMIT} behavioural coach questions per hour. Try again in about ${Math.max(1, Math.ceil((rate.retryAfterSec || 0) / 60))} minute(s).`
+      );
+      error.code = BEHAVIORAL_HOURLY_LIMIT_CODE;
+      error.status = 429;
+      error.retryAfterSec = rate.retryAfterSec;
+      return {
+        allowed: false,
+        limited: false,
+        unlimited: true,
+        consumeFree: false,
+        snapshot,
+        error,
+        rate,
+      };
+    }
+    return {
+      allowed: true,
+      limited: false,
+      unlimited: true,
+      consumeFree: false,
+      snapshot,
+      rate,
+    };
+  }
+
+  if (snapshot.freeBehavioralRemaining > 0) {
+    return {
+      allowed: true,
+      limited: true,
+      unlimited: false,
+      consumeFree: true,
+      snapshot,
+    };
+  }
+
+  const error = createPaywallError({
+    feature: PAYWALL_FEATURES.BEHAVIORAL_COACH,
+    message:
+      "Your free behavioural coach question has been used. Unlock one company category (or a higher plan) for unlimited coach practice.",
+    suggestedPlans: [PLAN_IDS.CATEGORY, PLAN_IDS.ALL_PREMIUM],
+  });
+  return {
+    allowed: false,
+    limited: true,
+    unlimited: false,
+    consumeFree: false,
+    snapshot,
+    error,
+  };
 }
 
 export function paywallPayload(error) {

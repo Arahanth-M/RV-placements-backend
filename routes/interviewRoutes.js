@@ -112,6 +112,7 @@ import {
   isInterviewWeeklyLimitEnabled,
 } from "../config/interviewLimits.js";
 import {
+  evaluateBehavioralCoachAccess,
   evaluateCompanyCardAccess,
   evaluateMockAccess,
   evaluateTestEmailOnceFeature,
@@ -121,7 +122,10 @@ import {
   paywallPayload,
 } from "../services/billing/accessService.js";
 import { TEST_EMAIL_LIMIT_CODE } from "../services/testEmailService.js";
-import { PAYWALL_CODE } from "../config/billingPlans.js";
+import {
+  BEHAVIORAL_HOURLY_LIMIT_CODE,
+  PAYWALL_CODE,
+} from "../config/billingPlans.js";
 import {
   getInterviewLimitRequestStatus,
   resolveInterviewWeeklyLimitMax,
@@ -2091,26 +2095,42 @@ router.post(
       if (!userId) {
         return res.status(401).json({ error: "Unauthorized" });
       }
-      const gate = await evaluateTestEmailOnceFeature({
+      const gate = await evaluateBehavioralCoachAccess({
         userId,
         user: req.user,
-        feature: "behavioral",
       });
       if (!gate.allowed) {
-        return res.status(402).json({
-          error: gate.error?.message,
-          code: TEST_EMAIL_LIMIT_CODE,
-        });
+        if (gate.error?.code === BEHAVIORAL_HOURLY_LIMIT_CODE) {
+          return res.status(429).json({
+            error: gate.error.message,
+            code: BEHAVIORAL_HOURLY_LIMIT_CODE,
+            retryAfterSec: gate.error.retryAfterSec || 0,
+          });
+        }
+        if (gate.error?.code === TEST_EMAIL_LIMIT_CODE) {
+          return res.status(402).json({
+            error: gate.error.message,
+            code: TEST_EMAIL_LIMIT_CODE,
+          });
+        }
+        return res.status(402).json(paywallPayload(gate.error));
       }
       const result = await startBehavioralCoachPractice({
         userId,
         focus: req.body.focus,
       });
-      if (gate.limited) {
+      if (gate.consumeFree) {
         await markFreeBehavioralConsumed(userId).catch(() => {});
       }
       recordDauActivitySafe(req.user, { action: "behavioral_coach" });
-      return res.status(201).json({ success: true, ...result });
+      return res.status(201).json({
+        success: true,
+        ...result,
+        unlimitedBehavioralCoach: gate.unlimited === true,
+        freeBehavioralRemaining: gate.consumeFree
+          ? 0
+          : gate.snapshot?.freeBehavioralRemaining ?? null,
+      });
     } catch (error) {
       const code = error?.code;
       if (code === "UNAUTHORIZED") {

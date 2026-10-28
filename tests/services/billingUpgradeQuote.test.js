@@ -13,8 +13,8 @@ describe("quotePlanPurchase", () => {
   it("credits a prior category unlock when buying PrepPath", () => {
     const quote = quotePlanPurchase(PLAN_IDS.PREP_PATH, [{ planId: PLAN_IDS.CATEGORY }]);
     expect(quote.listPriceInr).toBe(499);
-    expect(quote.creditInr).toBe(199);
-    expect(quote.payableInr).toBe(300);
+    expect(quote.creditInr).toBe(299);
+    expect(quote.payableInr).toBe(200);
   });
 
   it("credits overlapping list prices without proration", () => {
