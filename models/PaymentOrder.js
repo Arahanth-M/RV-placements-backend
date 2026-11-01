@@ -15,6 +15,11 @@ const paymentOrderSchema = new mongoose.Schema(
     categoryId: { type: String, trim: true, default: "" },
     listPricePaise: { type: Number, required: true, min: 0 },
     creditPaise: { type: Number, required: true, min: 0, default: 0 },
+    /** Base payable after upgrade credit, before GST (paise). */
+    basePaise: { type: Number, required: true, min: 0, default: 0 },
+    /** GST amount charged on top of base (paise). */
+    gstPaise: { type: Number, required: true, min: 0, default: 0 },
+    /** Total charged to Razorpay = basePaise + gstPaise. */
     amountPaise: { type: Number, required: true, min: 100 },
     currency: { type: String, default: "INR" },
     razorpayOrderId: { type: String, required: true, unique: true, trim: true },

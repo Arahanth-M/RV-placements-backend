@@ -410,7 +410,7 @@ async function createMeetViaCalendar(auth, input) {
     summary,
     description:
       description ||
-      "Peer session on Last Minute Placement Prep. Join with the Google Meet link.",
+      "Peer session on One Stop Placement Prep. Join with the Google Meet link.",
     start: {
       dateTime: toIstRfc3339(slotStart),
       timeZone: "Asia/Kolkata",

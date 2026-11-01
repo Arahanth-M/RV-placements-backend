@@ -1,9 +1,16 @@
 import express from "express";
 import mongoose from "mongoose";
+import multer from "multer";
 import authJWT from "../middleware/authJWT.js";
 import requireAdmin from "../middleware/requireAdmin.js";
 import requirePlatformAdmin from "../middleware/requirePlatformAdmin.js";
 import authorize from "../middleware/authorize.js";
+import {
+  PLATFORM_PREP_CSV_COLUMNS,
+  finalizePlatformPrepCsvImport,
+  parsePlatformPrepCsvBuffer,
+} from "../services/platformPrepCsvImportService.js";
+import { fetchQuickLinksForPrepRoles } from "../services/platformPrepQuickLinksService.js";
 import Submission from "../models/Submission.js";
 import User1 from "../models/User1.js";
 import PaymentOrder from "../models/PaymentOrder.js";
@@ -55,6 +62,7 @@ import {
   updatePlatformMustDoByTopic,
   updatePlatformQuestion,
 } from "../services/platformCompanyMutationsService.js";
+import { enhancePlatformQuestionField } from "../services/enhancePlatformQuestionField.js";
 import {
   clearRuntimeSecret,
   listRuntimeSecrets,
@@ -545,6 +553,27 @@ router.put("/companies/:id/oa-questions/:index", async (req, res) => {
   }
 });
 
+router.post("/companies/:id/oa-questions/:index/enhance-field", async (req, res) => {
+  try {
+    const out = await enhancePlatformQuestionField({
+      companyId: req.params.id,
+      contentField: "onlineQuestions",
+      index: req.params.index,
+      field: req.body?.field,
+    });
+    return res.json(out);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    if (status >= 500) {
+      console.error("[platform-admin] oa enhance-field:", error?.message || error);
+    }
+    return res.status(status).json({
+      error: error?.message || "Enhance failed",
+      code: error?.code || undefined,
+    });
+  }
+});
+
 router.delete("/companies/:id/oa-questions/:index", async (req, res) => {
   try {
     const out = await deletePlatformQuestion(
@@ -556,6 +585,119 @@ router.delete("/companies/:id/oa-questions/:index", async (req, res) => {
   } catch (error) {
     const status = Number(error?.status) || 500;
     return res.status(status).json({ error: error?.message || "Server error" });
+  }
+});
+
+const prepCsvUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter(_req, file, callback) {
+    const csvName = /\.csv$/i.test(file.originalname || "");
+    const csvMime = ["text/csv", "application/csv", "application/vnd.ms-excel"].includes(
+      String(file.mimetype || "").toLowerCase()
+    );
+    callback(csvName || csvMime ? null : new Error("Only CSV files are allowed."), csvName || csvMime);
+  },
+});
+
+router.get("/companies/:id/interview-questions/csv-template", async (_req, res) => {
+  const header = PLATFORM_PREP_CSV_COLUMNS.join(",");
+  const codingExample = [
+    "SDE",
+    "coding",
+    "Implement LRU Cache",
+    "Use a hashmap + doubly linked list for O(1) get/put.",
+    "Keep most-recent nodes near the head; evict from the tail.",
+    "unordered_map + list sketch in C++",
+    "HashMap + LinkedList sketch in Java",
+    "OrderedDict / dict+list sketch in Python",
+  ]
+    .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
+    .join(",");
+  const theoryExample = [
+    "SDE",
+    "non_coding",
+    "Explain CAP theorem",
+    "Consistency, Availability, Partition tolerance — pick two under partition.",
+    "",
+    "",
+    "",
+    "",
+  ]
+    .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
+    .join(",");
+  const body = `${header}\n${codingExample}\n${theoryExample}\n`;
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader(
+    "Content-Disposition",
+    'attachment; filename="company-prep-interview-questions-template.csv"'
+  );
+  return res.status(200).send(body);
+});
+
+router.post(
+  "/companies/:id/interview-questions/csv-preview",
+  (req, res, next) => {
+    prepCsvUpload.single("file")(req, res, (error) => {
+      if (error) return res.status(400).json({ error: error.message || "CSV upload failed." });
+      return next();
+    });
+  },
+  async (req, res) => {
+    try {
+      if (!mongoose.isValidObjectId(String(req.params.id || ""))) {
+        return res.status(400).json({ error: "Invalid company id" });
+      }
+      const result = parsePlatformPrepCsvBuffer(req.file?.buffer);
+      return res.status(200).json({
+        companyId: String(req.params.id),
+        ...result,
+      });
+    } catch (error) {
+      const status = Number(error?.status) || 500;
+      if (status >= 500) {
+        console.error("[platform-admin] prep csv preview:", error?.message || error);
+      }
+      return res.status(status).json({ error: error?.message || "CSV preview failed." });
+    }
+  }
+);
+
+router.post("/companies/:id/interview-questions/csv-finalize", async (req, res) => {
+  try {
+    const result = await finalizePlatformPrepCsvImport({
+      companyId: req.params.id,
+      items: req.body?.items,
+      reviewer: {
+        name: req.user?.name || req.user?.username || "",
+        email: req.user?.email || "",
+      },
+    });
+    return res.status(201).json(result);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    if (status >= 500) {
+      console.error("[platform-admin] prep csv finalize:", error?.message || error);
+    }
+    return res.status(status).json({ error: error?.message || "CSV finalize failed." });
+  }
+});
+
+router.post("/companies/:id/interview-questions/fetch-quick-links", async (req, res) => {
+  try {
+    const result = await fetchQuickLinksForPrepRoles({
+      companyId: req.params.id,
+      roles: req.body?.roles,
+      country: req.body?.country,
+      maxPerRole: req.body?.maxPerRole,
+    });
+    return res.status(201).json(result);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    if (status >= 500) {
+      console.error("[platform-admin] fetch quick links:", error?.message || error);
+    }
+    return res.status(status).json({ error: error?.message || "Quick links fetch failed." });
   }
 });
 
@@ -571,6 +713,27 @@ router.put("/companies/:id/interview-questions/:index", async (req, res) => {
   } catch (error) {
     const status = Number(error?.status) || 500;
     return res.status(status).json({ error: error?.message || "Server error" });
+  }
+});
+
+router.post("/companies/:id/interview-questions/:index/enhance-field", async (req, res) => {
+  try {
+    const out = await enhancePlatformQuestionField({
+      companyId: req.params.id,
+      contentField: "interviewQuestions",
+      index: req.params.index,
+      field: req.body?.field,
+    });
+    return res.json(out);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    if (status >= 500) {
+      console.error("[platform-admin] interview enhance-field:", error?.message || error);
+    }
+    return res.status(status).json({
+      error: error?.message || "Enhance failed",
+      code: error?.code || undefined,
+    });
   }
 });
 

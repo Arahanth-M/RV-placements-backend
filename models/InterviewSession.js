@@ -325,8 +325,13 @@ const interviewSessionSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["in_progress", "completed"],
+      enum: ["in_progress", "completed", "abandoned"],
       default: "in_progress",
+    },
+    /** Set when the user quits mid-interview; cleared if they continue later. */
+    abandonedAt: {
+      type: Date,
+      default: null,
     },
     rounds: {
       type: [roundSchema],
@@ -362,8 +367,9 @@ interviewSessionSchema.pre("validate", function syncLegacyStates(next) {
   // If state is present, mirror into legacy fields.
   if (typeof this.state === "string" && this.state.trim()) {
     const isCompleted = this.state === "INTERVIEW_COMPLETE";
+    const isAbandoned = !isCompleted && Boolean(this.abandonedAt);
     this.interviewStatus = isCompleted ? "COMPLETED" : "IN_PROGRESS";
-    this.status = isCompleted ? "completed" : "in_progress";
+    this.status = isCompleted ? "completed" : isAbandoned ? "abandoned" : "in_progress";
     this.roundStatus = this.state === "ROUND_COMPLETE" ? "COMPLETED" : "IN_PROGRESS";
     return next();
   }

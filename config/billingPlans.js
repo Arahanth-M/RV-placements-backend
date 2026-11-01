@@ -1,6 +1,8 @@
-/** One-time /general SKUs. Amounts are INR, GST-inclusive. Validity is 6 months. */
+/** One-time /general SKUs. Amounts are INR base prices (GST exclusive). Validity is 6 months. */
 
 export const BILLING_DURATION_MONTHS = 6;
+/** GST charged on top of the base payable amount at checkout. */
+export const GST_RATE = 0.18;
 
 /** Lifetime free-tier allowances on /general (no paid PrepPath / mocks entitlement). */
 export const FREE_TIER_MOCK_LIMIT = 1;
@@ -26,7 +28,7 @@ export const BILLING_PLANS = Object.freeze({
     name: "Unlock one category",
     description:
       "Company-card details for every company in one category, plus unlimited behavioural coach (up to 3 questions per hour). No AI mocks or PrepPath.",
-    priceInr: 299,
+    priceInr: 199,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: true,
     catalog: true,
@@ -43,7 +45,7 @@ export const BILLING_PLANS = Object.freeze({
     name: "Unlimited PrepPath",
     description:
       "Unlimited PrepPath plus all company cards and unlimited behavioural coach for 6 months.",
-    priceInr: 499,
+    priceInr: 399,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
     catalog: true,
@@ -54,7 +56,7 @@ export const BILLING_PLANS = Object.freeze({
     name: "Unlimited AI mock interviews",
     description:
       "Unlimited AI mocks plus all company cards and unlimited behavioural coach for 6 months.",
-    priceInr: 499,
+    priceInr: 399,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
     catalog: true,
@@ -65,7 +67,7 @@ export const BILLING_PLANS = Object.freeze({
     name: "All premium features",
     description:
       "All company cards, unlimited AI mocks, unlimited PrepPath, and unlimited behavioural coach.",
-    priceInr: 699,
+    priceInr: 599,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
     catalog: true,
@@ -76,7 +78,7 @@ export const BILLING_PLANS = Object.freeze({
     id: PLAN_IDS.ALL_CARDS,
     name: "Unlock all company cards",
     description: "Full details for every company card on /general.",
-    priceInr: 499,
+    priceInr: 399,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
     catalog: false,
@@ -86,7 +88,7 @@ export const BILLING_PLANS = Object.freeze({
     id: PLAN_IDS.MOCKS_PREP,
     name: "AI mocks + PrepPath",
     description: "Unlimited AI mocks and PrepPath for 6 months.",
-    priceInr: 499,
+    priceInr: 399,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
     catalog: false,
@@ -131,17 +133,56 @@ export function isCatalogBillingPlan(planId) {
 export function listBillingPlans() {
   return Object.values(BILLING_PLANS)
     .filter((plan) => plan.catalog === true)
-    .map((plan) => ({
-      id: plan.id,
-      name: plan.name,
-      description: plan.description,
-      priceInr: plan.priceInr,
-      durationMonths: plan.durationMonths,
-      requiresCategory: plan.requiresCategory === true,
-      grants: { ...plan.grants },
-    }));
+    .map((plan) => {
+      const tax = applyGstOnInr(plan.priceInr);
+      return {
+        id: plan.id,
+        name: plan.name,
+        description: plan.description,
+        priceInr: plan.priceInr,
+        gstRate: GST_RATE,
+        gstInr: tax.gstInr,
+        totalInr: tax.totalInr,
+        durationMonths: plan.durationMonths,
+        requiresCategory: plan.requiresCategory === true,
+        grants: { ...plan.grants },
+      };
+    });
 }
 
 export function inrToPaise(inr) {
   return Math.round(Number(inr) * 100);
+}
+
+export function paiseToInr(paise) {
+  return Math.round(Number(paise) || 0) / 100;
+}
+
+/**
+ * GST on a base INR amount. Tax is computed in paise then converted so
+ * Razorpay order totals stay exact.
+ * @param {number} baseInr
+ */
+export function applyGstOnInr(baseInr) {
+  const basePaise = inrToPaise(Math.max(0, Number(baseInr) || 0));
+  const gstPaise = Math.round(basePaise * GST_RATE);
+  const totalPaise = basePaise + gstPaise;
+  return {
+    baseInr: paiseToInr(basePaise),
+    gstInr: paiseToInr(gstPaise),
+    totalInr: paiseToInr(totalPaise),
+    basePaise,
+    gstPaise,
+    totalPaise,
+    gstRate: GST_RATE,
+  };
+}
+
+/** Short line for Razorpay Checkout description / order notes. */
+export function formatGstCheckoutDescription({ planName, baseInr, gstInr, totalInr }) {
+  const name = String(planName || "Plan").trim() || "Plan";
+  const base = Number(baseInr) || 0;
+  const gst = Number(gstInr) || 0;
+  const total = Number(totalInr) || 0;
+  return `${name}: Base ₹${base} + GST 18% ₹${gst} = ₹${total}`;
 }

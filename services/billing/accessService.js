@@ -198,7 +198,11 @@ export async function getGeneralAccessSnapshot(userId, now = new Date(), user = 
     Boolean(grant) &&
     trial?.freeBehavioralConsumedAt &&
     new Date(trial.freeBehavioralConsumedAt) >= anchor;
-  const mockUsed = grant ? mockStarts > 0 : Boolean(trial?.freeMockConsumed) || mockStarts > 0;
+  // Free tier: ONLY BillingTrialUsage.freeMockConsumed === true counts.
+  // Do not treat existing/abandoned InterviewSession rows as consuming the free mock.
+  // Test-email grants still use platform session starts within the grant window.
+  const freeMockConsumed = trial?.freeMockConsumed === true;
+  const mockUsed = grant ? mockStarts > 0 : freeMockConsumed;
   const freeMockRemaining = summary.mocks
     ? 0
     : mockUsed
@@ -223,6 +227,7 @@ export async function getGeneralAccessSnapshot(userId, now = new Date(), user = 
     mockStarts,
     prepPlans,
     freeMockRemaining,
+    freeMockConsumed: grant ? mockUsed : freeMockConsumed,
     freePrepRemaining,
     unlimitedMocks: summary.mocks,
     unlimitedPrepPath: summary.prepPath,
@@ -274,26 +279,17 @@ export async function evaluateCompanyCardAccess({ userId, companyId, user, now =
 
 export async function evaluateMockAccess({ userId, companyId, user, now = new Date() }) {
   const card = await evaluateCompanyCardAccess({ userId, companyId, user, now });
-  // A test email's one mock can be for any company, not only the free card in each category.
-  if (card.snapshot?.isTestEmail) {
-    if (card.snapshot.freeMockRemaining > 0) {
-      return { ...card, mockAllowed: true, error: null };
-    }
-    return {
-      ...card,
-      mockAllowed: false,
-      error: createPaywallError({
-        feature: PAYWALL_FEATURES.MOCKS,
-        message:
-          "This test email includes one AI mock interview, and that interview has already been used.",
-        suggestedPlans: [],
-        categoryId: card.company?.categoryId || "",
-      }),
-    };
+  if (card.bypass || card.snapshot?.unlimitedMocks) {
+    return { ...card, mockAllowed: true, error: null };
   }
-  if (!card.allowed) return { ...card, mockAllowed: false };
-  if (card.bypass || card.snapshot?.unlimitedMocks || card.snapshot?.freeMockRemaining > 0) {
-    return { ...card, mockAllowed: true };
+  // Free tier / test-email: one mock of any company while remaining > 0.
+  const remaining = Number(card.snapshot?.freeMockRemaining);
+  if (Number.isFinite(remaining) && remaining > 0) {
+    return { ...card, mockAllowed: true, error: null };
+  }
+  // Belt-and-suspenders: never tell a free user their mock is used if the flag is still false.
+  if (!card.snapshot?.isTestEmail && card.snapshot?.freeMockConsumed !== true) {
+    return { ...card, mockAllowed: true, error: null };
   }
   return {
     ...card,

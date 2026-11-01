@@ -60,7 +60,8 @@ import {
   getUserSessionDetail,
   getUserInterviewAnalytics,
   updateSession,
-  discardInProgressSession,
+  abandonInProgressSession,
+  resumeAbandonedSession,
   startRound,
   resolveInterviewCompanyName,
   resolveInterviewMergedCompanyForSession,
@@ -117,6 +118,8 @@ import {
   evaluateMockAccess,
   evaluateTestEmailOnceFeature,
   getGeneralAccessSnapshot,
+  createPaywallError,
+  isBillingAdmin,
   markFreeBehavioralConsumed,
   markFreeMockConsumed,
   paywallPayload,
@@ -125,6 +128,8 @@ import { TEST_EMAIL_LIMIT_CODE } from "../services/testEmailService.js";
 import {
   BEHAVIORAL_HOURLY_LIMIT_CODE,
   PAYWALL_CODE,
+  PAYWALL_FEATURES,
+  PLAN_IDS,
 } from "../config/billingPlans.js";
 import {
   getInterviewLimitRequestStatus,
@@ -182,11 +187,18 @@ const visibleTestCasesFromDoc = (testCases) =>
       weight: Number(testcase?.weight) || 1,
     }));
 
-const toClientStatus = (state) =>
-  state === INTERVIEW_STATES.INTERVIEW_COMPLETE ? "completed" : "in_progress";
+const toClientStatus = (state, abandonedAt = null) => {
+  if (state === INTERVIEW_STATES.INTERVIEW_COMPLETE) return "completed";
+  // Incomplete sessions are treated as exited mid-way in My Interviews history.
+  if (abandonedAt || state !== INTERVIEW_STATES.INTERVIEW_COMPLETE) return "abandoned";
+  return "in_progress";
+};
 
 const toClientInterviewStatus = (state) =>
   state === INTERVIEW_STATES.INTERVIEW_COMPLETE ? "COMPLETED" : "IN_PROGRESS";
+
+const isPlatformSession = (session) =>
+  String(session?.contentScope || "").trim().toLowerCase() === "platform";
 
 const toRelevanceLabel = (value) => {
   if (value == null || value === "") return null;
@@ -311,8 +323,16 @@ function roundIndexFromCurrentRound(session) {
   return Math.max(0, Math.min(rounds.length - 1, currentRoundNumber - 1));
 }
 
-const buildSessionSummaryPayload = async (session, companyNameCache) => {
+const buildSessionSummaryPayload = async (session, companyNameCache, continueOptions = {}) => {
   const companyName = await resolveInterviewCompanyName(session, companyNameCache);
+  const incomplete = session.state !== INTERVIEW_STATES.INTERVIEW_COMPLETE;
+  const abandoned = Boolean(session.abandonedAt) || incomplete;
+  const platform = isPlatformSession(session);
+  const canContinue = abandoned
+    ? platform
+      ? Boolean(continueOptions.unlimitedMocks || continueOptions.isAdmin)
+      : true
+    : false;
   return {
     _id: session._id,
     userId: session.userId,
@@ -330,8 +350,12 @@ const buildSessionSummaryPayload = async (session, companyNameCache) => {
     currentRoundIndex: roundIndexFromCurrentRound(session),
     difficultyLevel: session.difficultyLevel || "",
     currentQuestion: session.currentQuestion || null,
-    status: toClientStatus(session.state),
+    status: toClientStatus(session.state, session.abandonedAt),
     state: session.state || INTERVIEW_STATES.PREVIEW,
+    contentScope: session.contentScope || "",
+    abandonedAt: session.abandonedAt || null,
+    canContinue,
+    continueRequiresUpgrade: abandoned && platform && !canContinue,
     finalScore:
       typeof session?.finalReport?.overallScore === "number"
         ? session.finalReport.overallScore
@@ -341,8 +365,16 @@ const buildSessionSummaryPayload = async (session, companyNameCache) => {
   };
 };
 
-const buildSessionDetailPayload = async (session, companyNameCache) => {
+const buildSessionDetailPayload = async (session, companyNameCache, continueOptions = {}) => {
   const companyName = await resolveInterviewCompanyName(session, companyNameCache);
+  const incomplete = session.state !== INTERVIEW_STATES.INTERVIEW_COMPLETE;
+  const abandoned = Boolean(session.abandonedAt) || incomplete;
+  const platform = isPlatformSession(session);
+  const canContinue = abandoned
+    ? platform
+      ? Boolean(continueOptions.unlimitedMocks || continueOptions.isAdmin)
+      : true
+    : false;
   return {
     _id: session._id,
     userId: session.userId,
@@ -362,8 +394,12 @@ const buildSessionDetailPayload = async (session, companyNameCache) => {
     currentRoundIndex: roundIndexFromCurrentRound(session),
     difficultyLevel: session.difficultyLevel || "",
     currentQuestion: session.currentQuestion || null,
-    status: toClientStatus(session.state),
+    status: toClientStatus(session.state, session.abandonedAt),
     state: session.state || INTERVIEW_STATES.PREVIEW,
+    contentScope: session.contentScope || "",
+    abandonedAt: session.abandonedAt || null,
+    canContinue,
+    continueRequiresUpgrade: abandoned && platform && !canContinue,
     finalReport: session.finalReport || null,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
@@ -652,6 +688,9 @@ router.get("/eligibility", async (req, res) => {
             reason: PAYWALL_CODE,
             message: body.error,
             completedCount: access.snapshot?.mockStarts || 0,
+            freeMockRemaining: access.snapshot?.freeMockRemaining ?? 0,
+            freeMockConsumed: access.snapshot?.freeMockConsumed === true,
+            unlimitedMocks: access.snapshot?.unlimitedMocks === true,
             ...body,
             limitRequest: { status: "none" },
           });
@@ -664,12 +703,16 @@ router.get("/eligibility", async (req, res) => {
           nextAvailableAt: null,
           lastCompletedAt: null,
           freeMockRemaining: access.snapshot?.freeMockRemaining ?? 0,
+          freeMockConsumed: access.snapshot?.freeMockConsumed === true,
           unlimitedMocks: access.snapshot?.unlimitedMocks === true,
           limitRequest: { status: "none" },
         });
       }
       const snapshot = await getGeneralAccessSnapshot(userId, new Date(), req.user);
-      const canStart = snapshot.unlimitedMocks || snapshot.freeMockRemaining > 0;
+      const canStart =
+        snapshot.unlimitedMocks ||
+        snapshot.freeMockRemaining > 0 ||
+        (!snapshot.isTestEmail && snapshot.freeMockConsumed !== true);
       return res.json({
         canStart,
         reason: canStart ? null : PAYWALL_CODE,
@@ -682,6 +725,7 @@ router.get("/eligibility", async (req, res) => {
         nextAvailableAt: null,
         lastCompletedAt: null,
         freeMockRemaining: snapshot.freeMockRemaining,
+        freeMockConsumed: snapshot.freeMockConsumed === true,
         unlimitedMocks: snapshot.unlimitedMocks,
         limitRequest: { status: "none" },
       });
@@ -838,6 +882,8 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
         return res.status(402).json({
           code: PAYWALL_CODE,
           ...body,
+          freeMockRemaining: access.snapshot?.freeMockRemaining ?? 0,
+          freeMockConsumed: access.snapshot?.freeMockConsumed === true,
         });
       }
     } else {
@@ -907,7 +953,7 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
     );
     if (existingSession?._id) {
       await Promise.all([
-        discardInProgressSession(existingSession._id),
+        abandonInProgressSession(existingSession._id),
         invalidateInterviewDetail(existingSession._id),
         clearInterviewProcessing(existingSession._id),
       ]);
@@ -1052,12 +1098,17 @@ router.get("/sessions/:userId", async (req, res) => {
     }
     const page = clampPage(req.query.page);
     const limit = clampLimit(req.query.limit);
+    const snapshot = await getGeneralAccessSnapshot(userId, new Date(), req.user);
+    const continueOptions = {
+      unlimitedMocks: snapshot.unlimitedMocks === true,
+      isAdmin: isBillingAdmin(req.user),
+    };
     const cached = await getCachedInterviewSummaries(userId, page, limit);
     const companyNameCache = new Map();
     if (cached) {
       const items = await Promise.all(
         (Array.isArray(cached?.items) ? cached.items : []).map((session) =>
-          buildSessionSummaryPayload(session, companyNameCache)
+          buildSessionSummaryPayload(session, companyNameCache, continueOptions)
         )
       );
       recordLatencyMetric("sessions", Date.now() - startedAt);
@@ -1076,7 +1127,9 @@ router.get("/sessions/:userId", async (req, res) => {
     const { items, pagination } = await getUserSessionSummariesPaginated(userId, page, limit);
     const payload = {
       items: await Promise.all(
-        items.map((session) => buildSessionSummaryPayload(session, companyNameCache))
+        items.map((session) =>
+          buildSessionSummaryPayload(session, companyNameCache, continueOptions)
+        )
       ),
       pagination,
     };
@@ -1108,12 +1161,18 @@ router.get("/session/:sessionId", async (req, res) => {
       return res.status(400).json({ error: "sessionId is required" });
     }
 
+    const snapshot = await getGeneralAccessSnapshot(userId, new Date(), req.user);
+    const continueOptions = {
+      unlimitedMocks: snapshot.unlimitedMocks === true,
+      isAdmin: isBillingAdmin(req.user),
+    };
+
     const cached = await getCachedInterviewDetail(sessionId);
     if (cached) {
       if (!isSessionOwner(cached, userId)) {
         return res.status(403).json({ error: "Forbidden" });
       }
-      const payload = await buildSessionDetailPayload(cached, new Map());
+      const payload = await buildSessionDetailPayload(cached, new Map(), continueOptions);
       recordLatencyMetric("sessionDetail", Date.now() - startedAt);
       console.info("[interview-session-detail] cache hit", {
         sessionId,
@@ -1127,7 +1186,7 @@ router.get("/session/:sessionId", async (req, res) => {
       return res.status(404).json({ error: "Session not found" });
     }
 
-    const payload = await buildSessionDetailPayload(session, new Map());
+    const payload = await buildSessionDetailPayload(session, new Map(), continueOptions);
     await setCachedInterviewDetail(sessionId, payload);
     recordLatencyMetric("sessionDetail", Date.now() - startedAt);
     console.info("[interview-session-detail] cache miss", {
@@ -1177,6 +1236,14 @@ router.post("/submit-answer", validateRequest(interviewSubmitAnswerSchema), asyn
     }
     if (!isSessionOwner(session, userId)) {
       return res.status(403).json({ error: "Forbidden" });
+    }
+    if (session.abandonedAt) {
+      return res.status(409).json({
+        error:
+          "This interview was exited mid-way. Continue it from My Interviews after unlocking unlimited AI mocks.",
+        abandoned: true,
+        code: "INTERVIEW_ABANDONED",
+      });
     }
 
     const wantLang = normalizeExecutionLanguage(languageRaw);
@@ -1238,6 +1305,15 @@ router.post("/run-preview", validateRequest(interviewRunPreviewSchema), async (r
     if (!isSessionOwner(session, userId)) return res.status(403).json({ error: "Forbidden" });
     if (session.state === INTERVIEW_STATES.INTERVIEW_COMPLETE) {
       return res.status(400).json({ success: false, message: "Interview already completed." });
+    }
+    if (session.abandonedAt) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "This interview was exited mid-way. Continue it from My Interviews after unlocking unlimited AI mocks.",
+        abandoned: true,
+        code: "INTERVIEW_ABANDONED",
+      });
     }
 
     const cooldownKey = `${userId}:${sessionId}`;
@@ -1459,6 +1535,14 @@ router.get("/interview-status/:sessionId", async (req, res) => {
     }
     if (!isSessionOwner(session, userId)) {
       return res.status(403).json({ error: "Forbidden" });
+    }
+    if (session.abandonedAt) {
+      return res.status(409).json({
+        error:
+          "This interview was exited mid-way. Continue it from My Interviews after unlocking unlimited AI mocks.",
+        abandoned: true,
+        code: "INTERVIEW_ABANDONED",
+      });
     }
 
     const rounds = Array.isArray(session.rounds) ? session.rounds : [];
@@ -1958,20 +2042,87 @@ router.delete("/discard/:sessionId", async (req, res) => {
       return res.status(403).json({ error: "Forbidden" });
     }
 
-    const deleted = await discardInProgressSession(sessionId);
+    // Keep the session for My Interviews history; mark as exited mid-way.
+    const abandoned = await abandonInProgressSession(sessionId);
     await Promise.all([
       invalidateSessionAndSummaryCaches(userId, sessionId),
       clearInterviewProcessing(sessionId),
     ]);
-    if (!deleted) {
-      // Idempotent discard: treat "already discarded/not found" as success.
-      return res.json({ success: true, message: "No in-progress interview found to discard" });
+    if (!abandoned) {
+      // Idempotent: already completed / missing in-progress session.
+      return res.json({ success: true, message: "No in-progress interview found to exit" });
     }
 
-    return res.json({ success: true, message: "In-progress interview discarded" });
+    return res.json({
+      success: true,
+      abandoned: true,
+      message: "In-progress interview marked as exited",
+    });
   } catch (error) {
     console.error("❌ Error discarding interview:", error.message);
     return res.status(500).json({ error: "Failed to discard interview" });
+  }
+});
+
+router.post("/continue/:sessionId", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    if (!sessionId) {
+      return res.status(400).json({ error: "sessionId is required" });
+    }
+
+    const session = await getSession(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+    if (!isSessionOwner(session, userId)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    if (session.state === INTERVIEW_STATES.INTERVIEW_COMPLETE) {
+      return res.status(400).json({ error: "This interview is already completed." });
+    }
+
+    if (isPlatformSession(session)) {
+      const snapshot = await getGeneralAccessSnapshot(userId, new Date(), req.user);
+      if (!snapshot.unlimitedMocks && !isBillingAdmin(req.user)) {
+        return res.status(402).json({
+          code: PAYWALL_CODE,
+          ...paywallPayload(
+            createPaywallError({
+              feature: PAYWALL_FEATURES.MOCKS,
+              message:
+                "Continuing an exited free mock requires unlimited AI mock interviews. Unlock mocks to pick up where you left off.",
+              suggestedPlans: [PLAN_IDS.MOCKS, PLAN_IDS.ALL_PREMIUM],
+              categoryId: "",
+            })
+          ),
+        });
+      }
+    }
+
+    // Incomplete sessions may lack abandonedAt if an earlier quit request was aborted.
+    const resumed = session.abandonedAt
+      ? await resumeAbandonedSession(sessionId)
+      : session;
+    if (!resumed) {
+      return res.status(400).json({ error: "Could not continue this interview." });
+    }
+    await invalidateSessionAndSummaryCaches(userId, sessionId);
+
+    return res.json({
+      success: true,
+      sessionId: String(resumed._id),
+      companyId: resumed.companyId ? String(resumed.companyId) : null,
+      contentScope: resumed.contentScope || "",
+      message: "Interview ready to continue",
+    });
+  } catch (error) {
+    console.error("❌ Error continuing interview:", error.message);
+    return res.status(500).json({ error: "Failed to continue interview" });
   }
 });
 

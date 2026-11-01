@@ -1,12 +1,14 @@
 import {
   BILLING_PLANS,
   PLAN_UPGRADE_OVERLAP,
+  applyGstOnInr,
   getBillingPlan,
   inrToPaise,
 } from "../../config/billingPlans.js";
 
 /**
- * List-price difference only. Credits every still-active overlapping SKU.
+ * List-price difference only, then 18% GST on the remaining base.
+ * Credits every still-active overlapping SKU (at base list price, before GST).
  * @param {string} planId
  * @param {Array<{ planId: string, categoryId?: string }>} activeEntitlements
  * @param {{ categoryId?: string }} [opts]
@@ -46,17 +48,25 @@ export function quotePlanPurchase(planId, activeEntitlements = [], opts = {}) {
   }
 
   const listPriceInr = plan.priceInr;
-  const payableInr = Math.max(0, listPriceInr - creditInr);
+  const basePayableInr = Math.max(0, listPriceInr - creditInr);
+  const tax = applyGstOnInr(basePayableInr);
 
   return {
     planId: plan.id,
     categoryId: plan.requiresCategory ? String(opts.categoryId || "").trim() : "",
     listPriceInr,
     creditInr,
-    payableInr,
+    /** Base amount after upgrade credit, before GST. */
+    baseInr: tax.baseInr,
+    gstInr: tax.gstInr,
+    gstRate: tax.gstRate,
+    /** Total charged (base + GST). Kept as payableInr for existing clients. */
+    payableInr: tax.totalInr,
     listPricePaise: inrToPaise(listPriceInr),
     creditPaise: inrToPaise(creditInr),
-    amountPaise: inrToPaise(payableInr),
+    basePaise: tax.basePaise,
+    gstPaise: tax.gstPaise,
+    amountPaise: tax.totalPaise,
     credited,
   };
 }

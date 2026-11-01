@@ -210,7 +210,7 @@ async function resolveMeetLinkForCreate({
   }
   const created = await createGoogleMeetForSession({
     summary: `${typeLabel}: ${topic}`.slice(0, 200),
-    description: `Peer session on Last Minute Placement Prep.\nType: ${typeLabel}\nTopic: ${topic}`,
+    description: `Peer session on One Stop Placement Prep.\nType: ${typeLabel}\nTopic: ${topic}`,
     slotStart,
     slotEnd,
     // Organizer as silent Calendar guest so they can enter (token account is Meet owner).

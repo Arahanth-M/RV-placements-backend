@@ -1,7 +1,7 @@
 import express from "express";
 import authJWT from "../middleware/authJWT.js";
 import authorize from "../middleware/authorize.js";
-import { listBillingPlans } from "../config/billingPlans.js";
+import { GST_RATE, listBillingPlans } from "../config/billingPlans.js";
 import { GENERAL_COMPANY_CATEGORIES } from "../utils/generalCompanyCategory.js";
 import { getRazorpayKeyId, isRazorpayConfigured } from "../services/billing/razorpayClient.js";
 import {
@@ -62,6 +62,7 @@ router.get("/config", authJWT, authorize(["student", "admin", "spc"]), async (_r
   return res.json({
     configured: isRazorpayConfigured(),
     keyId: isRazorpayConfigured() ? getRazorpayKeyId() : "",
+    gstRate: GST_RATE,
     plans: listBillingPlans(),
     categories: GENERAL_COMPANY_CATEGORIES.map((row) => ({
       id: row.id,
@@ -102,9 +103,8 @@ router.get("/access", authJWT, authorize(["student", "admin", "spc"]), async (re
           companyId,
           user: req.user,
         });
-        const mocks = card.allowed
-          ? await evaluateMockAccess({ userId, companyId, user: req.user })
-          : { mockAllowed: false };
+        // Free mock remaining applies to any company, even when the card itself is locked.
+        const mocks = await evaluateMockAccess({ userId, companyId, user: req.user });
         const prep = card.allowed
           ? await evaluatePrepPathAccess({ userId, companyId, user: req.user })
           : { prepAllowed: false };
@@ -147,6 +147,7 @@ router.get("/access", authJWT, authorize(["student", "admin", "spc"]), async (re
         categories: snapshot.summary.categories,
       },
       freeMockRemaining: snapshot.freeMockRemaining,
+      freeMockConsumed: snapshot.freeMockConsumed === true,
       freePrepRemaining: snapshot.freePrepRemaining,
       isTestEmail: snapshot.isTestEmail === true,
       testEmailExpiresAt: snapshot.testEmailExpiresAt,

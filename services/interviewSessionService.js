@@ -249,6 +249,10 @@ export const getSessionLean = async (sessionId) => {
   return InterviewSession.findById(sessionId).lean();
 };
 
+const notAbandonedFilter = {
+  $or: [{ abandonedAt: null }, { abandonedAt: { $exists: false } }],
+};
+
 export const getInProgressSession = async (
   userId,
   companyId,
@@ -263,6 +267,7 @@ export const getInProgressSession = async (
       userId,
       companyId,
       state: { $ne: INTERVIEW_STATES.INTERVIEW_COMPLETE },
+      ...notAbandonedFilter,
       mergePlacementByType: true,
       placementVisitType: norm.type,
     }).sort({ updatedAt: -1 });
@@ -272,6 +277,7 @@ export const getInProgressSession = async (
     userId,
     companyId,
     state: { $ne: INTERVIEW_STATES.INTERVIEW_COMPLETE },
+    ...notAbandonedFilter,
     placementVisitType: norm.type,
     placementCluster: norm.cluster,
     placementYear: year,
@@ -433,21 +439,19 @@ export const getUserSessionSummariesPaginated = async (userId, page = 1, limit =
   const pageNumber = Math.max(1, Number(page) || 1);
   const limitNumber = Math.min(50, Math.max(1, Number(limit) || 10));
   const skip = (pageNumber - 1) * limitNumber;
-  const completedFilter = {
-    userId,
-    state: INTERVIEW_STATES.INTERVIEW_COMPLETE,
-  };
+  // All sessions for this user: completed, exited mid-way, and incomplete leftovers.
+  const historyFilter = { userId };
 
   const [items, total] = await Promise.all([
-    InterviewSession.find(completedFilter)
+    InterviewSession.find(historyFilter)
       .select(
-        "userId companyId role currentRound currentQuestionIndex roundStatus state roundsPlan roundsDetails totalRounds currentRoundIndex difficultyLevel currentQuestion finalReport.overallScore createdAt updatedAt"
+        "userId companyId role currentRound currentQuestionIndex roundStatus state roundsPlan roundsDetails totalRounds currentRoundIndex difficultyLevel currentQuestion finalReport.overallScore contentScope abandonedAt createdAt updatedAt"
       )
       .sort({ updatedAt: -1 })
       .skip(skip)
       .limit(limitNumber)
       .lean(),
-    InterviewSession.countDocuments(completedFilter),
+    InterviewSession.countDocuments(historyFilter),
   ]);
 
   return {
@@ -471,6 +475,39 @@ export const discardInProgressSession = async (sessionId) => {
     _id: sessionId,
     state: { $ne: INTERVIEW_STATES.INTERVIEW_COMPLETE },
   });
+};
+
+/** Mark an in-progress interview as exited mid-way (kept for history / later continue). */
+export const abandonInProgressSession = async (sessionId) => {
+  const now = new Date();
+  const updated = await InterviewSession.findOneAndUpdate(
+    {
+      _id: sessionId,
+      state: { $ne: INTERVIEW_STATES.INTERVIEW_COMPLETE },
+    },
+    {
+      $set: {
+        abandonedAt: now,
+        status: "abandoned",
+        interviewStatus: "IN_PROGRESS",
+      },
+    },
+    { new: true }
+  );
+  return updated;
+};
+
+/** Clear abandoned flag so a paid user can continue the same session. */
+export const resumeAbandonedSession = async (sessionId) => {
+  const session = await InterviewSession.findOne({
+    _id: sessionId,
+    state: { $ne: INTERVIEW_STATES.INTERVIEW_COMPLETE },
+    abandonedAt: { $ne: null },
+  });
+  if (!session) return null;
+  session.abandonedAt = null;
+  await session.save();
+  return session;
 };
 
 export const startRound = async (sessionId) => {

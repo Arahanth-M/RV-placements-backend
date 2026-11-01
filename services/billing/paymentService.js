@@ -2,7 +2,11 @@ import crypto from "crypto";
 import PaymentOrder from "../../models/PaymentOrder.js";
 import Entitlement from "../../models/Entitlement.js";
 import { parseGeneralCompanyCategoryParam } from "../../utils/generalCompanyCategory.js";
-import { getBillingPlan, isCatalogBillingPlan } from "../../config/billingPlans.js";
+import {
+  formatGstCheckoutDescription,
+  getBillingPlan,
+  isCatalogBillingPlan,
+} from "../../config/billingPlans.js";
 import {
   getRazorpayInstance,
   getRazorpayKeyId,
@@ -136,6 +140,12 @@ export async function createBillingOrder({ userId, email, planId, categoryId }) 
 
   const instance = getRazorpayInstance();
   const receipt = `lmpp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const checkoutDescription = formatGstCheckoutDescription({
+    planName: plan.name,
+    baseInr: quote.baseInr,
+    gstInr: quote.gstInr,
+    totalInr: quote.payableInr,
+  });
   const razorpayOrder = await instance.orders.create({
     amount: quote.amountPaise,
     currency: "INR",
@@ -144,6 +154,11 @@ export async function createBillingOrder({ userId, email, planId, categoryId }) 
       userId: String(userId),
       planId: plan.id,
       categoryId: category || "",
+      baseInr: String(quote.baseInr),
+      gstInr: String(quote.gstInr),
+      gstRate: String(quote.gstRate),
+      totalInr: String(quote.payableInr),
+      breakdown: checkoutDescription,
     },
   });
 
@@ -154,11 +169,18 @@ export async function createBillingOrder({ userId, email, planId, categoryId }) 
     categoryId: category || "",
     listPricePaise: quote.listPricePaise,
     creditPaise: quote.creditPaise,
+    basePaise: quote.basePaise,
+    gstPaise: quote.gstPaise,
     amountPaise: quote.amountPaise,
     currency: "INR",
     razorpayOrderId: razorpayOrder.id,
     status: "created",
-    notes: { receipt, credited: quote.credited },
+    notes: {
+      receipt,
+      credited: quote.credited,
+      checkoutDescription,
+      gstRate: quote.gstRate,
+    },
   });
 
   return {
@@ -171,7 +193,11 @@ export async function createBillingOrder({ userId, email, planId, categoryId }) 
       categoryId: category || "",
       listPriceInr: quote.listPriceInr,
       creditInr: quote.creditInr,
+      baseInr: quote.baseInr,
+      gstInr: quote.gstInr,
+      gstRate: quote.gstRate,
       payableInr: quote.payableInr,
+      checkoutDescription,
     },
     keyId: getRazorpayKeyId(),
     plan: {
