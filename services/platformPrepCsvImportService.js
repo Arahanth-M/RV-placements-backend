@@ -116,6 +116,118 @@ export function parsePlatformPrepCsvRow(row, rowNumber) {
 }
 
 /**
+ * RFC4180-ish CSV parser (supports quoted multiline cells and "" escapes).
+ * Prefer this over XLSX for .csv uploads — more predictable in production.
+ * @param {string} text
+ * @returns {string[][]}
+ */
+export function parseCsvTextToMatrix(text) {
+  const source = String(text ?? "").replace(/^\uFEFF/, "");
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < source.length; i += 1) {
+    const ch = source[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (source[i + 1] === '"') {
+          cell += '"';
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cell += ch;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = true;
+      continue;
+    }
+    if (ch === ",") {
+      row.push(cell);
+      cell = "";
+      continue;
+    }
+    if (ch === "\n") {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+      continue;
+    }
+    if (ch === "\r") {
+      continue;
+    }
+    cell += ch;
+  }
+
+  if (inQuotes) {
+    const err = new Error("The CSV has an unclosed quoted field. Re-export as UTF-8 CSV and try again.");
+    err.status = 400;
+    throw err;
+  }
+
+  if (cell.length > 0 || row.length > 0) {
+    row.push(cell);
+    rows.push(row);
+  }
+
+  return rows.filter((cells) => cells.some((value) => String(value ?? "").trim() !== ""));
+}
+
+function matrixToObjectRows(matrix) {
+  if (!Array.isArray(matrix) || matrix.length < 2) return [];
+  const headers = matrix[0].map((header) => String(header ?? "").trim());
+  if (!headers.some(Boolean)) {
+    const err = new Error("The CSV is missing a header row.");
+    err.status = 400;
+    throw err;
+  }
+  const rows = [];
+  for (let r = 1; r < matrix.length; r += 1) {
+    const cells = matrix[r] || [];
+    const obj = {};
+    for (let c = 0; c < headers.length; c += 1) {
+      const key = headers[c];
+      if (!key) continue;
+      obj[key] = cells[c] == null ? "" : String(cells[c]);
+    }
+    rows.push(obj);
+  }
+  return rows;
+}
+
+function readCsvRowsFromBuffer(buffer) {
+  const text = Buffer.isBuffer(buffer) ? buffer.toString("utf8") : String(buffer ?? "");
+  // Fast path for plain CSVs (our template + admin exports).
+  if (text.includes(",") || text.includes("\n") || text.includes("\r")) {
+    try {
+      return matrixToObjectRows(parseCsvTextToMatrix(text));
+    } catch (error) {
+      if (Number(error?.status) === 400) throw error;
+      // Fall through to XLSX for odd encodings / Excel-saved files.
+    }
+  }
+
+  try {
+    const workbook = XLSX.read(buffer, { type: "buffer", raw: false, codepage: 65001 });
+    const sheetName = workbook?.SheetNames?.[0];
+    const firstSheet = sheetName ? workbook.Sheets?.[sheetName] : null;
+    return firstSheet ? XLSX.utils.sheet_to_json(firstSheet, { defval: "" }) : [];
+  } catch (error) {
+    const err = new Error(
+      `Could not parse the CSV (${error?.message || "invalid file"}). Save as UTF-8 CSV and retry.`
+    );
+    err.status = 400;
+    throw err;
+  }
+}
+
+/**
  * @param {Buffer} buffer
  */
 export function parsePlatformPrepCsvBuffer(buffer) {
@@ -124,9 +236,17 @@ export function parsePlatformPrepCsvBuffer(buffer) {
     err.status = 400;
     throw err;
   }
-  const workbook = XLSX.read(buffer, { type: "buffer", raw: false });
-  const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-  const rows = firstSheet ? XLSX.utils.sheet_to_json(firstSheet, { defval: "" }) : [];
+
+  let rows;
+  try {
+    rows = readCsvRowsFromBuffer(buffer);
+  } catch (error) {
+    if (Number(error?.status)) throw error;
+    const err = new Error(error?.message || "Could not parse the CSV.");
+    err.status = 400;
+    throw err;
+  }
+
   if (!rows.length) {
     const err = new Error("The CSV has no data rows.");
     err.status = 400;

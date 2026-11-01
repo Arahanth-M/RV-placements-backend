@@ -648,17 +648,24 @@ router.post(
       if (!mongoose.isValidObjectId(String(req.params.id || ""))) {
         return res.status(400).json({ error: "Invalid company id" });
       }
-      const result = parsePlatformPrepCsvBuffer(req.file?.buffer);
+      if (!req.file?.buffer?.length) {
+        return res.status(400).json({
+          error:
+            'Upload a CSV using the form field "file". If the file was selected, try again — the upload may have lost its multipart boundary.',
+        });
+      }
+      const result = parsePlatformPrepCsvBuffer(req.file.buffer);
       return res.status(200).json({
         companyId: String(req.params.id),
         ...result,
       });
     } catch (error) {
       const status = Number(error?.status) || 500;
+      const message = String(error?.message || error || "CSV preview failed.");
       if (status >= 500) {
-        console.error("[platform-admin] prep csv preview:", error?.message || error);
+        console.error("[platform-admin] prep csv preview:", message, error?.stack || "");
       }
-      return res.status(status).json({ error: error?.message || "CSV preview failed." });
+      return res.status(status).json({ error: message || "CSV preview failed." });
     }
   }
 );
