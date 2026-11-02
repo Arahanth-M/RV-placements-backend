@@ -1,6 +1,5 @@
 import express from "express";
 import mongoose from "mongoose";
-import multer from "multer";
 import authJWT from "../middleware/authJWT.js";
 import requireAdmin from "../middleware/requireAdmin.js";
 import requirePlatformAdmin from "../middleware/requirePlatformAdmin.js";
@@ -8,7 +7,7 @@ import authorize from "../middleware/authorize.js";
 import {
   PLATFORM_PREP_CSV_COLUMNS,
   finalizePlatformPrepCsvImport,
-  parsePlatformPrepCsvBuffer,
+  parsePlatformPrepCsvText,
 } from "../services/platformPrepCsvImportService.js";
 import { fetchQuickLinksForPrepRoles } from "../services/platformPrepQuickLinksService.js";
 import Submission from "../models/Submission.js";
@@ -588,18 +587,6 @@ router.delete("/companies/:id/oa-questions/:index", async (req, res) => {
   }
 });
 
-const prepCsvUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 8 * 1024 * 1024 },
-  fileFilter(_req, file, callback) {
-    const csvName = /\.csv$/i.test(file.originalname || "");
-    const csvMime = ["text/csv", "application/csv", "application/vnd.ms-excel"].includes(
-      String(file.mimetype || "").toLowerCase()
-    );
-    callback(csvName || csvMime ? null : new Error("Only CSV files are allowed."), csvName || csvMime);
-  },
-});
-
 router.get("/companies/:id/interview-questions/csv-template", async (_req, res) => {
   const header = PLATFORM_PREP_CSV_COLUMNS.join(",");
   const codingExample = [
@@ -635,40 +622,39 @@ router.get("/companies/:id/interview-questions/csv-template", async (_req, res) 
   return res.status(200).send(body);
 });
 
-router.post(
-  "/companies/:id/interview-questions/csv-preview",
-  (req, res, next) => {
-    prepCsvUpload.single("file")(req, res, (error) => {
-      if (error) return res.status(400).json({ error: error.message || "CSV upload failed." });
-      return next();
-    });
-  },
-  async (req, res) => {
-    try {
-      if (!mongoose.isValidObjectId(String(req.params.id || ""))) {
-        return res.status(400).json({ error: "Invalid company id" });
-      }
-      if (!req.file?.buffer?.length) {
-        return res.status(400).json({
-          error:
-            'Upload a CSV using the form field "file". If the file was selected, try again — the upload may have lost its multipart boundary.',
-        });
-      }
-      const result = parsePlatformPrepCsvBuffer(req.file.buffer);
-      return res.status(200).json({
-        companyId: String(req.params.id),
-        ...result,
-      });
-    } catch (error) {
-      const status = Number(error?.status) || 500;
-      const message = String(error?.message || error || "CSV preview failed.");
-      if (status >= 500) {
-        console.error("[platform-admin] prep csv preview:", message, error?.stack || "");
-      }
-      return res.status(status).json({ error: message || "CSV preview failed." });
+router.post("/companies/:id/interview-questions/csv-preview", async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(String(req.params.id || ""))) {
+      return res.status(400).json({ error: "Invalid company id" });
     }
+
+    const csvText =
+      typeof req.body?.csvText === "string"
+        ? req.body.csvText
+        : typeof req.body?.csv === "string"
+          ? req.body.csv
+          : "";
+
+    if (!csvText.trim()) {
+      return res.status(400).json({
+        error: 'Request body must include CSV text as { "csvText": "<file contents>" }.',
+      });
+    }
+
+    const result = parsePlatformPrepCsvText(csvText);
+    return res.status(200).json({
+      companyId: String(req.params.id),
+      ...result,
+    });
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    const message = String(error?.message || error || "CSV preview failed.");
+    if (status >= 500) {
+      console.error("[platform-admin] prep csv preview:", message, error?.stack || "");
+    }
+    return res.status(status).json({ error: message || "CSV preview failed." });
   }
-);
+});
 
 router.post("/companies/:id/interview-questions/csv-finalize", async (req, res) => {
   try {

@@ -138,7 +138,21 @@ app.use((req, res, next) => {
   if (path === "/api/billing/webhook") {
     return express.raw({ type: "application/json" })(req, res, next);
   }
-  return express.json()(req, res, next);
+  const contentType = String(req.headers["content-type"] || "").toLowerCase();
+  if (contentType.includes("multipart/form-data")) {
+    return next();
+  }
+  return express.json({ limit: "10mb" })(req, res, next);
+});
+app.use((err, req, res, next) => {
+  if (!err) return next();
+  if (err.type === "entity.too.large" || err.status === 413) {
+    return res.status(413).json({ error: "Request body too large." });
+  }
+  if (err instanceof SyntaxError && (err.status === 400 || err.statusCode === 400)) {
+    return res.status(400).json({ error: "Invalid JSON body." });
+  }
+  return next(err);
 });
 app.use((req, res, next) => {
   const path = String(req.originalUrl || req.url || "").split("?")[0];

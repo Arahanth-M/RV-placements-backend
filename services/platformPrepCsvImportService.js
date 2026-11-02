@@ -228,25 +228,9 @@ function readCsvRowsFromBuffer(buffer) {
 }
 
 /**
- * @param {Buffer} buffer
+ * @param {unknown[]} rows
  */
-export function parsePlatformPrepCsvBuffer(buffer) {
-  if (!buffer?.length) {
-    const err = new Error('Upload a CSV using the form field "file".');
-    err.status = 400;
-    throw err;
-  }
-
-  let rows;
-  try {
-    rows = readCsvRowsFromBuffer(buffer);
-  } catch (error) {
-    if (Number(error?.status)) throw error;
-    const err = new Error(error?.message || "Could not parse the CSV.");
-    err.status = 400;
-    throw err;
-  }
-
+function buildPreviewFromRows(rows) {
   if (!rows.length) {
     const err = new Error("The CSV has no data rows.");
     err.status = 400;
@@ -280,6 +264,58 @@ export function parsePlatformPrepCsvBuffer(buffer) {
     errors: errors.slice(0, 200),
     columns: PLATFORM_PREP_CSV_COLUMNS,
   };
+}
+
+/**
+ * Preferred production path: parse CSV text from a JSON body (avoids multipart/multer).
+ * @param {unknown} text
+ */
+export function parsePlatformPrepCsvText(text) {
+  const raw = String(text ?? "");
+  if (!raw.trim()) {
+    const err = new Error("CSV text is empty.");
+    err.status = 400;
+    throw err;
+  }
+  if (Buffer.byteLength(raw, "utf8") > 8 * 1024 * 1024) {
+    const err = new Error("CSV is larger than 8MB.");
+    err.status = 400;
+    throw err;
+  }
+
+  let rows;
+  try {
+    rows = matrixToObjectRows(parseCsvTextToMatrix(raw));
+  } catch (error) {
+    if (Number(error?.status)) throw error;
+    const err = new Error(error?.message || "Could not parse the CSV text.");
+    err.status = 400;
+    throw err;
+  }
+  return buildPreviewFromRows(rows);
+}
+
+/**
+ * @param {Buffer} buffer
+ */
+export function parsePlatformPrepCsvBuffer(buffer) {
+  if (!buffer?.length) {
+    const err = new Error('Upload a CSV using the form field "file".');
+    err.status = 400;
+    throw err;
+  }
+
+  let rows;
+  try {
+    rows = readCsvRowsFromBuffer(buffer);
+  } catch (error) {
+    if (Number(error?.status)) throw error;
+    const err = new Error(error?.message || "Could not parse the CSV.");
+    err.status = 400;
+    throw err;
+  }
+
+  return buildPreviewFromRows(rows);
 }
 
 function asObjectId(value) {
