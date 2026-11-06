@@ -1,3 +1,4 @@
+import { spawnSync } from "child_process";
 import { callLLM } from "./llmClient.js";
 import { parseJSONResponse } from "../utils/parseJSONResponse.js";
 import { GROQ_KEY_SLOTS } from "../config/groqApiKey.js";
@@ -28,6 +29,13 @@ function compact(value, max = 0) {
   const text = compactSingleLine(value);
   if (!max || text.length <= max) return text;
   return text.slice(0, max).trim();
+}
+
+/** Keep newlines/indentation for source code (unlike compact()). */
+function preserveCode(value, max = 4000) {
+  const text = normalizeMultilineText(value);
+  if (!max || text.length <= max) return text;
+  return text.slice(0, max).trimEnd();
 }
 
 function asObjectId(value) {
@@ -283,19 +291,256 @@ async function enhanceExplanation({ companyName, item }) {
   return { explanation: next };
 }
 
-async function refillLanguage({ companyName, item, language }) {
+/** Strip line/block/hash comments while preserving string and char literals. */
+function stripCodeComments(code, language) {
+  const src = String(code || "");
+  if (!src) return src;
+
+  let out = "";
+  let i = 0;
+  let mode = "code"; // code | line | block | string
+  let quote = "";
+  let escape = false;
+  const isPython = language === "python";
+
+  while (i < src.length) {
+    const ch = src[i];
+    const next = src[i + 1];
+
+    if (mode === "line") {
+      if (ch === "\n") {
+        mode = "code";
+        out += ch;
+      }
+      i += 1;
+      continue;
+    }
+
+    if (mode === "block") {
+      if (ch === "*" && next === "/") {
+        mode = "code";
+        i += 2;
+      } else {
+        i += 1;
+      }
+      continue;
+    }
+
+    if (mode === "string") {
+      out += ch;
+      if (escape) {
+        escape = false;
+        i += 1;
+        continue;
+      }
+      if (ch === "\\" && quote.length === 1) {
+        escape = true;
+        i += 1;
+        continue;
+      }
+      if (quote.length === 3) {
+        if (src.startsWith(quote, i)) {
+          out += quote.slice(1);
+          i += 3;
+          mode = "code";
+          continue;
+        }
+        i += 1;
+        continue;
+      }
+      if (ch === quote) {
+        mode = "code";
+      }
+      i += 1;
+      continue;
+    }
+
+    // mode === "code"
+    if (isPython && (ch === '"' || ch === "'")) {
+      if (src.startsWith(ch.repeat(3), i)) {
+        quote = ch.repeat(3);
+        out += quote;
+        i += 3;
+        mode = "string";
+        continue;
+      }
+      quote = ch;
+      out += ch;
+      i += 1;
+      mode = "string";
+      continue;
+    }
+
+    if (!isPython && (ch === '"' || ch === "'" || ch === "`")) {
+      quote = ch;
+      out += ch;
+      i += 1;
+      mode = "string";
+      continue;
+    }
+
+    if (!isPython && ch === "/" && next === "/") {
+      mode = "line";
+      i += 2;
+      continue;
+    }
+    if (!isPython && ch === "/" && next === "*") {
+      mode = "block";
+      i += 2;
+      continue;
+    }
+    if (isPython && ch === "#") {
+      mode = "line";
+      i += 1;
+      continue;
+    }
+
+    out += ch;
+    i += 1;
+  }
+
+  return out
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+$/g, ""))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function stripMarkdownFences(code) {
+  let text = String(code || "").trim();
+  if (!text.startsWith("```")) return text;
+  text = text.replace(/^```(?:python|py|Python)?\s*\n?/, "");
+  text = text.replace(/\n?```\s*$/, "");
+  return text.trim();
+}
+
+/** Best-effort docstring removal when python3 is unavailable. */
+function stripPythonDocstringsJs(code) {
+  return String(code || "")
+    .replace(/^[ \t]*("""[\s\S]*?"""|'''[\s\S]*?''')[ \t]*\r?\n?/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function python3Available() {
+  try {
+    const result = spawnSync("python3", ["--version"], {
+      encoding: "utf8",
+      timeout: 3000,
+    });
+    return result.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Clean Python solution. Uses ast.unparse when python3 exists; otherwise JS cleanup.
+ * @returns {{ code: string|null, error: string|null, usedPython: boolean }}
+ */
+function finalizePythonSolution(code) {
+  const cleaned = stripPythonDocstringsJs(
+    stripCodeComments(stripMarkdownFences(normalizeMultilineText(code)), "python")
+  );
+  if (!cleaned) {
+    return { code: null, error: "empty code", usedPython: false };
+  }
+
+  if (!python3Available()) {
+    // Docker images historically shipped without python3 — never hard-fail for that.
+    return { code: cleaned, error: null, usedPython: false };
+  }
+
+  const script = [
+    "import ast, sys",
+    "src = sys.stdin.read()",
+    "tree = ast.parse(src)",
+    "class StripDocs(ast.NodeTransformer):",
+    "    def _strip(self, node):",
+    "        self.generic_visit(node)",
+    "        if getattr(node, 'body', None) and isinstance(node.body[0], ast.Expr):",
+    "            v = node.body[0].value",
+    "            if isinstance(v, ast.Constant) and isinstance(v.value, str):",
+    "                node.body = node.body[1:] or [ast.Pass()]",
+    "        return node",
+    "    def visit_Module(self, node):",
+    "        return self._strip(node)",
+    "    def visit_FunctionDef(self, node):",
+    "        return self._strip(node)",
+    "    def visit_AsyncFunctionDef(self, node):",
+    "        return self._strip(node)",
+    "    def visit_ClassDef(self, node):",
+    "        return self._strip(node)",
+    "tree = StripDocs().visit(tree)",
+    "print(ast.unparse(tree))",
+  ].join("\n");
+
+  try {
+    const result = spawnSync("python3", ["-c", script], {
+      input: cleaned,
+      encoding: "utf8",
+      maxBuffer: 2 * 1024 * 1024,
+      timeout: 8000,
+    });
+    if (result.status !== 0) {
+      const errText = String(result.stderr || result.stdout || "syntax error")
+        .split("\n")
+        .filter(Boolean)
+        .slice(0, 4)
+        .join(" | ");
+      return { code: null, error: errText || "syntax error", usedPython: true };
+    }
+    const out = normalizeMultilineText(result.stdout);
+    if (!out) {
+      return { code: null, error: "empty after unparse", usedPython: true };
+    }
+    return { code: out, error: null, usedPython: true };
+  } catch (error) {
+    return {
+      code: cleaned,
+      error: null,
+      usedPython: false,
+    };
+  }
+}
+
+async function generateLanguageCode({
+  companyName,
+  item,
+  language,
+  previous,
+  repairHint = "",
+}) {
   const question = compact(item?.question, 2500);
   const label = LANG_LABELS[language];
-  const previous = compact(item?.solutions?.[language], 2000);
+  const answerHint = compact(item?.answer, 1500);
+  const intuitionHint = compact(item?.intuition, 800);
+  const pythonRules =
+    language === "python"
+      ? [
+          "Python formatting is mandatory:",
+          "use exactly 4 spaces per indent level;",
+          "never put a suite on the same line after a colon;",
+          "never put two statements on one line;",
+          "elif/else must align with their matching if;",
+          "return/result statements must use the correct block indent;",
+          "no docstrings.",
+        ].join(" ")
+      : "Never return minified one-line code; indent with 2 or 4 spaces per block.";
+
   const parsed = await requestParsed(
     [
       {
         role: "system",
         content: [
-          `You write one ${label} interview solution for placement prep.`,
+          `You write one correct, compilable/runnable ${label} interview solution for placement prep.`,
           `Return only JSON: {"code":"full ${label} code"}`,
+          "The solution must be algorithmically correct for the stated problem, handle typical edge cases, and match the intended time/space approach when implied.",
+          "Do NOT include any comments: no // lines, no /* */ blocks, no # comments, and no docstrings or explanatory prose inside the code.",
+          "Prefer clear names over comments. Output code only.",
           "The code must be complete. Escape newlines inside the JSON string as \\n.",
-          "Never return minified one-line code; indent with 2 or 4 spaces per block.",
+          pythonRules,
           "Use the standard library only unless the problem requires otherwise.",
         ].join(" "),
       },
@@ -304,17 +549,28 @@ async function refillLanguage({ companyName, item, language }) {
         content: [
           `Company: ${companyName || "Unknown"}`,
           `Question:\n${question}`,
+          intuitionHint
+            ? `Intuition (follow this approach when consistent with a correct solution):\n${intuitionHint}`
+            : null,
+          answerHint
+            ? `Explanation / expected approach (use for correctness; do not paste as comments):\n${answerHint}`
+            : null,
           previous
-            ? `Rewrite only the ${label} solution. Previous ${label} code:\n${previous}`
-            : `Write a complete ${label} solution from scratch.`,
-          `Return complete, correctly indented ${label}.`,
-        ].join("\n\n"),
+            ? `Rewrite a complete, correctly indented ${label} solution. Fix logic bugs and indentation. Previous ${label} code (preserve intent, not broken formatting):\n${previous}`
+            : `Write a complete, correct ${label} solution from scratch.`,
+          repairHint
+            ? `Previous attempt was invalid. Fix it. Validator notes:\n${repairHint}`
+            : null,
+          `Return complete, correctly indented ${label} with zero comments. One statement per line.`,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
       },
     ],
     {
       apiKeySlot: GROQ_KEY_SLOTS.ADMIN,
-      temperature: 0.25,
-      reasoning_effort: "low",
+      temperature: repairHint ? 0.05 : 0.1,
+      reasoning_effort: "medium",
       include_reasoning: false,
       max_completion_tokens: await getLlmBudget("answers-coding"),
       response_format: jsonSchema("refilled_code", {
@@ -322,7 +578,62 @@ async function refillLanguage({ companyName, item, language }) {
       }),
     }
   );
-  const code = normalizeMultilineText(parsed?.code);
+  return stripCodeComments(normalizeMultilineText(parsed?.code), language);
+}
+
+async function refillLanguage({ companyName, item, language }) {
+  const label = LANG_LABELS[language];
+  // Must preserve indentation — compactSingleLine was collapsing Python/C++/Java
+  // solutions into one line and the model then emitted broken suites.
+  const previous = preserveCode(item?.solutions?.[language], 4000);
+
+  let code = await generateLanguageCode({
+    companyName,
+    item,
+    language,
+    previous,
+  });
+
+  if (language === "python") {
+    let result = finalizePythonSolution(code);
+
+    // Only retry when python3 is present and rejected the syntax.
+    if (!result.code && result.error && result.usedPython) {
+      code = await generateLanguageCode({
+        companyName,
+        item,
+        language,
+        previous: code || previous,
+        repairHint: [
+          "Python rejected the previous attempt with:",
+          result.error,
+          "Rewrite the full solution with valid 4-space indentation.",
+          "Never put statements after ':' on the same line.",
+          "elif/else must align with if; put return in the correct block.",
+        ].join(" "),
+      });
+      result = finalizePythonSolution(code);
+    }
+
+    // Last resort: ignore broken previous code and generate fresh.
+    if (!result.code && result.error && result.usedPython) {
+      code = await generateLanguageCode({
+        companyName,
+        item,
+        language,
+        previous: "",
+        repairHint:
+          "Write a brand-new valid Python solution from scratch. 4-space indents, one statement per line, no docstrings/comments.",
+      });
+      result = finalizePythonSolution(code);
+    }
+
+    // Prefer validated/reindented code; otherwise keep cleaned LLM output.
+    code = result.code || stripPythonDocstringsJs(
+      stripCodeComments(stripMarkdownFences(normalizeMultilineText(code)), "python")
+    );
+  }
+
   if (!code) {
     const err = new Error(`Refill returned empty ${label} code.`);
     err.status = 500;

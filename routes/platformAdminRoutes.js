@@ -10,6 +10,7 @@ import {
   parsePlatformPrepCsvText,
 } from "../services/platformPrepCsvImportService.js";
 import { fetchQuickLinksForPrepRoles } from "../services/platformPrepQuickLinksService.js";
+import { generatePrepRoleLinksSummaries } from "../services/platformPrepRoleSummariesService.js";
 import Submission from "../models/Submission.js";
 import User1 from "../models/User1.js";
 import PaymentOrder from "../models/PaymentOrder.js";
@@ -691,6 +692,25 @@ router.post("/companies/:id/interview-questions/fetch-quick-links", async (req, 
       console.error("[platform-admin] fetch quick links:", error?.message || error);
     }
     return res.status(status).json({ error: error?.message || "Quick links fetch failed." });
+  }
+});
+
+router.post("/companies/:id/interview-questions/generate-role-summaries", async (req, res) => {
+  try {
+    const result = await generatePrepRoleLinksSummaries({
+      companyId: req.params.id,
+      roles: req.body?.roles,
+    });
+    return res.status(201).json(result);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    if (status >= 500) {
+      console.error("[platform-admin] generate role summaries:", error?.message || error);
+    }
+    return res.status(status).json({
+      error: error?.message || "Role summary generation failed.",
+      code: error?.code || undefined,
+    });
   }
 });
 

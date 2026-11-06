@@ -19,7 +19,7 @@ ENV NODE_ENV=production
 # Install a modern Docker CLI from Docker's official Debian repository so it
 # remains compatible with newer host daemons exposed via /var/run/docker.sock.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+    && apt-get install -y --no-install-recommends ca-certificates curl gnupg python3 \
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
     && chmod a+r /etc/apt/keyrings/docker.asc \
