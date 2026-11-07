@@ -6,6 +6,7 @@ import {
   platformPrepCoverageFromDoc,
 } from "../utils/platformPrepCoverage.js";
 import { mapResearchSourceRoleRefs } from "../utils/researchSources.js";
+import { normalizeEnhanceCompletionDoc } from "./platformEnhanceCompletionService.js";
 
 function asObjectId(value) {
   try {
@@ -62,6 +63,7 @@ export async function attachPlatformPrepCoverageToCompanyList(list) {
       ...row,
       platformPrepCoverage: emptyCoverage(),
       platformPrepCoverageByRole: [],
+      platformEnhanceCompletion: normalizeEnhanceCompletionDoc(null),
       researchSources: [],
       prepRoles: [],
       onlineQuestions_prepRoleKey: [],
@@ -77,6 +79,7 @@ export async function attachPlatformPrepCoverageToCompanyList(list) {
       .select({
         companyId: 1,
         prepRoles: 1,
+        enhanceCompletion: 1,
         updatedAt: 1,
         createdAt: 1,
         "onlineQuestions.status": 1,
@@ -102,6 +105,7 @@ export async function attachPlatformPrepCoverageToCompanyList(list) {
       ...row,
       platformPrepCoverage: emptyCoverage(),
       platformPrepCoverageByRole: [],
+      platformEnhanceCompletion: normalizeEnhanceCompletionDoc(null),
       researchSources: [],
       prepRoles: [],
       onlineQuestions_prepRoleKey: [],
@@ -113,6 +117,7 @@ export async function attachPlatformPrepCoverageToCompanyList(list) {
   const coverageById = new Map();
   const coverageByRoleById = new Map();
   const sourcesById = new Map();
+  const enhanceById = new Map();
   const prepMetaById = new Map();
   for (const doc of Array.isArray(docs) ? docs : []) {
     const id = String(doc?.companyId || "");
@@ -120,6 +125,7 @@ export async function attachPlatformPrepCoverageToCompanyList(list) {
     coverageById.set(id, platformPrepCoverageFromDoc(doc));
     coverageByRoleById.set(id, platformPrepCoverageByRoleFromDoc(doc));
     sourcesById.set(id, mapResearchSourceRoleRefs(doc));
+    enhanceById.set(id, normalizeEnhanceCompletionDoc(doc?.enhanceCompletion));
     prepMetaById.set(id, {
       prepRoles: mapPrepRolesForClient(doc?.prepRoles),
       onlineQuestions_prepRoleKey: [
@@ -143,6 +149,8 @@ export async function attachPlatformPrepCoverageToCompanyList(list) {
       ...row,
       platformPrepCoverage: coverageById.get(id) || emptyCoverage(),
       platformPrepCoverageByRole: coverageByRoleById.get(id) || [],
+      platformEnhanceCompletion:
+        enhanceById.get(id) || normalizeEnhanceCompletionDoc(null),
       researchSources: sourcesById.get(id) || [],
       ...meta,
     };

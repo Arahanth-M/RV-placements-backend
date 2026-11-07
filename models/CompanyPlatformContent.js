@@ -165,6 +165,11 @@ const companyPlatformContentSchema = new mongoose.Schema(
     researchSources: { type: [researchSourceSchema], default: [] },
     prepRoles: { type: [prepRoleCatalogSchema], default: [] },
     researchLinksSummaries: { type: [researchLinksSummarySchema], default: [] },
+    /** Platform-admin enhance progress: { oa: {...}, interview: {...} }. */
+    enhanceCompletion: {
+      oa: { type: mongoose.Schema.Types.Mixed, default: {} },
+      interview: { type: mongoose.Schema.Types.Mixed, default: {} },
+    },
   },
   { timestamps: true }
 );

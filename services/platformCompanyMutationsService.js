@@ -112,10 +112,12 @@ function applyQuestionUpdate(item, body) {
       item.solutions && typeof item.solutions === "object" ? item.solutions : {};
     const next = {};
     for (const language of SOLUTION_LANGUAGES) {
-      next[language] =
+      // Keep real newlines / indentation for source code (do not flatten).
+      const incoming =
         body.solutions[language] !== undefined && body.solutions[language] !== null
-          ? normalizeSolutionText(body.solutions[language])
-          : normalizeSolutionText(previous[language]);
+          ? body.solutions[language]
+          : previous[language];
+      next[language] = normalizeSolutionText(incoming);
     }
     item.solutions = next;
   }

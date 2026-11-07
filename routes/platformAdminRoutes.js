@@ -62,7 +62,11 @@ import {
   updatePlatformMustDoByTopic,
   updatePlatformQuestion,
 } from "../services/platformCompanyMutationsService.js";
-import { enhancePlatformQuestionField } from "../services/enhancePlatformQuestionField.js";
+import {
+  enhancePlatformCompanyQuestionsAll,
+  enhancePlatformQuestionField,
+} from "../services/enhancePlatformQuestionField.js";
+import { updatePlatformEnhanceCompletion } from "../services/platformEnhanceCompletionService.js";
 import {
   clearRuntimeSecret,
   listRuntimeSecrets,
@@ -538,6 +542,45 @@ router.delete("/submissions/:id/delete", async (req, res) => {
   }
 });
 
+router.post("/companies/:id/oa-questions/enhance-all", async (req, res) => {
+  try {
+    const out = await enhancePlatformCompanyQuestionsAll({
+      companyId: req.params.id,
+      contentField: "onlineQuestions",
+    });
+    return res.json(out);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    if (status >= 500) {
+      console.error("[platform-admin] oa enhance-all:", error?.message || error);
+    }
+    return res.status(status).json({
+      error: error?.message || "Enhance all failed",
+      code: error?.code || undefined,
+    });
+  }
+});
+
+router.put("/companies/:id/enhance-completion", async (req, res) => {
+  try {
+    const out = await updatePlatformEnhanceCompletion({
+      companyId: req.params.id,
+      scope: req.body?.scope,
+      completion: req.body?.completion,
+    });
+    return res.json(out);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    if (status >= 500) {
+      console.error("[platform-admin] enhance-completion:", error?.message || error);
+    }
+    return res.status(status).json({
+      error: error?.message || "Failed to save enhance completion",
+      code: error?.code || undefined,
+    });
+  }
+});
+
 router.put("/companies/:id/oa-questions/:index", async (req, res) => {
   try {
     const out = await updatePlatformQuestion(
@@ -709,6 +752,25 @@ router.post("/companies/:id/interview-questions/generate-role-summaries", async 
     }
     return res.status(status).json({
       error: error?.message || "Role summary generation failed.",
+      code: error?.code || undefined,
+    });
+  }
+});
+
+router.post("/companies/:id/interview-questions/enhance-all", async (req, res) => {
+  try {
+    const out = await enhancePlatformCompanyQuestionsAll({
+      companyId: req.params.id,
+      contentField: "interviewQuestions",
+    });
+    return res.json(out);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    if (status >= 500) {
+      console.error("[platform-admin] interview enhance-all:", error?.message || error);
+    }
+    return res.status(status).json({
+      error: error?.message || "Enhance all failed",
       code: error?.code || undefined,
     });
   }

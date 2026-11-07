@@ -19,11 +19,27 @@ export const PLATFORM_ENHANCE_FIELDS = Object.freeze([
   "python",
 ]);
 
+/** Intuition + language refills only apply to coding/DSA questions. */
+export const PLATFORM_CODING_ONLY_ENHANCE_FIELDS = Object.freeze([
+  "intuition",
+  "cpp",
+  "java",
+  "python",
+]);
+
 const LANG_LABELS = Object.freeze({
   cpp: "C++",
   java: "Java",
   python: "Python",
 });
+
+function isCodingQuestion(item) {
+  return String(item?.kind || "").trim() === "coding";
+}
+
+function isCodingOnlyEnhanceField(field) {
+  return PLATFORM_CODING_ONLY_ENHANCE_FIELDS.includes(field);
+}
 
 function compact(value, max = 0) {
   const text = compactSingleLine(value);
@@ -628,10 +644,22 @@ async function refillLanguage({ companyName, item, language }) {
       result = finalizePythonSolution(code);
     }
 
-    // Prefer validated/reindented code; otherwise keep cleaned LLM output.
-    code = result.code || stripPythonDocstringsJs(
-      stripCodeComments(stripMarkdownFences(normalizeMultilineText(code)), "python")
-    );
+    // Prefer validated/reindented code. Do not persist broken LLM output when the
+    // validator rejected every attempt — that is how glued statements reach the UI.
+    if (result.code) {
+      code = result.code;
+    } else if (result.usedPython && result.error) {
+      const err = new Error(
+        `Refill produced invalid Python after retries (${result.error}).`
+      );
+      err.status = 500;
+      err.code = "enhance_failed";
+      throw err;
+    } else {
+      code = stripPythonDocstringsJs(
+        stripCodeComments(stripMarkdownFences(normalizeMultilineText(code)), "python")
+      );
+    }
   }
 
   if (!code) {
@@ -667,6 +695,20 @@ export async function enhancePlatformQuestionField(input = {}) {
   }
 
   const loaded = await loadQuestionItem(input.companyId, input.contentField, input.index);
+
+  // Explanation-only / non-coding items have no intuition or language solutions.
+  if (isCodingOnlyEnhanceField(field) && !isCodingQuestion(loaded.item)) {
+    return {
+      companyId: loaded.companyId,
+      contentField: loaded.contentField,
+      index: loaded.uiIndex,
+      field,
+      skipped: true,
+      reason: "not_coding",
+      message: `${field} skipped (not a coding question)`,
+    };
+  }
+
   let patch;
   if (field === "question") {
     patch = await enhanceQuestionText(loaded);
@@ -690,5 +732,107 @@ export async function enhancePlatformQuestionField(input = {}) {
     field,
     patch,
     message: `${field} updated`,
+  };
+}
+
+/**
+ * Enhance all supported fields for every approved OA/interview question on a company.
+ * Continues after individual field failures so one bad item does not abort the run.
+ * @param {{
+ *   companyId: string,
+ *   contentField: "onlineQuestions" | "interviewQuestions",
+ * }} input
+ */
+export async function enhancePlatformCompanyQuestionsAll(input = {}) {
+  const contentField = String(input.contentField || "").trim();
+  if (!["onlineQuestions", "interviewQuestions"].includes(contentField)) {
+    const err = new Error("Invalid question field");
+    err.status = 400;
+    throw err;
+  }
+  const oid = asObjectId(input.companyId);
+  if (!oid) {
+    const err = new Error("Invalid company id");
+    err.status = 400;
+    throw err;
+  }
+  const company = await CompanyStatic.findById(oid).select({ name: 1 }).lean();
+  if (!company) {
+    const err = new Error("Company not found");
+    err.status = 404;
+    throw err;
+  }
+  const doc = await CompanyPlatformContent.findOne({ companyId: oid }).lean();
+  const refs = approvedWithQuestion(doc?.[contentField]);
+  const companyId = String(oid);
+  const results = [];
+  let successCount = 0;
+  let failureCount = 0;
+  let skippedCount = 0;
+  let attempted = 0;
+
+  for (let uiIndex = 0; uiIndex < refs.length; uiIndex += 1) {
+    const coding = isCodingQuestion(refs[uiIndex]?.item);
+    for (const field of PLATFORM_ENHANCE_FIELDS) {
+      if (isCodingOnlyEnhanceField(field) && !coding) {
+        skippedCount += 1;
+        results.push({
+          index: uiIndex,
+          field,
+          ok: true,
+          skipped: true,
+          reason: "not_coding",
+        });
+        continue;
+      }
+      attempted += 1;
+      try {
+        const out = await enhancePlatformQuestionField({
+          companyId,
+          contentField,
+          index: uiIndex,
+          field,
+        });
+        if (out?.skipped) {
+          skippedCount += 1;
+          results.push({
+            index: uiIndex,
+            field,
+            ok: true,
+            skipped: true,
+            reason: out.reason || "skipped",
+          });
+          continue;
+        }
+        successCount += 1;
+        results.push({ index: uiIndex, field, ok: true });
+      } catch (error) {
+        failureCount += 1;
+        results.push({
+          index: uiIndex,
+          field,
+          ok: false,
+          error: error?.message || "Enhance failed",
+          code: error?.code || undefined,
+        });
+      }
+    }
+  }
+
+  return {
+    companyId,
+    contentField,
+    questionCount: refs.length,
+    fields: [...PLATFORM_ENHANCE_FIELDS],
+    attempted,
+    successCount,
+    failureCount,
+    skippedCount,
+    results,
+    message:
+      refs.length === 0
+        ? "No questions to enhance"
+        : `Enhanced ${successCount} of ${attempted} fields across ${refs.length} question(s)` +
+          (skippedCount > 0 ? ` (${skippedCount} coding-only field(s) skipped)` : ""),
   };
 }

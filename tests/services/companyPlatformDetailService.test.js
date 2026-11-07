@@ -50,8 +50,10 @@ describe("getCompanyPlatformDetailById", () => {
     });
     expect(payload.onlineQuestions_intuition[0]).toBe("hash map");
     expect(payload.onlineQuestions_explanation[0]).toBe("Use a hash map.");
+    expect(payload.onlineQuestions_kind).toEqual(["coding"]);
     expect(payload.interviewQuestions_explanation[0]).toBe("HTTP API style");
     expect(payload.interviewQuestions).toEqual(["What is REST?"]);
+    expect(payload.interviewQuestions_kind).toEqual(["non_coding"]);
     expect(payload.interviewProcess[0].content).toBe("Two rounds, then HR.");
     expect(payload.Must_Do_Topics).toContain("Arrays");
     expect(payload.prev_coding_ques).toEqual([]);

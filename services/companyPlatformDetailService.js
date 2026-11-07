@@ -7,6 +7,7 @@ import { prepareSourceCodeForDisplay } from "../utils/prepareSourceCodeForDispla
 import { mapResearchSourcesForClient } from "../utils/researchSources.js";
 import { mapResearchLinksSummariesForClient } from "../utils/researchLinksSummaries.js";
 import { platformPrepCoverageFromDoc } from "../utils/platformPrepCoverage.js";
+import { normalizeEnhanceCompletionDoc } from "./platformEnhanceCompletionService.js";
 
 function approvedItems(arr) {
   return (Array.isArray(arr) ? arr : []).filter(
@@ -183,6 +184,7 @@ export async function getCompanyPlatformDetailById(companyId) {
       ...mcqQuestions.map((item) => item.prepRoleKey),
     ],
     onlineQuestions_kind: oa.kinds,
+    interviewQuestions_kind: iq.kinds,
     prepRoles: Array.isArray(platform?.prepRoles)
       ? platform.prepRoles.map((row) => ({
           key: text(row?.key),
@@ -198,6 +200,7 @@ export async function getCompanyPlatformDetailById(companyId) {
     mcqQuestions,
     researchSources: mapResearchSourcesForClient(platform),
     platformPrepCoverage: platformPrepCoverageFromDoc(platform),
+    platformEnhanceCompletion: normalizeEnhanceCompletionDoc(platform?.enhanceCompletion),
     platformContentUpdatedAt: platform?.updatedAt || platform?.createdAt || null,
     placementYearsAvailable: [],
     roles: [],
@@ -224,6 +227,8 @@ const PAID_PLATFORM_DETAIL_KEYS = [
   "interviewQuestions_intuition",
   "interviewQuestions_explanation",
   "interviewQuestions_prepRoleKey",
+  "interviewQuestions_kind",
+
   "interviewProcess",
   "internshipExperience",
   "prev_coding_ques",
