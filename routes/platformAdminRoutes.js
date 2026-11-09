@@ -58,6 +58,7 @@ import {
   deletePlatformMustDoByTopic,
   deletePlatformQuestion,
   deletePlatformResearchSourceByUrl,
+  setCompanyVerified,
   updatePlatformExperience,
   updatePlatformMustDoByTopic,
   updatePlatformQuestion,
@@ -577,6 +578,29 @@ router.put("/companies/:id/enhance-completion", async (req, res) => {
     return res.status(status).json({
       error: error?.message || "Failed to save enhance completion",
       code: error?.code || undefined,
+    });
+  }
+});
+
+router.put("/companies/:id/verified", async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const payload = {};
+    if (typeof body.verified === "boolean") payload.verified = body.verified;
+    if (Object.prototype.hasOwnProperty.call(body, "notes")) {
+      payload.notes = body.notes;
+    } else if (Object.prototype.hasOwnProperty.call(body, "verifiedNotes")) {
+      payload.notes = body.verifiedNotes;
+    }
+    const out = await setCompanyVerified(req.params.id, payload);
+    return res.json(out);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    if (status >= 500) {
+      console.error("[platform-admin] company verified:", error?.message || error);
+    }
+    return res.status(status).json({
+      error: error?.message || "Failed to update company verification",
     });
   }
 });

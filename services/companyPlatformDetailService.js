@@ -2,8 +2,7 @@ import mongoose from "mongoose";
 import CompanyStatic from "../models/CompanyStatic.js";
 import CompanyPlatformContent from "../models/CompanyPlatformContent.js";
 import { getCompanyFocusTags } from "../utils/companyFocusTags.js";
-import { normalizeSolutionText } from "../utils/normalizeSolutionText.js";
-import { prepareSourceCodeForDisplay } from "../utils/prepareSourceCodeForDisplay.js";
+import { preserveStoredSourceForDisplay } from "../utils/prepareSourceCodeForDisplay.js";
 import { mapResearchSourcesForClient } from "../utils/researchSources.js";
 import { mapResearchLinksSummariesForClient } from "../utils/researchLinksSummaries.js";
 import { platformPrepCoverageFromDoc } from "../utils/platformPrepCoverage.js";
@@ -32,14 +31,15 @@ function mapQuestionArrays(items) {
     const question = text(item?.question);
     if (!question) continue;
     const sols = item?.solutions && typeof item.solutions === "object" ? item.solutions : {};
-    const cpp = prepareSourceCodeForDisplay(normalizeSolutionText(sols.cpp), "cpp");
-    const java = prepareSourceCodeForDisplay(normalizeSolutionText(sols.java), "java");
-    const python = prepareSourceCodeForDisplay(normalizeSolutionText(sols.python), "python");
-    const answer = normalizeSolutionText(item?.answer);
+    // Keep indentation/spacing exactly as stored in Mongo (no reflow/re-indent).
+    const cpp = preserveStoredSourceForDisplay(sols.cpp);
+    const java = preserveStoredSourceForDisplay(sols.java);
+    const python = preserveStoredSourceForDisplay(sols.python);
+    const answer = preserveStoredSourceForDisplay(item?.answer);
     questions.push(question);
     solutionsLegacy.push(cpp || java || python || answer);
     solutionsByLang.push({ cpp, java, python });
-    intuitions.push(text(item?.intuition));
+    intuitions.push(preserveStoredSourceForDisplay(item?.intuition));
     explanations.push(answer);
     prepRoleKeys.push(text(item?.prepRoleKey));
     kinds.push(text(item?.kind) || "non_coding");
@@ -167,6 +167,9 @@ export async function getCompanyPlatformDetailById(companyId) {
     "About The Company": staticRow.about,
     business_model: staticRow.business_model,
     helpfulCount: staticRow.helpfulCount || 0,
+    verified: staticRow.verified === true,
+    verifiedAt: staticRow.verifiedAt || null,
+    verifiedNotes: String(staticRow.verifiedNotes || "").trim(),
     contentSource: "platform",
     onlineQuestions: oa.questions,
     onlineQuestions_solution: oa.solutionsLegacy,

@@ -448,6 +448,15 @@ function needsIndentRestore(code, language = "") {
   return indented / lines.length < 0.15;
 }
 
+/**
+ * Show source exactly as stored. Only normalizes CRLF → LF.
+ * No trim, unescape, reflow, or indent rewrite.
+ */
+export function preserveStoredSourceForDisplay(raw) {
+  if (raw == null) return "";
+  return String(raw).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
 export function prepareSourceCodeForDisplay(raw, language) {
   const lang = String(language || "").toLowerCase();
   let str = String(raw ?? "").trim();

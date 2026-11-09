@@ -22,6 +22,11 @@ const companyStaticSchema = new mongoose.Schema(
     helpfulUsers: [{ type: String }],
     /** Student emails that requested more company details (one request per email). */
     detailRequestUsers: [{ type: String }],
+    /** Platform admin marked this company entry as reviewed/verified. */
+    verified: { type: Boolean, default: false },
+    verifiedAt: { type: Date, default: null },
+    /** Admin-only notes for verification review (editable any time). */
+    verifiedNotes: { type: String, trim: true, default: "" },
     submittedBy: submittedBySchema,
   },
   { timestamps: true }

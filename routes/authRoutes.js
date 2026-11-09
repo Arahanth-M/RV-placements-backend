@@ -72,6 +72,21 @@ const redirectToAuthCallback = (req, res, query) => {
 
 const JWT_COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
+/** Must match set + clear options or browsers keep the JWT after logout. */
+const tokenCookieOptions = (overrides = {}) => ({
+  httpOnly: true,
+  secure: config.NODE_ENV === "production",
+  sameSite: "lax",
+  path: "/",
+  ...overrides,
+});
+
+const clearTokenCookie = (res) => {
+  res.clearCookie("token", tokenCookieOptions());
+  // Extra expire for stubborn browsers / mismatched prior Set-Cookie attrs.
+  res.cookie("token", "", tokenCookieOptions({ maxAge: 0 }));
+};
+
 const setTokenCookie = (res, user, options = {}) => {
   if (!config.JWT_SECRET) {
     console.warn("JWT_SECRET is not set; skipping token cookie");
@@ -84,13 +99,11 @@ const setTokenCookie = (res, user, options = {}) => {
     previousLastLoginAt,
   });
   const token = jwt.sign(payload, config.JWT_SECRET, { expiresIn: "7d" });
-  res.cookie("token", token, {
-    httpOnly: true,
-    secure: config.NODE_ENV === "production",
-    sameSite: "lax",
-    maxAge: JWT_COOKIE_MAX_AGE_MS,
-    path: "/",
-  });
+  res.cookie(
+    "token",
+    token,
+    tokenCookieOptions({ maxAge: JWT_COOKIE_MAX_AGE_MS })
+  );
   console.log("JWT issued for user");
 };
 
@@ -133,10 +146,11 @@ router.get("/google", captureOAuthClientOrigin, (req, res, next) => {
   const googleOpts = {
     session: false,
     scope: ["profile", "email"],
+    // Default to account picker so an existing Google session cannot silently
+    // complete login. Callers may pass prompt=none only if they truly want SSO.
+    prompt:
+      String(req.query?.prompt || "select_account").trim() || "select_account",
   };
-  if (String(req.query?.prompt || "") === "select_account") {
-    googleOpts.prompt = "select_account";
-  }
   return passport.authenticate("google", googleOpts)(req, res, next);
 });
 
@@ -149,6 +163,8 @@ router.get("/google/admin", captureOAuthClientOrigin, (req, res, next) => {
   return passport.authenticate("google", {
     session: false,
     scope: ["profile", "email"],
+    prompt:
+      String(req.query?.prompt || "select_account").trim() || "select_account",
   })(req, res, next);
 });
 
@@ -435,8 +451,14 @@ router.get("/accounts", authJWT, async (req, res) => {
 });
 
 router.get("/logout", (req, res) => {
-  res.clearCookie("token", { path: "/" });
-  res.redirect(`${getClientBaseUrl(req)}?logout=success`);
+  clearTokenCookie(res);
+  const accept = String(req.get("Accept") || "");
+  // Axios logout sends Accept: application/json — avoid HTML redirect so the
+  // Set-Cookie clear is applied reliably on the XHR response.
+  if (accept.includes("application/json")) {
+    return res.status(200).json({ ok: true });
+  }
+  return res.redirect(`${getClientBaseUrl(req)}?logout=success`);
 });
 
 export default router;
