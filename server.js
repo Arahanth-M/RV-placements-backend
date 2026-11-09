@@ -6,7 +6,7 @@ import passport from "passport";
 import helmet from "helmet";
 import { connectDB } from "./config/db.js";
 import { connectRedis } from "./src/utils/redisClient.js";
-import { config, routes, messages } from "./config/constants.js";
+import { config, routes } from "./config/constants.js";
 import "./config/mongoCollections.js";
 import {
   globalLimiter,
@@ -61,8 +61,10 @@ app.use(
     origin: function (origin, callback) {
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
+      // Do not throw — cors Error callbacks become Express 500 HTML responses
+      // that the browser reports as failed POSTs (e.g. /api/billing/quote).
       console.log('🚫 CORS rejected origin:', origin);
-      callback(new Error(messages.ERROR.CORS_ERROR));
+      return callback(null, false);
     },
     credentials: true,
   })

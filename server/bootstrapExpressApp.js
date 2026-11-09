@@ -8,7 +8,7 @@ import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
 import passport from "passport";
 import helmet from "helmet";
-import { config, messages, routes } from "../config/constants.js";
+import { config, routes } from "../config/constants.js";
 import {
   globalLimiter,
   authLimiter,
@@ -38,8 +38,10 @@ export function applySharedHttpMiddleware(app, options = {}) {
       origin(origin, callback) {
         if (!origin) return callback(null, true);
         if (allowedOrigins.includes(origin)) return callback(null, true);
+        // Do not throw — cors Error callbacks become Express 500 HTML responses
+        // that the browser reports as failed POSTs (e.g. /api/billing/quote).
         console.log("🚫 CORS rejected origin:", origin);
-        callback(new Error(messages.ERROR.CORS_ERROR));
+        return callback(null, false);
       },
       credentials: true,
     })

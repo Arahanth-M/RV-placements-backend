@@ -6,6 +6,12 @@ const DEFAULT_CORS_ORIGINS = [
   "http://localhost:7778",
   "http://localhost:7777",
   "http://localhost:7779",
+  // Current public product domain
+  "http://onestopplacementprep.in",
+  "https://onestopplacementprep.in",
+  "http://www.onestopplacementprep.in",
+  "https://www.onestopplacementprep.in",
+  // Legacy campus domain (still in the wild for bookmarks / OAuth redirects)
   "http://lastminuteplacementprep.in",
   "https://lastminuteplacementprep.in",
   "http://www.lastminuteplacementprep.in",
@@ -47,7 +53,7 @@ export const config = {
   // URLs
   FRONTEND_URL: process.env.FRONTEND_URL || 'http://localhost:5173',
   BACKEND_URL: process.env.BACKEND_URL || 'http://localhost:7779',
-  PRODUCTION_DOMAIN: process.env.PRODUCTION_DOMAIN || 'lastminuteplacementprep.in',
+  PRODUCTION_DOMAIN: process.env.PRODUCTION_DOMAIN || 'onestopplacementprep.in',
   
   // Database
   MONGO_URI: process.env.MONGO_URI || 'mongodb://localhost:27017/rv-placements',

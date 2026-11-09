@@ -96,7 +96,10 @@ export const BILLING_PLANS = Object.freeze({
   },
 });
 
-/** Active SKUs whose list price is credited when buying the key plan. */
+/**
+ * Legacy upgrade-credit map (unused — checkout always charges full catalog
+ * list price + GST: 199 / 399 / 599). Kept so older notes/docs stay readable.
+ */
 export const PLAN_UPGRADE_OVERLAP = Object.freeze({
   [PLAN_IDS.ALL_PREMIUM]: [
     PLAN_IDS.ALL_CARDS,
@@ -159,14 +162,16 @@ export function paiseToInr(paise) {
 }
 
 /**
- * GST on a base INR amount. Tax is computed in paise then converted so
- * Razorpay order totals stay exact.
+ * GST on a base INR amount. Exact 18% is computed, then the payable total is
+ * rounded to the nearest rupee; GST is adjusted so base + GST = total.
  * @param {number} baseInr
  */
 export function applyGstOnInr(baseInr) {
   const basePaise = inrToPaise(Math.max(0, Number(baseInr) || 0));
-  const gstPaise = Math.round(basePaise * GST_RATE);
-  const totalPaise = basePaise + gstPaise;
+  const exactTotalPaise = Math.round(basePaise * (1 + GST_RATE));
+  // Round payable total to the nearest whole rupee (0 decimal places).
+  const totalPaise = Math.round(exactTotalPaise / 100) * 100;
+  const gstPaise = Math.max(0, totalPaise - basePaise);
   return {
     baseInr: paiseToInr(basePaise),
     gstInr: paiseToInr(gstPaise),
