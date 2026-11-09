@@ -70,7 +70,12 @@ export default async function authJWT(req, res, next) {
       testEmailAllowed = false;
     }
     if (!testEmailAllowed) {
-      res.clearCookie("token", { path: "/" });
+      res.clearCookie("token", {
+        path: "/",
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+      });
       return res.status(401).json({ error: PRODUCTION_LOGIN_MESSAGE });
     }
 

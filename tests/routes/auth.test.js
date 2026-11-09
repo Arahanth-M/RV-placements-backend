@@ -82,6 +82,15 @@ describe('Authentication Routes', () => {
 
       expect(response.headers.location).toMatch(/localhost|lastminuteplacementprep\.in/);
     });
+
+    it('should return JSON when Accept is application/json', async () => {
+      const response = await request(app)
+        .get('/api/auth/logout')
+        .set('Accept', 'application/json')
+        .expect(200);
+
+      expect(response.body).toEqual({ ok: true });
+    });
   });
 
   describe('JWT auth', () => {

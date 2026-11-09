@@ -297,3 +297,50 @@ export async function deletePlatformResearchSourceByUrl(companyId, url) {
   await saveDoc(oid, doc);
   return { message: "Link deleted" };
 }
+
+const VERIFIED_NOTES_MAX_LEN = 2000;
+
+function normalizeVerifiedNotes(value) {
+  return String(value ?? "").trim().slice(0, VERIFIED_NOTES_MAX_LEN);
+}
+
+/**
+ * Platform admin: update verification and/or verification notes.
+ * Pass `{ verified }` and/or `{ notes }` — at least one is required.
+ */
+export async function setCompanyVerified(companyId, payload = {}) {
+  const oid = asId(companyId);
+  if (!oid) {
+    const err = new Error("Invalid company id");
+    err.status = 400;
+    throw err;
+  }
+  const hasVerified = typeof payload?.verified === "boolean";
+  const hasNotes = Object.prototype.hasOwnProperty.call(payload || {}, "notes");
+  if (!hasVerified && !hasNotes) {
+    const err = new Error("Provide verified and/or notes");
+    err.status = 400;
+    throw err;
+  }
+  const staticRow = await CompanyStatic.findById(oid);
+  if (!staticRow) {
+    const err = new Error("Company not found");
+    err.status = 404;
+    throw err;
+  }
+  if (hasVerified) {
+    staticRow.verified = payload.verified;
+    staticRow.verifiedAt = payload.verified ? new Date() : null;
+  }
+  if (hasNotes) {
+    staticRow.verifiedNotes = normalizeVerifiedNotes(payload.notes);
+  }
+  await staticRow.save();
+  await invalidateCompanyDetailCache(String(oid));
+  return {
+    _id: staticRow._id,
+    verified: staticRow.verified === true,
+    verifiedAt: staticRow.verifiedAt || null,
+    verifiedNotes: String(staticRow.verifiedNotes || "").trim(),
+  };
+}

@@ -298,6 +298,9 @@ const STATIC_STORAGE_KEY_SET = new Set([
   "helpfulUsers",
   "nameKey",
   "submittedBy",
+  "verified",
+  "verifiedAt",
+  "verifiedNotes",
 ]);
 
 /** Legacy / API keys → `companies` field names (no value coercion). */
