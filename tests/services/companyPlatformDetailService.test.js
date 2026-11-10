@@ -59,6 +59,37 @@ describe("getCompanyPlatformDetailById", () => {
     expect(payload.prev_coding_ques).toEqual([]);
   });
 
+  it("maps codingQuestions without throwing on solution helpers", async () => {
+    const { staticRow } = await seedApprovedSplitCompany({
+      name: "Coding Bank Co",
+      business_model: "Fintech",
+      about: "Banking software.",
+    });
+    await CompanyPlatformContent.create({
+      companyId: staticRow._id,
+      codingQuestions: [
+        {
+          status: "approved",
+          question: { Title: "Reverse Linked List" },
+          intuition: "iterative pointers",
+          solutions: {
+            cpp: "ListNode* reverse(ListNode* h){return h;}",
+            java: "class S{ListNode reverse(ListNode h){return h;}}",
+            python: "def reverse(h):\n  return h",
+          },
+        },
+      ],
+    });
+
+    const payload = await getCompanyPlatformDetailById(String(staticRow._id));
+    expect(payload).not.toBeNull();
+    expect(payload.prev_coding_ques).toHaveLength(1);
+    expect(payload.prev_coding_ques[0].Title).toBe("Reverse Linked List");
+    expect(payload.prev_coding_ques[0].intuition).toBe("iterative pointers");
+    expect(payload.prev_coding_ques[0].solution_cpp).toContain("reverse");
+    expect(payload.prev_coding_ques[0].solution_python).toContain("def reverse");
+  });
+
   it("returns null for an unknown company id", async () => {
     const payload = await getCompanyPlatformDetailById("64b0f0f0f0f0f0f0f0f0f0f0");
     expect(payload).toBeNull();

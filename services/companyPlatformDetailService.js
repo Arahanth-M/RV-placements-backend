@@ -115,9 +115,10 @@ function mapCodingQuestions(items) {
     const intuition = text(item?.intuition || base.intuition);
     if (intuition) base.intuition = intuition;
     const sols = item?.solutions && typeof item.solutions === "object" ? item.solutions : {};
-    const cpp = prepareSourceCodeForDisplay(normalizeSolutionText(sols.cpp), "cpp");
-    const java = prepareSourceCodeForDisplay(normalizeSolutionText(sols.java), "java");
-    const python = prepareSourceCodeForDisplay(normalizeSolutionText(sols.python), "python");
+    // Same as OA/interview: keep stored indentation (do not reflow via prepareSourceCodeForDisplay).
+    const cpp = preserveStoredSourceForDisplay(sols.cpp);
+    const java = preserveStoredSourceForDisplay(sols.java);
+    const python = preserveStoredSourceForDisplay(sols.python);
     if (cpp) base.solution_cpp = cpp;
     if (java) base.solution_java = java;
     if (python) base.solution_python = python;
