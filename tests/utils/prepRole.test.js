@@ -4,6 +4,7 @@ import {
   normalizePrepRoleKey,
   prepRoleCatalogMissing,
   prepRoleScopedKey,
+  uniquePrepRoles,
 } from "../../utils/prepRole.js";
 
 describe("prepRole utils", () => {
@@ -32,5 +33,19 @@ describe("prepRole utils", () => {
     expect(
       prepRoleCatalogMissing([{ key: "sde", label: "SDE" }], { key: "sde", label: "SDE" })
     ).toBe(false);
+  });
+
+  it("dedupes catalog rows by key", () => {
+    expect(
+      uniquePrepRoles([
+        { key: "software-engineer", label: "Software Engineer" },
+        { key: "data-engineer", label: "Data Engineer" },
+        { key: "software-engineer", label: "Software Engineer" },
+        { key: "data-engineer", label: "Data Engineer" },
+      ])
+    ).toEqual([
+      { key: "software-engineer", label: "Software Engineer" },
+      { key: "data-engineer", label: "Data Engineer" },
+    ]);
   });
 });

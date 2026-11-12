@@ -125,6 +125,8 @@ function summaryWithoutPaidGrants() {
     prepPathUntil: null,
     behavioralCoach: false,
     behavioralCoachUntil: null,
+    peerSessions: false,
+    peerSessionsUntil: null,
     categories: {},
   };
 }
@@ -232,11 +234,36 @@ export async function getGeneralAccessSnapshot(userId, now = new Date(), user = 
     unlimitedMocks: summary.mocks,
     unlimitedPrepPath: summary.prepPath,
     unlimitedBehavioralCoach,
+    unlimitedPeerSessions: summary.peerSessions === true,
     isTestEmail: Boolean(grant),
     testEmailExpiresAt: grant?.expiresAt || null,
     testEmailDurationHours: grant ? Number(grant.durationHours) || null : null,
     freeChallengeRemaining: grant ? (challengeUsed ? 0 : 1) : null,
     freeBehavioralRemaining,
+  };
+}
+
+/**
+ * Peer sessions are All premium (₹599) only — no free tier.
+ */
+export async function evaluatePeerSessionAccess({ userId, user, now = new Date() }) {
+  if (isBillingAdmin(user)) {
+    return { allowed: true, bypass: true, snapshot: null };
+  }
+  const snapshot = await getGeneralAccessSnapshot(userId, now, user);
+  if (snapshot.unlimitedPeerSessions) {
+    return { allowed: true, bypass: false, snapshot };
+  }
+  return {
+    allowed: false,
+    bypass: false,
+    snapshot,
+    error: createPaywallError({
+      feature: PAYWALL_FEATURES.PEER_SESSIONS,
+      message:
+        "Peer sessions are included in All premium features. Unlock the ₹599 plan to create and join peer sessions.",
+      suggestedPlans: [PLAN_IDS.ALL_PREMIUM],
+    }),
   };
 }
 
@@ -342,7 +369,9 @@ export async function evaluatePrepPathAccess({ userId, companyId, user, now = ne
 export function alreadyOwnsPlan(summary, planId, categoryId = "") {
   const id = String(planId || "").trim();
   if (id === PLAN_IDS.ALL_PREMIUM) {
-    return Boolean(summary.allCards && summary.mocks && summary.prepPath);
+    return Boolean(
+      summary.allCards && summary.mocks && summary.prepPath && summary.peerSessions
+    );
   }
   if (id === PLAN_IDS.ALL_CARDS) return Boolean(summary.allCards);
   if (id === PLAN_IDS.MOCKS) return Boolean(summary.mocks);

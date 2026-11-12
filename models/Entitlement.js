@@ -15,6 +15,7 @@ const entitlementSchema = new mongoose.Schema(
       mocks: { type: Boolean, default: false },
       prepPath: { type: Boolean, default: false },
       behavioralCoach: { type: Boolean, default: false },
+      peerSessions: { type: Boolean, default: false },
     },
     startsAt: { type: Date, required: true },
     expiresAt: { type: Date, required: true, index: true },

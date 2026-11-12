@@ -44,8 +44,9 @@ export const interviewStartSchema = Joi.object({
           .valid(...PLATFORM_INTERVIEW_ROUND_TYPES)
           .required(),
         difficulty: Joi.string().valid("easy", "medium", "hard").required(),
-        focus: Joi.string().trim().max(120).optional(),
-        about: Joi.string().trim().max(120).optional(),
+        // bank:<encodeURIComponent(label)> can exceed 120 when labels have spaces
+        focus: Joi.string().trim().max(400).optional(),
+        about: Joi.string().trim().max(400).optional(),
       })
     )
     .required(),

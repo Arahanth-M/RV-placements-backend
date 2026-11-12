@@ -6,6 +6,7 @@ import { preserveStoredSourceForDisplay } from "../utils/prepareSourceCodeForDis
 import { mapResearchSourcesForClient } from "../utils/researchSources.js";
 import { mapResearchLinksSummariesForClient } from "../utils/researchLinksSummaries.js";
 import { platformPrepCoverageFromDoc } from "../utils/platformPrepCoverage.js";
+import { uniquePrepRoles } from "../utils/prepRole.js";
 import { normalizeEnhanceCompletionDoc } from "./platformEnhanceCompletionService.js";
 
 function approvedItems(arr) {
@@ -189,12 +190,7 @@ export async function getCompanyPlatformDetailById(companyId) {
     ],
     onlineQuestions_kind: oa.kinds,
     interviewQuestions_kind: iq.kinds,
-    prepRoles: Array.isArray(platform?.prepRoles)
-      ? platform.prepRoles.map((row) => ({
-          key: text(row?.key),
-          label: text(row?.label) || text(row?.key) || "General",
-        }))
-      : [],
+    prepRoles: uniquePrepRoles(platform?.prepRoles),
     researchLinksSummaries: mapResearchLinksSummariesForClient(platform),
     interviewProcess,
     internshipExperience,

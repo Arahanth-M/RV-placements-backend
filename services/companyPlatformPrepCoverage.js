@@ -5,6 +5,7 @@ import {
   platformPrepCoverageByRoleFromDoc,
   platformPrepCoverageFromDoc,
 } from "../utils/platformPrepCoverage.js";
+import { uniquePrepRoles } from "../utils/prepRole.js";
 import { mapResearchSourceRoleRefs } from "../utils/researchSources.js";
 import { normalizeEnhanceCompletionDoc } from "./platformEnhanceCompletionService.js";
 
@@ -35,12 +36,7 @@ function prepRoleKeysFromQuestions(items) {
 }
 
 function mapPrepRolesForClient(prepRoles) {
-  return (Array.isArray(prepRoles) ? prepRoles : [])
-    .map((row) => ({
-      key: String(row?.key ?? "").trim(),
-      label: String(row?.label ?? row?.key ?? "").trim() || "General",
-    }))
-    .filter((row) => row.key);
+  return uniquePrepRoles(prepRoles);
 }
 
 /**

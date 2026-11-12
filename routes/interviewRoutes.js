@@ -116,6 +116,7 @@ import {
   evaluateBehavioralCoachAccess,
   evaluateCompanyCardAccess,
   evaluateMockAccess,
+  evaluatePeerSessionAccess,
   evaluateTestEmailOnceFeature,
   getGeneralAccessSnapshot,
   createPaywallError,
@@ -189,8 +190,7 @@ const visibleTestCasesFromDoc = (testCases) =>
 
 const toClientStatus = (state, abandonedAt = null) => {
   if (state === INTERVIEW_STATES.INTERVIEW_COMPLETE) return "completed";
-  // Incomplete sessions are treated as exited mid-way in My Interviews history.
-  if (abandonedAt || state !== INTERVIEW_STATES.INTERVIEW_COMPLETE) return "abandoned";
+  if (abandonedAt) return "abandoned";
   return "in_progress";
 };
 
@@ -1514,6 +1514,15 @@ router.post("/run-preview", validateRequest(interviewRunPreviewSchema), async (r
     });
   } catch (error) {
     console.error("[runPreview] failed", error?.message || error);
+    const message = String(error?.message || "");
+    if (/\[image-pull\] timed out/i.test(message) || /runtime image/i.test(message)) {
+      return res.status(503).json({
+        success: false,
+        message:
+          "Code runtime image is still downloading. Wait a minute and try Run again (first C++/Java/Python setup on this machine can take longer).",
+        code: "RUNTIME_IMAGE_NOT_READY",
+      });
+    }
     return res.status(500).json({ success: false, message: "Failed to run preview." });
   }
 });
@@ -2357,6 +2366,9 @@ router.get("/behavioral-coach/analytics", async (req, res) => {
 function mapPeerSessionError(res, error) {
   const code = error?.code;
   const status = error?.status || 400;
+  if (code === PAYWALL_CODE) {
+    return res.status(402).json(paywallPayload(error));
+  }
   if (code === "UNAUTHORIZED") {
     return res.status(401).json({ error: error.message, code });
   }
@@ -2370,6 +2382,20 @@ function mapPeerSessionError(res, error) {
     return res.status(status).json({ error: error.message, code });
   }
   return null;
+}
+
+async function requirePeerSessionAccess(req, res) {
+  const userId = String(req.user?.userId || req.user?._id || "").trim();
+  if (!userId) {
+    res.status(401).json({ error: "Unauthorized", code: "UNAUTHORIZED" });
+    return null;
+  }
+  const access = await evaluatePeerSessionAccess({ userId, user: req.user });
+  if (!access.allowed) {
+    res.status(402).json(paywallPayload(access.error));
+    return null;
+  }
+  return access;
 }
 
 router.get("/peer-sessions/types", (_req, res) => {
@@ -2386,6 +2412,7 @@ router.get("/peer-sessions/types", (_req, res) => {
 
 router.get("/peer-sessions/open", async (req, res) => {
   try {
+    if (!(await requirePeerSessionAccess(req, res))) return undefined;
     const sessions = await listOpenPeerSessions({
       user: req.user,
       sessionType: req.query?.sessionType,
@@ -2400,6 +2427,7 @@ router.get("/peer-sessions/open", async (req, res) => {
 
 router.get("/peer-sessions/mine", async (req, res) => {
   try {
+    if (!(await requirePeerSessionAccess(req, res))) return undefined;
     const sessions = await listMyPeerSessions({ user: req.user });
     return res.json({ success: true, sessions });
   } catch (error) {
@@ -2411,6 +2439,7 @@ router.get("/peer-sessions/mine", async (req, res) => {
 
 router.get("/peer-sessions/by-code/:inviteCode", async (req, res) => {
   try {
+    if (!(await requirePeerSessionAccess(req, res))) return undefined;
     const session = await findPeerSessionByInviteCode({
       user: req.user,
       inviteCode: req.params.inviteCode,
@@ -2425,6 +2454,7 @@ router.get("/peer-sessions/by-code/:inviteCode", async (req, res) => {
 
 router.get("/peer-sessions/:sessionId", async (req, res) => {
   try {
+    if (!(await requirePeerSessionAccess(req, res))) return undefined;
     const session = await getPeerSession({
       user: req.user,
       sessionId: req.params.sessionId,
@@ -2442,6 +2472,7 @@ router.post(
   validateRequest(peerSessionCreateSchema),
   async (req, res) => {
     try {
+      if (!(await requirePeerSessionAccess(req, res))) return undefined;
       const session = await createPeerSession({
         user: req.user,
         sessionType: req.body.sessionType,
@@ -2467,6 +2498,7 @@ router.post(
   validateRequest(peerSessionJoinSchema),
   async (req, res) => {
     try {
+      if (!(await requirePeerSessionAccess(req, res))) return undefined;
       const session = await requestJoinPeerSession({
         user: req.user,
         sessionId: req.body.sessionId,
@@ -2487,6 +2519,7 @@ router.post(
   validateRequest(peerSessionRequestActionSchema),
   async (req, res) => {
     try {
+      if (!(await requirePeerSessionAccess(req, res))) return undefined;
       const session = await acceptJoinRequest({
         user: req.user,
         sessionId: req.params.sessionId,
@@ -2506,6 +2539,7 @@ router.post(
   validateRequest(peerSessionRequestActionSchema),
   async (req, res) => {
     try {
+      if (!(await requirePeerSessionAccess(req, res))) return undefined;
       const session = await rejectJoinRequest({
         user: req.user,
         sessionId: req.params.sessionId,
@@ -2522,6 +2556,7 @@ router.post(
 
 router.post("/peer-sessions/:sessionId/cancel-request", async (req, res) => {
   try {
+    if (!(await requirePeerSessionAccess(req, res))) return undefined;
     const session = await cancelJoinRequest({
       user: req.user,
       sessionId: req.params.sessionId,
@@ -2536,6 +2571,7 @@ router.post("/peer-sessions/:sessionId/cancel-request", async (req, res) => {
 
 router.post("/peer-sessions/:sessionId/cancel", async (req, res) => {
   try {
+    if (!(await requirePeerSessionAccess(req, res))) return undefined;
     const session = await cancelPeerSession({
       user: req.user,
       sessionId: req.params.sessionId,
@@ -2550,6 +2586,7 @@ router.post("/peer-sessions/:sessionId/cancel", async (req, res) => {
 
 router.post("/peer-sessions/:sessionId/leave", async (req, res) => {
   try {
+    if (!(await requirePeerSessionAccess(req, res))) return undefined;
     const session = await leavePeerSession({
       user: req.user,
       sessionId: req.params.sessionId,

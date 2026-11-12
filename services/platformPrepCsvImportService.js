@@ -55,7 +55,7 @@ function normalizeKind(raw) {
 
 /**
  * Validate one CSV row into a staging question item.
- * Coding rows require intuition + cpp/java/python solutions.
+ * Coding intuition + language solutions are optional (can be filled later / via enhance).
  * @param {Record<string, unknown>} row
  * @param {number} rowNumber
  */
@@ -82,21 +82,6 @@ export function parsePlatformPrepCsvRow(row, rowNumber) {
   }
   if (!answer) {
     throw new Error(`Row ${rowNumber}: answer is required.`);
-  }
-
-  if (kind === "coding") {
-    if (!intuition) {
-      throw new Error(`Row ${rowNumber}: intuition is required for coding questions.`);
-    }
-    if (!solutions.cpp) {
-      throw new Error(`Row ${rowNumber}: solutions_cpp is required for coding questions.`);
-    }
-    if (!solutions.java) {
-      throw new Error(`Row ${rowNumber}: solutions_java is required for coding questions.`);
-    }
-    if (!solutions.python) {
-      throw new Error(`Row ${rowNumber}: solutions_python is required for coding questions.`);
-    }
   }
 
   const { key: prepRoleKey, label: prepRoleLabel } = normalizePrepRoleKey(roleRaw);
@@ -372,21 +357,6 @@ export function normalizeFinalizeItems(rawItems) {
     }
     if (!answer) {
       throw Object.assign(new Error(`Item ${rowNumber}: answer is required.`), { status: 400 });
-    }
-    if (kind === "coding") {
-      if (!intuition) {
-        throw Object.assign(new Error(`Item ${rowNumber}: intuition is required for coding questions.`), {
-          status: 400,
-        });
-      }
-      if (!solutions.cpp || !solutions.java || !solutions.python) {
-        throw Object.assign(
-          new Error(
-            `Item ${rowNumber}: solutions_cpp, solutions_java, and solutions_python are required for coding questions.`
-          ),
-          { status: 400 }
-        );
-      }
     }
 
     const roleLabelSource = compact(raw?.prepRoleLabel) || compact(raw?.role);

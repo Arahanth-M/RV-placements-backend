@@ -66,8 +66,57 @@ describe("billing access helpers", () => {
       alreadyOwnsPlan({ allCards: true, mocks: true, prepPath: false, categories: {} }, PLAN_IDS.ALL_PREMIUM)
     ).toBe(false);
     expect(
-      alreadyOwnsPlan({ allCards: true, mocks: true, prepPath: true, categories: {} }, PLAN_IDS.ALL_PREMIUM)
+      alreadyOwnsPlan(
+        { allCards: true, mocks: true, prepPath: true, peerSessions: false, categories: {} },
+        PLAN_IDS.ALL_PREMIUM
+      )
+    ).toBe(false);
+    expect(
+      alreadyOwnsPlan(
+        { allCards: true, mocks: true, prepPath: true, peerSessions: true, categories: {} },
+        PLAN_IDS.ALL_PREMIUM
+      )
     ).toBe(true);
+  });
+
+  it("unlocks peer sessions for All premium plan entitlements", () => {
+    const now = new Date();
+    const later = new Date(now.getTime() + 86400000);
+    const summary = summarizeEntitlements(
+      [
+        {
+          planId: PLAN_IDS.ALL_PREMIUM,
+          grants: { allCards: true, mocks: true, prepPath: true, peerSessions: true },
+          expiresAt: later,
+        },
+      ],
+      now
+    );
+    expect(summary.peerSessions).toBe(true);
+
+    const legacy = summarizeEntitlements(
+      [
+        {
+          planId: PLAN_IDS.ALL_PREMIUM,
+          grants: { allCards: true, mocks: true, prepPath: true },
+          expiresAt: later,
+        },
+      ],
+      now
+    );
+    expect(legacy.peerSessions).toBe(true);
+
+    const mocksOnly = summarizeEntitlements(
+      [
+        {
+          planId: PLAN_IDS.MOCKS,
+          grants: { allCards: true, mocks: true, prepPath: false, peerSessions: false },
+          expiresAt: later,
+        },
+      ],
+      now
+    );
+    expect(mocksOnly.peerSessions).toBe(false);
   });
 
   it("unlocks behavioural coach for category or all-cards entitlements", () => {

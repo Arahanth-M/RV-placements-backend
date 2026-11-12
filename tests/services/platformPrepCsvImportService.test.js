@@ -4,38 +4,23 @@ import {
 } from "../../services/platformPrepCsvImportService.js";
 
 describe("parsePlatformPrepCsvRow", () => {
-  it("requires coding intuition and all three language solutions", () => {
-    expect(() =>
-      parsePlatformPrepCsvRow(
-        {
-          role: "SDE",
-          kind: "coding",
-          question: "LRU Cache",
-          answer: "Use hashmap + list",
-          intuition: "",
-          solutions_cpp: "cpp",
-          solutions_java: "java",
-          solutions_python: "python",
-        },
-        2
-      )
-    ).toThrow(/intuition is required/i);
-
-    expect(() =>
-      parsePlatformPrepCsvRow(
-        {
-          role: "SDE",
-          kind: "coding",
-          question: "LRU Cache",
-          answer: "Use hashmap + list",
-          intuition: "evict LRU",
-          solutions_cpp: "cpp",
-          solutions_java: "",
-          solutions_python: "python",
-        },
-        2
-      )
-    ).toThrow(/solutions_java is required/i);
+  it("allows coding rows without intuition or language solutions", () => {
+    const item = parsePlatformPrepCsvRow(
+      {
+        role: "SDE",
+        kind: "coding",
+        question: "LRU Cache",
+        answer: "Use hashmap + list",
+        intuition: "",
+        solutions_cpp: "",
+        solutions_java: "",
+        solutions_python: "",
+      },
+      2
+    );
+    expect(item.kind).toBe("coding");
+    expect(item.intuition).toBe("");
+    expect(item.solutions).toEqual({ cpp: "", java: "", python: "" });
   });
 
   it("accepts a complete coding row", () => {
@@ -77,19 +62,19 @@ describe("parsePlatformPrepCsvRow", () => {
 });
 
 describe("normalizeFinalizeItems", () => {
-  it("rejects coding items missing a language solution", () => {
-    expect(() =>
-      normalizeFinalizeItems([
-        {
-          prepRoleKey: "sde",
-          prepRoleLabel: "SDE",
-          kind: "coding",
-          question: "Two Sum",
-          answer: "Hash map",
-          intuition: "store complements",
-          solutions: { cpp: "a", java: "b", python: "" },
-        },
-      ])
-    ).toThrow(/solutions_cpp, solutions_java, and solutions_python are required/i);
+  it("accepts coding items with empty language solutions", () => {
+    const items = normalizeFinalizeItems([
+      {
+        prepRoleKey: "sde",
+        prepRoleLabel: "SDE",
+        kind: "coding",
+        question: "Two Sum",
+        answer: "Hash map",
+        intuition: "",
+        solutions: { cpp: "", java: "", python: "" },
+      },
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0].solutions).toEqual({ cpp: "", java: "", python: "" });
   });
 });

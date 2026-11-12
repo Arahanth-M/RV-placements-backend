@@ -6,7 +6,7 @@ import { connectRedis, redisUrl } from "../src/utils/redisClient.js";
 import { connectDB } from "../config/db.js";
 import { config } from "../config/constants.js";
 import { EXECUTION_QUEUE, EXECUTE_DSA } from "../services/queues/executionQueue.js";
-import { executeCode } from "../services/codeExecution/executeCode.js";
+import { executeCode, warmExecutionRuntimeImages } from "../services/codeExecution/executeCode.js";
 
 await connectDB(config.MONGO_URI);
 await connectRedis().catch(() => {});
@@ -18,6 +18,12 @@ console.log("[executionWorker] worker startup", {
   queue: EXECUTION_QUEUE,
   concurrency,
 });
+
+if (process.env.EXECUTION_WARM_IMAGES !== "0") {
+  warmExecutionRuntimeImages().catch((error) => {
+    console.error("[executionWorker] runtime image warm failed", error?.message || error);
+  });
+}
 
 const processor = async (job) => {
   const jobName = job?.name;

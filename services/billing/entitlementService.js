@@ -1,5 +1,9 @@
 import Entitlement from "../../models/Entitlement.js";
-import { BILLING_DURATION_MONTHS, getBillingPlan } from "../../config/billingPlans.js";
+import {
+  BILLING_DURATION_MONTHS,
+  PLAN_IDS,
+  getBillingPlan,
+} from "../../config/billingPlans.js";
 
 export function addMonths(date, months) {
   const d = new Date(date);
@@ -25,6 +29,7 @@ export function summarizeEntitlements(rows, now = new Date()) {
   let mocksUntil = null;
   let prepPathUntil = null;
   let behavioralCoachUntil = null;
+  let peerSessionsUntil = null;
   const categories = {};
 
   const later = (current, next) => {
@@ -46,6 +51,10 @@ export function summarizeEntitlements(rows, now = new Date()) {
     if (row.grants?.behavioralCoach || row.grants?.allCards || row.grants?.mocks || row.grants?.prepPath) {
       behavioralCoachUntil = later(behavioralCoachUntil, row.expiresAt);
     }
+    // Explicit grant, or legacy All premium purchases before peerSessions existed on grants.
+    if (row.grants?.peerSessions || row.planId === PLAN_IDS.ALL_PREMIUM) {
+      peerSessionsUntil = later(peerSessionsUntil, row.expiresAt);
+    }
     const categoryId = String(row.categoryId || "").trim();
     if (categoryId) {
       categories[categoryId] = later(categories[categoryId] || null, row.expiresAt);
@@ -63,6 +72,8 @@ export function summarizeEntitlements(rows, now = new Date()) {
     prepPathUntil,
     behavioralCoach: Boolean(behavioralCoachUntil),
     behavioralCoachUntil,
+    peerSessions: Boolean(peerSessionsUntil),
+    peerSessionsUntil,
     categories,
   };
 }
@@ -102,6 +113,7 @@ export async function grantEntitlementFromPlan({
       mocks: Boolean(plan.grants.mocks),
       prepPath: Boolean(plan.grants.prepPath),
       behavioralCoach: Boolean(plan.grants.behavioralCoach),
+      peerSessions: Boolean(plan.grants.peerSessions),
     },
     startsAt,
     expiresAt,

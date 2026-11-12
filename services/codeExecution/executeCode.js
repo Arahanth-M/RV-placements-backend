@@ -69,14 +69,21 @@ const DOCKER_CPU_LIMIT_CPP =
   DOCKER_CPU_LIMIT;
 const DOCKER_PIDS_LIMIT = "64";
 export const DOCKER_IMAGE_PYTHON = process.env.EXECUTION_PYTHON_IMAGE || "python:3.11";
-const DOCKER_IMAGE_CPP = process.env.EXECUTION_CPP_IMAGE || "gcc:13-bookworm";
-const DOCKER_IMAGE_JAVA = process.env.EXECUTION_JAVA_IMAGE || "eclipse-temurin:17-jdk";
+export const DOCKER_IMAGE_CPP = process.env.EXECUTION_CPP_IMAGE || "gcc:13-bookworm";
+export const DOCKER_IMAGE_JAVA = process.env.EXECUTION_JAVA_IMAGE || "eclipse-temurin:17-jdk";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** Cached presence of runtime images after successful inspect or pull. */
 const dockerImageReady = new Map();
 /** Singleflight: concurrent callers await the same pull/inspect promise per image. */
 const dockerImagePullInflight = new Map();
+
+/** Images needed for interview / practice DSA preview + submit execution. */
+export const EXECUTION_RUNTIME_IMAGES = [
+  DOCKER_IMAGE_PYTHON,
+  DOCKER_IMAGE_CPP,
+  DOCKER_IMAGE_JAVA,
+];
 
 export const normalizeExecutionLanguage = (language) => {
   const raw = language == null ? "" : String(language).trim();
@@ -786,6 +793,51 @@ export const ensureDockerImage = async (dockerImage) => {
   } finally {
     dockerImagePullInflight.delete(dockerImage);
   }
+};
+
+/**
+ * Best-effort pre-pull of Python/C++/Java runtime images so the first user
+ * preview does not hit a multi-minute cold pull (which times out in the browser).
+ */
+export const warmExecutionRuntimeImages = async ({
+  images = EXECUTION_RUNTIME_IMAGES,
+  parallel = true,
+} = {}) => {
+  const list = (Array.isArray(images) ? images : [])
+    .map((image) => String(image || "").trim())
+    .filter(Boolean);
+  if (!list.length) return { ok: true, warmed: [], failed: [] };
+
+  console.log("[executeCode] warming runtime images", { images: list, parallel });
+  const warmed = [];
+  const failed = [];
+
+  const warmOne = async (image) => {
+    try {
+      await ensureDockerImage(image);
+      warmed.push(image);
+    } catch (error) {
+      failed.push({ image, error: error?.message || String(error) });
+      console.error("[executeCode] runtime image warm failed", {
+        image,
+        error: error?.message || error,
+      });
+    }
+  };
+
+  if (parallel) {
+    await Promise.all(list.map((image) => warmOne(image)));
+  } else {
+    for (const image of list) {
+      await warmOne(image);
+    }
+  }
+
+  console.log("[executeCode] runtime image warm complete", {
+    warmedCount: warmed.length,
+    failedCount: failed.length,
+  });
+  return { ok: failed.length === 0, warmed, failed };
 };
 
 const runDockerCommand = ({ args, timeoutMs = 30000, killSignal = "SIGKILL" }) =>

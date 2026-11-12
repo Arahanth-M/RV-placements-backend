@@ -81,6 +81,33 @@ async function saveDoc(oid, doc) {
 }
 
 const SOLUTION_LANGUAGES = ["cpp", "java", "python"];
+const QUESTION_KINDS = new Set(["coding", "non_coding", "sql"]);
+const MCQ_OPTION_IDS = ["A", "B", "C", "D"];
+
+function normalizeQuestionKind(raw) {
+  const value = text(raw).toLowerCase().replace(/[\s-]+/g, "_");
+  if (value === "noncoding" || value === "non_coding" || value === "theory" || value === "hr") {
+    return "non_coding";
+  }
+  if (value === "coding" || value === "dsa" || value === "code") return "coding";
+  if (value === "sql") return "sql";
+  return "";
+}
+
+function buildSolutionsFromBody(body, previous = {}) {
+  const hasStructuredSolutions =
+    body?.solutions && typeof body.solutions === "object" && !Array.isArray(body.solutions);
+  const next = {};
+  for (const language of SOLUTION_LANGUAGES) {
+    const incoming = hasStructuredSolutions
+      ? body.solutions[language] !== undefined && body.solutions[language] !== null
+        ? body.solutions[language]
+        : previous[language]
+      : previous[language];
+    next[language] = normalizeSolutionText(incoming);
+  }
+  return next;
+}
 
 function applyQuestionUpdate(item, body) {
   if (!item || !body || typeof body !== "object") return;
@@ -92,6 +119,18 @@ function applyQuestionUpdate(item, body) {
       throw err;
     }
     item.question = question;
+  }
+  if (body.kind !== undefined && body.kind !== null) {
+    const kind = normalizeQuestionKind(body.kind);
+    if (!QUESTION_KINDS.has(kind)) {
+      const err = new Error("kind must be coding, non_coding, or sql");
+      err.status = 400;
+      throw err;
+    }
+    item.kind = kind;
+  }
+  if (body.prepRoleKey !== undefined && body.prepRoleKey !== null) {
+    item.prepRoleKey = text(body.prepRoleKey).slice(0, 80);
   }
   const hasStructuredSolutions =
     body.solutions && typeof body.solutions === "object" && !Array.isArray(body.solutions);
@@ -108,19 +147,165 @@ function applyQuestionUpdate(item, body) {
     item.intuition = normalizeSolutionText(body.intuition);
   }
   if (hasStructuredSolutions) {
-    const previous =
-      item.solutions && typeof item.solutions === "object" ? item.solutions : {};
-    const next = {};
-    for (const language of SOLUTION_LANGUAGES) {
-      // Keep real newlines / indentation for source code (do not flatten).
-      const incoming =
-        body.solutions[language] !== undefined && body.solutions[language] !== null
-          ? body.solutions[language]
-          : previous[language];
-      next[language] = normalizeSolutionText(incoming);
-    }
-    item.solutions = next;
+    item.solutions = buildSolutionsFromBody(body, item.solutions);
   }
+}
+
+function buildQuestionItemFromBody(body) {
+  const question = text(body?.question);
+  if (!question) {
+    const err = new Error("Question is required");
+    err.status = 400;
+    throw err;
+  }
+  const kind = normalizeQuestionKind(body?.kind) || "non_coding";
+  if (!QUESTION_KINDS.has(kind)) {
+    const err = new Error("kind must be coding, non_coding, or sql");
+    err.status = 400;
+    throw err;
+  }
+  const explanation =
+    body?.explanation !== undefined && body?.explanation !== null
+      ? body.explanation
+      : body?.answer !== undefined && body?.answer !== null
+        ? body.answer
+        : body?.solution;
+  const item = {
+    prepRoleKey: text(body?.prepRoleKey).slice(0, 80),
+    kind,
+    question,
+    answer: normalizeSolutionText(explanation),
+    intuition: normalizeSolutionText(body?.intuition),
+    status: "approved",
+    approvedAt: new Date(),
+  };
+  if (kind === "coding") {
+    item.solutions = buildSolutionsFromBody(body, {});
+  }
+  return item;
+}
+
+function approvedMcqs(items) {
+  const refs = [];
+  const list = Array.isArray(items) ? items : [];
+  for (let i = 0; i < list.length; i += 1) {
+    const item = list[i];
+    if (item?.status && item.status !== "approved") continue;
+    if (!text(item?.question)) continue;
+    refs.push({ arrayIndex: i });
+  }
+  return refs;
+}
+
+function normalizeMcqOptionsFromBody(body) {
+  const fromArray = Array.isArray(body?.options) ? body.options : null;
+  const options = [];
+  for (const id of MCQ_OPTION_IDS) {
+    let optionText = "";
+    if (fromArray) {
+      const hit = fromArray.find(
+        (opt) => String(opt?.id || "").trim().toUpperCase() === id
+      );
+      optionText = text(hit?.text);
+    } else {
+      optionText = text(body?.[`option${id}`]);
+    }
+    if (optionText) options.push({ id, text: optionText });
+  }
+  return options;
+}
+
+function buildMcqItemFromBody(body) {
+  const question = text(body?.question);
+  if (!question) {
+    const err = new Error("Question is required");
+    err.status = 400;
+    throw err;
+  }
+  const options = normalizeMcqOptionsFromBody(body);
+  if (options.length < 2) {
+    const err = new Error("At least two MCQ options are required");
+    err.status = 400;
+    throw err;
+  }
+  const correctOptionId = text(body?.correctOptionId || body?.answer).toUpperCase();
+  if (!correctOptionId || !options.some((opt) => opt.id === correctOptionId)) {
+    const err = new Error("correctOptionId must match one of the options");
+    err.status = 400;
+    throw err;
+  }
+  const explanation = normalizeSolutionText(
+    body?.explanation !== undefined && body?.explanation !== null
+      ? body.explanation
+      : body?.solution
+  );
+  const byId = Object.fromEntries(options.map((opt) => [opt.id, opt.text]));
+  const mcqMetadata = {
+    options,
+    correctOptionId,
+    explanation,
+  };
+  return {
+    prepRoleKey: text(body?.prepRoleKey).slice(0, 80),
+    question,
+    mcqMetadata,
+    optionA: byId.A || "",
+    optionB: byId.B || "",
+    optionC: byId.C || "",
+    optionD: byId.D || "",
+    answer: correctOptionId,
+    intuition: explanation,
+    status: "approved",
+    approvedAt: new Date(),
+  };
+}
+
+function applyMcqUpdate(item, body) {
+  if (!item || !body || typeof body !== "object") return;
+  const next = buildMcqItemFromBody({
+    question: body.question !== undefined ? body.question : item.question,
+    options:
+      body.options !== undefined
+        ? body.options
+        : item?.mcqMetadata?.options || [
+            { id: "A", text: item.optionA },
+            { id: "B", text: item.optionB },
+            { id: "C", text: item.optionC },
+            { id: "D", text: item.optionD },
+          ],
+    optionA: body.optionA !== undefined ? body.optionA : item.optionA,
+    optionB: body.optionB !== undefined ? body.optionB : item.optionB,
+    optionC: body.optionC !== undefined ? body.optionC : item.optionC,
+    optionD: body.optionD !== undefined ? body.optionD : item.optionD,
+    correctOptionId:
+      body.correctOptionId !== undefined
+        ? body.correctOptionId
+        : body.answer !== undefined
+          ? body.answer
+          : item?.mcqMetadata?.correctOptionId || item.answer,
+    explanation:
+      body.explanation !== undefined
+        ? body.explanation
+        : body.solution !== undefined
+          ? body.solution
+          : item?.mcqMetadata?.explanation || item.intuition,
+    prepRoleKey: body.prepRoleKey !== undefined ? body.prepRoleKey : item.prepRoleKey,
+  });
+  Object.assign(item, next);
+}
+
+export async function createPlatformQuestion(companyId, field, body) {
+  if (!["onlineQuestions", "interviewQuestions"].includes(field)) {
+    const err = new Error("Invalid question field");
+    err.status = 400;
+    throw err;
+  }
+  const { oid, doc } = await loadPlatformDoc(companyId);
+  if (!Array.isArray(doc[field])) doc[field] = [];
+  doc[field].push(buildQuestionItemFromBody(body));
+  doc.markModified(field);
+  await saveDoc(oid, doc);
+  return { message: "Question created" };
 }
 
 export async function updatePlatformQuestion(companyId, field, uiIndex, body) {
@@ -163,6 +348,47 @@ export async function deletePlatformQuestion(companyId, field, uiIndex) {
   doc.markModified(field);
   await saveDoc(oid, doc);
   return { message: "Question deleted" };
+}
+
+export async function createPlatformMcq(companyId, body) {
+  const { oid, doc } = await loadPlatformDoc(companyId);
+  if (!Array.isArray(doc.mcqQuestions)) doc.mcqQuestions = [];
+  doc.mcqQuestions.push(buildMcqItemFromBody(body));
+  doc.markModified("mcqQuestions");
+  await saveDoc(oid, doc);
+  return { message: "MCQ created" };
+}
+
+export async function updatePlatformMcq(companyId, uiIndex, body) {
+  const index = parseUiIndex(uiIndex);
+  const { oid, doc } = await loadPlatformDoc(companyId);
+  const refs = approvedMcqs(doc.mcqQuestions);
+  const hit = refs[index];
+  if (!hit) {
+    const err = new Error("MCQ not found");
+    err.status = 404;
+    throw err;
+  }
+  applyMcqUpdate(doc.mcqQuestions[hit.arrayIndex], body);
+  doc.markModified("mcqQuestions");
+  await saveDoc(oid, doc);
+  return { message: "MCQ updated" };
+}
+
+export async function deletePlatformMcq(companyId, uiIndex) {
+  const index = parseUiIndex(uiIndex);
+  const { oid, doc } = await loadPlatformDoc(companyId);
+  const refs = approvedMcqs(doc.mcqQuestions);
+  const hit = refs[index];
+  if (!hit) {
+    const err = new Error("MCQ not found");
+    err.status = 404;
+    throw err;
+  }
+  doc.mcqQuestions.splice(hit.arrayIndex, 1);
+  doc.markModified("mcqQuestions");
+  await saveDoc(oid, doc);
+  return { message: "MCQ deleted" };
 }
 
 export async function updatePlatformExperience(companyId, field, uiIndex, body) {

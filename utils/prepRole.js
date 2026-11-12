@@ -54,3 +54,23 @@ export function prepRoleLabelForKey(prepRoleKey, prepRoles) {
   );
   return compact(hit?.label) || key;
 }
+
+/**
+ * Drop duplicate catalog rows that share the same key (keep first label).
+ * @param {unknown[]} prepRoles
+ * @returns {{ key: string, label: string }[]}
+ */
+export function uniquePrepRoles(prepRoles) {
+  const seen = new Set();
+  const out = [];
+  for (const row of Array.isArray(prepRoles) ? prepRoles : []) {
+    const key = compact(row?.key);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      key,
+      label: compact(row?.label) || key,
+    });
+  }
+  return out;
+}

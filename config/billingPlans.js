@@ -27,7 +27,7 @@ export const BILLING_PLANS = Object.freeze({
     id: PLAN_IDS.CATEGORY,
     name: "Unlock one category",
     description:
-      "Company-card details for every company in one category, plus unlimited behavioural coach (up to 3 questions per hour). No AI mocks or PrepPath.",
+      "Company-card details for every company in one category, plus unlimited behavioural coach (up to 3 questions per hour). No AI mocks, PrepPath, or peer sessions.",
     priceInr: 199,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: true,
@@ -38,6 +38,7 @@ export const BILLING_PLANS = Object.freeze({
       prepPath: false,
       category: true,
       behavioralCoach: true,
+      peerSessions: false,
     },
   },
   [PLAN_IDS.PREP_PATH]: {
@@ -49,7 +50,13 @@ export const BILLING_PLANS = Object.freeze({
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
     catalog: true,
-    grants: { allCards: true, mocks: false, prepPath: true, behavioralCoach: true },
+    grants: {
+      allCards: true,
+      mocks: false,
+      prepPath: true,
+      behavioralCoach: true,
+      peerSessions: false,
+    },
   },
   [PLAN_IDS.MOCKS]: {
     id: PLAN_IDS.MOCKS,
@@ -60,18 +67,30 @@ export const BILLING_PLANS = Object.freeze({
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
     catalog: true,
-    grants: { allCards: true, mocks: true, prepPath: false, behavioralCoach: true },
+    grants: {
+      allCards: true,
+      mocks: true,
+      prepPath: false,
+      behavioralCoach: true,
+      peerSessions: false,
+    },
   },
   [PLAN_IDS.ALL_PREMIUM]: {
     id: PLAN_IDS.ALL_PREMIUM,
     name: "All premium features",
     description:
-      "All company cards, unlimited AI mocks, unlimited PrepPath, and unlimited behavioural coach.",
+      "All company cards, unlimited AI mocks, unlimited PrepPath, peer sessions, and unlimited behavioural coach.",
     priceInr: 599,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
     catalog: true,
-    grants: { allCards: true, mocks: true, prepPath: true, behavioralCoach: true },
+    grants: {
+      allCards: true,
+      mocks: true,
+      prepPath: true,
+      behavioralCoach: true,
+      peerSessions: true,
+    },
   },
   /** Retired — kept so existing entitlements and orders still resolve. */
   [PLAN_IDS.ALL_CARDS]: {
@@ -82,7 +101,13 @@ export const BILLING_PLANS = Object.freeze({
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
     catalog: false,
-    grants: { allCards: true, mocks: false, prepPath: false, behavioralCoach: true },
+    grants: {
+      allCards: true,
+      mocks: false,
+      prepPath: false,
+      behavioralCoach: true,
+      peerSessions: false,
+    },
   },
   [PLAN_IDS.MOCKS_PREP]: {
     id: PLAN_IDS.MOCKS_PREP,
@@ -92,7 +117,13 @@ export const BILLING_PLANS = Object.freeze({
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
     catalog: false,
-    grants: { allCards: false, mocks: true, prepPath: true, behavioralCoach: true },
+    grants: {
+      allCards: false,
+      mocks: true,
+      prepPath: true,
+      behavioralCoach: true,
+      peerSessions: false,
+    },
   },
 });
 
@@ -122,6 +153,7 @@ export const PAYWALL_FEATURES = Object.freeze({
   MOCKS: "mocks",
   PREP_PATH: "prep_path",
   BEHAVIORAL_COACH: "behavioral_coach",
+  PEER_SESSIONS: "peer_sessions",
 });
 
 export function getBillingPlan(planId) {

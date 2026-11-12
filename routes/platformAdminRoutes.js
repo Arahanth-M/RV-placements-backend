@@ -54,12 +54,16 @@ import {
   isSubmissionEnhancementSupported,
 } from "../services/submissionEnhanceService.js";
 import {
+  createPlatformMcq,
+  createPlatformQuestion,
   deletePlatformExperience,
+  deletePlatformMcq,
   deletePlatformMustDoByTopic,
   deletePlatformQuestion,
   deletePlatformResearchSourceByUrl,
   setCompanyVerified,
   updatePlatformExperience,
+  updatePlatformMcq,
   updatePlatformMustDoByTopic,
   updatePlatformQuestion,
 } from "../services/platformCompanyMutationsService.js";
@@ -605,6 +609,16 @@ router.put("/companies/:id/verified", async (req, res) => {
   }
 });
 
+router.post("/companies/:id/oa-questions", async (req, res) => {
+  try {
+    const out = await createPlatformQuestion(req.params.id, "onlineQuestions", req.body);
+    return res.status(201).json(out);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    return res.status(status).json({ error: error?.message || "Server error" });
+  }
+});
+
 router.put("/companies/:id/oa-questions/:index", async (req, res) => {
   try {
     const out = await updatePlatformQuestion(
@@ -613,6 +627,36 @@ router.put("/companies/:id/oa-questions/:index", async (req, res) => {
       req.params.index,
       req.body
     );
+    return res.json(out);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    return res.status(status).json({ error: error?.message || "Server error" });
+  }
+});
+
+router.post("/companies/:id/mcq-questions", async (req, res) => {
+  try {
+    const out = await createPlatformMcq(req.params.id, req.body);
+    return res.status(201).json(out);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    return res.status(status).json({ error: error?.message || "Server error" });
+  }
+});
+
+router.put("/companies/:id/mcq-questions/:index", async (req, res) => {
+  try {
+    const out = await updatePlatformMcq(req.params.id, req.params.index, req.body);
+    return res.json(out);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    return res.status(status).json({ error: error?.message || "Server error" });
+  }
+});
+
+router.delete("/companies/:id/mcq-questions/:index", async (req, res) => {
+  try {
+    const out = await deletePlatformMcq(req.params.id, req.params.index);
     return res.json(out);
   } catch (error) {
     const status = Number(error?.status) || 500;
@@ -797,6 +841,16 @@ router.post("/companies/:id/interview-questions/enhance-all", async (req, res) =
       error: error?.message || "Enhance all failed",
       code: error?.code || undefined,
     });
+  }
+});
+
+router.post("/companies/:id/interview-questions", async (req, res) => {
+  try {
+    const out = await createPlatformQuestion(req.params.id, "interviewQuestions", req.body);
+    return res.status(201).json(out);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    return res.status(status).json({ error: error?.message || "Server error" });
   }
 });
 

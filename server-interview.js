@@ -11,6 +11,7 @@ import { createExpressApp, applySharedHttpMiddleware } from "./server/bootstrapE
 import interviewRouter from "./routes/interviewRoutes.js";
 import practiceChallengeRouter from "./routes/practiceChallengeRoutes.js";
 import { createHealthHandler } from "./server/healthHandler.js";
+import { warmExecutionRuntimeImages } from "./services/codeExecution/executeCode.js";
 
 const app = createExpressApp();
 applySharedHttpMiddleware(app, { bypassGlobalLimiterForInterviewPrefix: true });
@@ -30,6 +31,13 @@ if (process.env.NODE_ENV !== "test") {
     app.listen(port, () => {
       console.log(`[backend-interview] listening on port ${port}`);
     });
+
+    // Non-blocking: pull Python/C++/Java images before the first preview request.
+    if (process.env.EXECUTION_WARM_IMAGES !== "0") {
+      warmExecutionRuntimeImages().catch((error) => {
+        console.error("[backend-interview] runtime image warm failed", error?.message || error);
+      });
+    }
   });
 }
 
