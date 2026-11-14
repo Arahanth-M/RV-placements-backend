@@ -12,6 +12,8 @@ import {
   blockedLoginInterestSchema,
   collegeEnrollmentInterestSchema,
   collegeOnboardingRequestSchema,
+  privacyConsentAcceptSchema,
+  featureConsentAcceptSchema,
 } from "../validations/auth.validation.js";
 import {
   signBlockedLoginIntentToken,
@@ -22,6 +24,16 @@ import { createCollegeOnboardingRequest } from "../services/collegeOnboardingSer
 import { getCollegeFeaturesForUser } from "../services/collegeFeatureConfigService.js";
 import { isProductionLoginAllowed } from "../utils/productionLoginLock.js";
 import { loadTestEmailAccess } from "../services/billing/accessService.js";
+import {
+  acceptPrivacyConsent,
+  buildPrivacyConsentStatus,
+  getPrivacyConsentStatus,
+} from "../services/privacyConsentService.js";
+import {
+  acceptFeatureConsent,
+  buildAllFeatureConsentStatuses,
+  getFeatureConsentStatuses,
+} from "../services/featureConsentService.js";
 
 const router = express.Router();
 
@@ -398,14 +410,123 @@ router.get("/current_user", authJWT, async (req, res) => {
     console.error("current_user testEmailAccess:", error?.message || error);
   }
 
+  let privacyConsent = buildPrivacyConsentStatus(null);
+  try {
+    privacyConsent = await getPrivacyConsentStatus(claims._id);
+  } catch (error) {
+    console.error("current_user privacyConsent:", error?.message || error);
+  }
+
+  let featureConsents = buildAllFeatureConsentStatuses(null);
+  try {
+    featureConsents = await getFeatureConsentStatuses(claims._id);
+  } catch (error) {
+    console.error("current_user featureConsents:", error?.message || error);
+  }
+
   res.json({
     ...claims,
     createdAt: createdAt || claims.createdAt,
     isNewUser: isNewUser || false,
     spcCluster,
     testEmailAccess,
+    privacyConsent,
+    featureConsents,
   });
 });
+
+/** Record DPDP feature-level consent (AI interview / checkout). */
+router.post(
+  "/feature-consent",
+  authJWT,
+  validateRequest(featureConsentAcceptSchema),
+  async (req, res) => {
+    try {
+      if (!req.user?._id) {
+        return res.status(401).json({ error: messages.ERROR.NOT_AUTHENTICATED });
+      }
+
+      const result = await acceptFeatureConsent(
+        req.user._id,
+        req.body.feature,
+        req.body.version
+      );
+
+      if (!result.ok) {
+        const status =
+          result.reason === "not_found"
+            ? 404
+            : result.reason === "version_mismatch"
+              ? 409
+              : 400;
+        return res.status(status).json({
+          error:
+            result.reason === "version_mismatch"
+              ? "Feature consent version is out of date. Refresh and try again."
+              : result.reason === "not_found"
+                ? "User not found"
+                : "Could not record feature consent",
+          reason: result.reason,
+          featureConsents: result.featureConsents,
+        });
+      }
+
+      return res.json({
+        success: true,
+        featureConsents: result.featureConsents,
+      });
+    } catch (err) {
+      console.error("POST /api/auth/feature-consent:", err?.message || err);
+      return res.status(500).json({ error: "Failed to record feature consent" });
+    }
+  }
+);
+
+/** Record DPDP privacy-notice acceptance (general platform). */
+router.post(
+  "/privacy-consent",
+  authJWT,
+  validateRequest(privacyConsentAcceptSchema),
+  async (req, res) => {
+    try {
+      if (!req.user?._id) {
+        return res.status(401).json({ error: messages.ERROR.NOT_AUTHENTICATED });
+      }
+
+      const result = await acceptPrivacyConsent(
+        req.user._id,
+        req.body.privacyPolicyVersion
+      );
+
+      if (!result.ok) {
+        const status =
+          result.reason === "not_found"
+            ? 404
+            : result.reason === "version_mismatch"
+              ? 409
+              : 400;
+        return res.status(status).json({
+          error:
+            result.reason === "version_mismatch"
+              ? "Privacy policy version is out of date. Refresh and try again."
+              : result.reason === "not_found"
+                ? "User not found"
+                : "Could not record privacy consent",
+          reason: result.reason,
+          privacyConsent: result.privacyConsent,
+        });
+      }
+
+      return res.json({
+        success: true,
+        privacyConsent: result.privacyConsent,
+      });
+    } catch (err) {
+      console.error("POST /api/auth/privacy-consent:", err?.message || err);
+      return res.status(500).json({ error: "Failed to record privacy consent" });
+    }
+  }
+);
 
 router.get("/is_admin", authJWT, (req, res) => {
   try {

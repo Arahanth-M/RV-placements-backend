@@ -126,6 +126,8 @@ import {
   paywallPayload,
 } from "../services/billing/accessService.js";
 import { TEST_EMAIL_LIMIT_CODE } from "../services/testEmailService.js";
+import { FEATURE_CONSENT_IDS } from "../config/featureConsents.js";
+import { hasFeatureConsent } from "../services/featureConsentService.js";
 import {
   BEHAVIORAL_HOURLY_LIMIT_CODE,
   PAYWALL_CODE,
@@ -2254,6 +2256,18 @@ router.post(
       const userId = getAuthenticatedUserId(req);
       if (!userId) {
         return res.status(401).json({ error: "Unauthorized" });
+      }
+      const consented = await hasFeatureConsent(
+        req.user?._id,
+        FEATURE_CONSENT_IDS.BEHAVIORAL_COACH
+      );
+      if (!consented) {
+        return res.status(403).json({
+          error:
+            "Consent is required to store and evaluate behavioural coach answers. Accept the coach consent and try again.",
+          code: "FEATURE_CONSENT_REQUIRED",
+          feature: FEATURE_CONSENT_IDS.BEHAVIORAL_COACH,
+        });
       }
       const gate = await evaluateBehavioralCoachAccess({
         userId,

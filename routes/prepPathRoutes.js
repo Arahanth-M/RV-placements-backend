@@ -25,6 +25,8 @@ import {
   PAYWALL_CODE,
   TEST_EMAIL_PREP_PATH_LIMIT,
 } from "../config/billingPlans.js";
+import { FEATURE_CONSENT_IDS } from "../config/featureConsents.js";
+import { hasFeatureConsent } from "../services/featureConsentService.js";
 
 function platformPrepQuotaFromSnapshot(snapshot) {
   const unlimited = Boolean(snapshot?.unlimitedPrepPath);
@@ -199,6 +201,18 @@ router.post("/generate", (req, res) => {
 
       const platformScope = isPlatformPrepScope(req);
       if (platformScope) {
+        const consented = await hasFeatureConsent(
+          req.user?._id,
+          FEATURE_CONSENT_IDS.PREP_PATH
+        );
+        if (!consented) {
+          return res.status(403).json({
+            error:
+              "Consent is required to process your resume and JD for PrepPath. Accept the PrepPath consent and try again.",
+            code: "FEATURE_CONSENT_REQUIRED",
+            feature: FEATURE_CONSENT_IDS.PREP_PATH,
+          });
+        }
         const access = await evaluatePrepPathAccess({
           userId,
           companyId: req.body?.companyId,

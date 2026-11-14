@@ -22,6 +22,22 @@ export const blockedLoginInterestSchema = Joi.object({
   wantsPlatformAtCollege: Joi.boolean().optional(),
 }).unknown(false);
 
+/** Affirmative DPDP privacy-notice acceptance for the general platform. */
+export const privacyConsentAcceptSchema = Joi.object({
+  privacyPolicyVersion: Joi.string().trim().min(1).max(64).required(),
+  accepted: Joi.boolean().valid(true).required(),
+}).unknown(false);
+
+/** Affirmative DPDP feature-level consent (AI interview / checkout / PrepPath / coach). */
+export const featureConsentAcceptSchema = Joi.object({
+  feature: Joi.string()
+    .trim()
+    .valid("aiInterview", "billingCheckout", "prepPath", "behavioralCoach")
+    .required(),
+  version: Joi.string().trim().min(1).max(64).required(),
+  accepted: Joi.boolean().valid(true).required(),
+}).unknown(false);
+
 export const collegeEnrollmentInterestSchema = Joi.object({
   collegeName: Joi.string().trim().min(2).max(120).required(),
   email: emailField,

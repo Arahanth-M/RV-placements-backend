@@ -51,6 +51,25 @@ const user1Schema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    /** DPDP: timestamp when the user accepted the current privacy notice. */
+    privacyConsentAcceptedAt: {
+      type: Date,
+      default: null,
+    },
+    /** DPDP: notice version string accepted (must match config/privacyPolicy.js). */
+    privacyPolicyVersion: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    /**
+     * DPDP feature-level consents (general platform), e.g.
+     * { aiInterview: { acceptedAt, version }, billingCheckout: { acceptedAt, version } }
+     */
+    featureConsents: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
     lastLoginAt: {
       type: Date,
       default: Date.now,

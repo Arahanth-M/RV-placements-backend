@@ -84,6 +84,10 @@ import {
   revokeTestEmail,
   setTestEmail,
 } from "../services/testEmailService.js";
+import {
+  ACCOUNT_DELETE_CHECKLIST,
+  deleteGeneralUserAccount,
+} from "../services/accountDeletionService.js";
 
 const router = express.Router();
 router.use(authJWT);
@@ -1072,6 +1076,33 @@ router.delete("/test-emails", async (req, res) => {
       console.error("[platform-admin] revoke test email:", error?.message || error);
     }
     return res.status(status).json({ error: error?.message || "Failed to revoke test email" });
+  }
+});
+
+/** Internal DPDP checklist for mail-based account deletion requests. */
+router.get("/users/delete-account/checklist", (_req, res) => {
+  return res.json({ success: true, checklist: ACCOUNT_DELETE_CHECKLIST });
+});
+
+/**
+ * Fulfill a general-platform account deletion (ops).
+ * Body: { email?, userId?, dryRun? }
+ */
+router.post("/users/delete-account", async (req, res) => {
+  try {
+    const result = await deleteGeneralUserAccount({
+      email: req.body?.email,
+      userId: req.body?.userId,
+      dryRun: req.body?.dryRun === true,
+    });
+    if (!result.ok) {
+      const status = result.reason === "not_found" ? 404 : 400;
+      return res.status(status).json(result);
+    }
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    console.error("[platform-admin] delete account:", error?.message || error);
+    return res.status(500).json({ error: error?.message || "Failed to delete account" });
   }
 });
 
