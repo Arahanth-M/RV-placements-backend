@@ -14,6 +14,10 @@ import {
 } from "../utils/emailSignupGuards.js";
 import { recordDauActivitySafe } from "./dau/recordDauActivity.js";
 import { recordBlockedLoginAttempt } from "./blockedLoginAttempts.js";
+import {
+  LOGIN_QUOTA_EXCEEDED_REASON,
+  loginQuota,
+} from "./loginQuota.js";
 
 /** Google may expose the avatar on photos[], _json.picture, or legacy profile.picture */
 function pictureFromGoogleProfile(profile) {
@@ -115,6 +119,16 @@ passport.use(
             );
           }
           return done(null, false, { reason: "domain", attemptId });
+        }
+
+        // Rolling 24h login cap per email (platform owners exempt). After domain gates
+        // so blocked attempts do not consume a slot.
+        const quota = await loginQuota.consume(normalizedEmail);
+        if (quota.exceeded) {
+          return done(null, false, {
+            reason: LOGIN_QUOTA_EXCEEDED_REASON,
+            retryAfterSeconds: quota.retryAfterSeconds,
+          });
         }
 
         if (isAdminLogin) {

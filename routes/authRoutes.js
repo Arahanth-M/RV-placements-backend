@@ -217,6 +217,13 @@ router.get(
             "login=failed&reason=disposable_email"
           );
         }
+        if (info && info.reason === "login_limit") {
+          return redirectToAuthCallback(
+            req,
+            res,
+            "login=failed&reason=login_limit"
+          );
+        }
         if (info && info.reason === "domain") {
           let query = "login=failed&reason=domain";
           const attemptId = info.attemptId ? String(info.attemptId).trim() : "";
