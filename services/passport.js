@@ -8,6 +8,10 @@ import { sendWelcomeEmailWebhook } from "./webhookService.js";
 import { isAllowedCollegeEmail, isRvceCollegeEmail } from "../utils/collegeScope.js";
 import { isPlatformOwnerEmail } from "../config/constants.js";
 import { isProductionLoginAllowed } from "../utils/productionLoginLock.js";
+import {
+  isDisposableEmail,
+  isGoogleEmailVerified,
+} from "../utils/emailSignupGuards.js";
 import { recordDauActivitySafe } from "./dau/recordDauActivity.js";
 import { recordBlockedLoginAttempt } from "./blockedLoginAttempts.js";
 
@@ -46,6 +50,16 @@ passport.use(
         // 1. Basic Email Validation
         if (!normalizedEmail) {
           return done(null, false, { reason: "not_allowed" });
+        }
+
+        // 2. Require Google-verified email (blocks unverified addresses)
+        if (!isGoogleEmailVerified(profile)) {
+          return done(null, false, { reason: "email_unverified" });
+        }
+
+        // 3. Reject known disposable / temporary mail domains
+        if (isDisposableEmail(normalizedEmail)) {
+          return done(null, false, { reason: "disposable_email" });
         }
 
         if (!(await isProductionLoginAllowed(normalizedEmail))) {

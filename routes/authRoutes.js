@@ -203,6 +203,20 @@ router.get(
         if (info && info.reason === "closed") {
           return redirectToAuthCallback(req, res, "login=failed&reason=closed");
         }
+        if (info && info.reason === "email_unverified") {
+          return redirectToAuthCallback(
+            req,
+            res,
+            "login=failed&reason=email_unverified"
+          );
+        }
+        if (info && info.reason === "disposable_email") {
+          return redirectToAuthCallback(
+            req,
+            res,
+            "login=failed&reason=disposable_email"
+          );
+        }
         if (info && info.reason === "domain") {
           let query = "login=failed&reason=domain";
           const attemptId = info.attemptId ? String(info.attemptId).trim() : "";
