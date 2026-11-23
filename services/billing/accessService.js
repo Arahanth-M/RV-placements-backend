@@ -11,6 +11,10 @@ import {
   FREE_TIER_BEHAVIORAL_LIMIT,
   FREE_TIER_MOCK_LIMIT,
   FREE_TIER_PREP_PATH_LIMIT,
+  MONTHLY_QUOTA_CODE,
+  PAID_MOCKS_MONTHLY_LIMIT,
+  PAID_PREP_PATH_MONTHLY_LIMIT,
+  PAID_QUOTA_WINDOW_DAYS,
   PAYWALL_CODE,
   PAYWALL_FEATURES,
   PLAN_IDS,
@@ -24,6 +28,48 @@ import {
   getActiveTestEmail,
   usageAnchorFromGrant,
 } from "../testEmailService.js";
+
+const PAID_QUOTA_WINDOW_MS = PAID_QUOTA_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
+function asDate(value) {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+
+/** Earliest `startsAt` among active entitlements that grant `grantKey` (`mocks` | `prepPath`). */
+export function earliestPaidGrantStartsAt(entitlements, grantKey, now = new Date()) {
+  const key = String(grantKey || "").trim();
+  if (!key) return null;
+  let earliest = null;
+  for (const row of Array.isArray(entitlements) ? entitlements : []) {
+    const expiresAt = asDate(row?.expiresAt);
+    if (!expiresAt || expiresAt <= now) continue;
+    if (!row?.grants?.[key]) continue;
+    const startsAt = asDate(row?.startsAt);
+    if (!startsAt) continue;
+    if (!earliest || startsAt < earliest) earliest = startsAt;
+  }
+  return earliest;
+}
+
+/**
+ * Rolling 30-day window anchored at purchase (`startsAt`).
+ * Period 0: [startsAt, startsAt+30d), period 1: next 30d, etc.
+ */
+export function paidQuotaWindow(anchorStart, now = new Date(), windowMs = PAID_QUOTA_WINDOW_MS) {
+  const start = asDate(anchorStart);
+  const current = asDate(now) || new Date();
+  if (!start || !(windowMs > 0)) {
+    return { windowStart: null, windowEnd: null, periodIndex: 0 };
+  }
+  const startMs = start.getTime();
+  const nowMs = Math.max(current.getTime(), startMs);
+  const periodIndex = Math.floor((nowMs - startMs) / windowMs);
+  const windowStart = new Date(startMs + periodIndex * windowMs);
+  const windowEnd = new Date(startMs + (periodIndex + 1) * windowMs);
+  return { windowStart, windowEnd, periodIndex };
+}
 
 export function isBillingAdmin(user) {
   if (!user) return false;
@@ -46,6 +92,17 @@ export function createPaywallError({
   return err;
 }
 
+export function createMonthlyQuotaError({ feature, message } = {}) {
+  const err = new Error(
+    message ||
+      `Usage limit reached for this ${PAID_QUOTA_WINDOW_DAYS}-day period. Try again when your next window starts.`
+  );
+  err.code = MONTHLY_QUOTA_CODE;
+  err.feature = feature;
+  err.status = 429;
+  return err;
+}
+
 export async function countPlatformMockStarts(userId) {
   const id = String(userId || "").trim();
   if (!id) return 0;
@@ -59,6 +116,25 @@ export async function countPrepPathPlans(userId) {
   const id = String(userId || "").trim();
   if (!id) return 0;
   return PrepPathPlan.countDocuments({ userId: id });
+}
+
+export async function countPlatformMockStartsSince(userId, since) {
+  const id = String(userId || "").trim();
+  if (!id || !since) return 0;
+  return InterviewSession.countDocuments({
+    userId: id,
+    contentScope: "platform",
+    createdAt: { $gte: since },
+  });
+}
+
+export async function countPrepPathPlansSince(userId, since) {
+  const id = String(userId || "").trim();
+  if (!id || !since) return 0;
+  return PrepPathPlan.countDocuments({
+    userId: id,
+    createdAt: { $gte: since },
+  });
 }
 
 export async function loadCompanyCategoryMeta(companyId) {
@@ -223,6 +299,31 @@ export async function getGeneralAccessSnapshot(userId, now = new Date(), user = 
     : behavioralUsed
       ? 0
       : FREE_TIER_BEHAVIORAL_LIMIT;
+
+  const mocksPurchaseAt = grant ? null : earliestPaidGrantStartsAt(entitlements, "mocks", now);
+  const prepPurchaseAt = grant ? null : earliestPaidGrantStartsAt(entitlements, "prepPath", now);
+  const mocksWindow =
+    summary.mocks && mocksPurchaseAt ? paidQuotaWindow(mocksPurchaseAt, now) : null;
+  const prepWindow =
+    summary.prepPath && prepPurchaseAt ? paidQuotaWindow(prepPurchaseAt, now) : null;
+
+  const [windowMocks, windowPrep] = await Promise.all([
+    mocksWindow?.windowStart
+      ? countPlatformMockStartsSince(id, mocksWindow.windowStart)
+      : Promise.resolve(0),
+    prepWindow?.windowStart
+      ? countPrepPathPlansSince(id, prepWindow.windowStart)
+      : Promise.resolve(0),
+  ]);
+
+  const paidMocksMonthlyUsed = Math.max(0, Number(windowMocks) || 0);
+  const paidPrepMonthlyUsed = Math.max(0, Number(windowPrep) || 0);
+  const paidMocksMonthlyRemaining = summary.mocks
+    ? Math.max(0, PAID_MOCKS_MONTHLY_LIMIT - paidMocksMonthlyUsed)
+    : null;
+  const paidPrepMonthlyRemaining = summary.prepPath
+    ? Math.max(0, PAID_PREP_PATH_MONTHLY_LIMIT - paidPrepMonthlyUsed)
+    : null;
   return {
     entitlements: grant ? [] : entitlements,
     summary,
@@ -231,8 +332,21 @@ export async function getGeneralAccessSnapshot(userId, now = new Date(), user = 
     freeMockRemaining,
     freeMockConsumed: grant ? mockUsed : freeMockConsumed,
     freePrepRemaining,
+    /** Has paid mocks entitlement (still subject to rolling 30-day cap). */
     unlimitedMocks: summary.mocks,
+    /** Has paid PrepPath entitlement (still subject to rolling 30-day cap). */
     unlimitedPrepPath: summary.prepPath,
+    paidQuotaWindowDays: PAID_QUOTA_WINDOW_DAYS,
+    paidMocksMonthlyLimit: summary.mocks ? PAID_MOCKS_MONTHLY_LIMIT : null,
+    paidMocksMonthlyUsed: summary.mocks ? paidMocksMonthlyUsed : null,
+    paidMocksMonthlyRemaining,
+    paidMocksQuotaWindowStart: mocksWindow?.windowStart || null,
+    paidMocksQuotaWindowEnd: mocksWindow?.windowEnd || null,
+    paidPrepMonthlyLimit: summary.prepPath ? PAID_PREP_PATH_MONTHLY_LIMIT : null,
+    paidPrepMonthlyUsed: summary.prepPath ? paidPrepMonthlyUsed : null,
+    paidPrepMonthlyRemaining,
+    paidPrepQuotaWindowStart: prepWindow?.windowStart || null,
+    paidPrepQuotaWindowEnd: prepWindow?.windowEnd || null,
     unlimitedBehavioralCoach,
     unlimitedPeerSessions: summary.peerSessions === true,
     isTestEmail: Boolean(grant),
@@ -240,6 +354,7 @@ export async function getGeneralAccessSnapshot(userId, now = new Date(), user = 
     testEmailDurationHours: grant ? Number(grant.durationHours) || null : null,
     freeChallengeRemaining: grant ? (challengeUsed ? 0 : 1) : null,
     freeBehavioralRemaining,
+    hasAnyPaidPlan: Boolean(entitlements?.length) && !grant,
   };
 }
 
@@ -306,7 +421,21 @@ export async function evaluateCompanyCardAccess({ userId, companyId, user, now =
 
 export async function evaluateMockAccess({ userId, companyId, user, now = new Date() }) {
   const card = await evaluateCompanyCardAccess({ userId, companyId, user, now });
-  if (card.bypass || card.snapshot?.unlimitedMocks) {
+  if (card.bypass) {
+    return { ...card, mockAllowed: true, error: null };
+  }
+  if (card.snapshot?.unlimitedMocks) {
+    const left = Number(card.snapshot?.paidMocksMonthlyRemaining);
+    if (Number.isFinite(left) && left <= 0) {
+      return {
+        ...card,
+        mockAllowed: false,
+        error: createMonthlyQuotaError({
+          feature: PAYWALL_FEATURES.MOCKS,
+          message: `AI mock limit reached (${PAID_MOCKS_MONTHLY_LIMIT} every ${PAID_QUOTA_WINDOW_DAYS} days from purchase). Try again when your next ${PAID_QUOTA_WINDOW_DAYS}-day window starts.`,
+        }),
+      };
+    }
     return { ...card, mockAllowed: true, error: null };
   }
   // Free tier / test-email: one mock of any company while remaining > 0.
@@ -325,7 +454,7 @@ export async function evaluateMockAccess({ userId, companyId, user, now = new Da
       feature: PAYWALL_FEATURES.MOCKS,
       message: card.snapshot?.isTestEmail
         ? "This test email includes one AI mock interview, and that interview has already been used."
-        : "Your free AI mock interview has been used. Unlock unlimited mocks to continue.",
+        : "Your free AI mock interview has been used. Unlock AI mocks (up to 10 every 30 days) to continue.",
       suggestedPlans: card.snapshot?.isTestEmail ? [] : [PLAN_IDS.MOCKS, PLAN_IDS.ALL_PREMIUM],
       categoryId: card.company?.categoryId || "",
     }),
@@ -343,13 +472,30 @@ export async function evaluatePrepPathAccess({ userId, companyId, user, now = ne
         feature: PAYWALL_FEATURES.COMPANY_DETAIL,
         message: prepOwned
           ? "Your PrepPath subscription is active. Unlock this company (or its category) to generate a plan for it. The first card in each category stays free."
-          : "Unlock this category, or Unlimited PrepPath (that plan includes all company cards). The first card in each category stays free.",
+          : "Unlock this category, or PrepPath (that plan includes all company cards). The first card in each category stays free.",
         suggestedPlans: [PLAN_IDS.CATEGORY, PLAN_IDS.PREP_PATH, PLAN_IDS.ALL_PREMIUM],
         categoryId: card.company?.categoryId || card.error?.categoryId || "",
       }),
     };
   }
-  if (card.bypass || card.snapshot?.unlimitedPrepPath || card.snapshot?.freePrepRemaining > 0) {
+  if (card.bypass) {
+    return { ...card, prepAllowed: true };
+  }
+  if (card.snapshot?.unlimitedPrepPath) {
+    const left = Number(card.snapshot?.paidPrepMonthlyRemaining);
+    if (Number.isFinite(left) && left <= 0) {
+      return {
+        ...card,
+        prepAllowed: false,
+        error: createMonthlyQuotaError({
+          feature: PAYWALL_FEATURES.PREP_PATH,
+          message: `PrepPath limit reached (${PAID_PREP_PATH_MONTHLY_LIMIT} plans every ${PAID_QUOTA_WINDOW_DAYS} days from purchase). Try again when your next ${PAID_QUOTA_WINDOW_DAYS}-day window starts.`,
+        }),
+      };
+    }
+    return { ...card, prepAllowed: true };
+  }
+  if (card.snapshot?.freePrepRemaining > 0) {
     return { ...card, prepAllowed: true };
   }
   return {
@@ -359,7 +505,7 @@ export async function evaluatePrepPathAccess({ userId, companyId, user, now = ne
       feature: PAYWALL_FEATURES.PREP_PATH,
       message: card.snapshot?.isTestEmail
         ? "This test email includes one PrepPath, and that plan has already been generated."
-        : "Your free PrepPath plans have been used. Unlock PrepPath to generate more.",
+        : "Your free PrepPath plans have been used. Unlock PrepPath (up to 10 every 30 days) to generate more.",
       suggestedPlans: card.snapshot?.isTestEmail ? [] : [PLAN_IDS.PREP_PATH, PLAN_IDS.ALL_PREMIUM],
       categoryId: card.company?.categoryId || "",
     }),

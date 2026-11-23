@@ -3,11 +3,32 @@ import { PDFParse } from "pdf-parse";
 
 const MAX_RESUME_CHARS = 28000;
 
-function normalizeWhitespace(text) {
-  return String(text || "")
+/**
+ * Clean PDF/DOCX extract artifacts: mid-word wraps, one-word-per-line columns,
+ * and excess blank lines — keep real paragraph breaks.
+ */
+const RESUME_SECTION_HEADER_RE =
+  /^(name\s*\/\s*headline|summary|profile|objective|about(\s+me)?|education|academic(\s+background)?|experience|work\s+experience|internship|employment|projects?|skills?(\s*\/\s*languages?)?|technical\s+skills?|languages?|technologies|tech\s+stack|tools?|frameworks?|concepts?|certifications?|additional\s+notes|other)\s*:?\s*$/i;
+
+export function normalizeWhitespace(text) {
+  let out = String(text || "")
     .replace(/\u0000/g, "")
     .replace(/\r\n/g, "\n")
+    .replace(/([A-Za-z])-\n([A-Za-z])/g, "$1$2")
+    .replace(/([A-Za-z])\n([a-z])/g, "$1$2");
+
+  // Soft-join wraps, but keep real section headers / bullets on their own lines.
+  out = out.replace(/([^\n.!?•|:;])\n(?=[A-Za-z0-9(•\u2022\-*])/g, (full, prev, offset) => {
+    const after = out.slice(offset + full.length);
+    const nextLine = (after.split("\n")[0] || "").trim();
+    if (RESUME_SECTION_HEADER_RE.test(nextLine)) return `${prev}\n`;
+    if (/^([•\u2022\-*]|\d+[.)])\s*/.test(nextLine)) return `${prev}\n`;
+    return `${prev} `;
+  });
+
+  return out
     .replace(/[ \t]+\n/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }

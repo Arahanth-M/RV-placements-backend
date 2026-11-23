@@ -10,6 +10,14 @@ export const FREE_TIER_PREP_PATH_LIMIT = 1;
 export const FREE_TIER_BEHAVIORAL_LIMIT = 1;
 /** Paid behavioural coach: max question generations per rolling clock-hour window. */
 export const BEHAVIORAL_COACH_HOURLY_LIMIT = 3;
+/**
+ * Paid mocks / PrepPath: soft caps per rolling window from entitlement purchase
+ * (`startsAt` + N days, then the next N days, …) for the life of the subscription.
+ */
+export const PAID_QUOTA_WINDOW_DAYS = 30;
+export const PAID_MOCKS_MONTHLY_LIMIT = 10;
+export const PAID_PREP_PATH_MONTHLY_LIMIT = 10;
+export const MONTHLY_QUOTA_CODE = "MONTHLY_QUOTA";
 /** Test-email grants keep a single PrepPath for the grant window. */
 export const TEST_EMAIL_PREP_PATH_LIMIT = 1;
 
@@ -43,9 +51,9 @@ export const BILLING_PLANS = Object.freeze({
   },
   [PLAN_IDS.PREP_PATH]: {
     id: PLAN_IDS.PREP_PATH,
-    name: "Unlimited PrepPath",
+    name: "PrepPath (10 / 30 days)",
     description:
-      "Unlimited PrepPath plus all company cards and unlimited behavioural coach for 6 months.",
+      "Up to 10 PrepPath plans every 30 days from purchase (previous months' unused PrepPaths won't be added to the next month), plus all company cards and unlimited behavioural coach for 6 months.",
     priceInr: 399,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
@@ -60,9 +68,9 @@ export const BILLING_PLANS = Object.freeze({
   },
   [PLAN_IDS.MOCKS]: {
     id: PLAN_IDS.MOCKS,
-    name: "Unlimited AI mock interviews",
+    name: "AI mock interviews (10 / 30 days)",
     description:
-      "Unlimited AI mocks plus all company cards and unlimited behavioural coach for 6 months.",
+      "Up to 10 AI mock interviews every 30 days from purchase (previous months' unused mock interviews won't be added to the next month), plus all company cards and unlimited behavioural coach for 6 months.",
     priceInr: 399,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
@@ -79,7 +87,7 @@ export const BILLING_PLANS = Object.freeze({
     id: PLAN_IDS.ALL_PREMIUM,
     name: "All premium features",
     description:
-      "All company cards, unlimited AI mocks, unlimited PrepPath, peer sessions, and unlimited behavioural coach.",
+      "All company cards, up to 10 AI mocks every 30 days, up to 10 PrepPath plans every 30 days (previous months' unused mock interviews and PrepPaths won't be added to the next month), peer sessions, and unlimited behavioural coach.",
     priceInr: 599,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,
@@ -112,7 +120,8 @@ export const BILLING_PLANS = Object.freeze({
   [PLAN_IDS.MOCKS_PREP]: {
     id: PLAN_IDS.MOCKS_PREP,
     name: "AI mocks + PrepPath",
-    description: "Unlimited AI mocks and PrepPath for 6 months.",
+    description:
+      "Up to 10 AI mocks and 10 PrepPath plans every 30 days from purchase for 6 months (previous months' unused mock interviews and PrepPaths won't be added to the next month).",
     priceInr: 399,
     durationMonths: BILLING_DURATION_MONTHS,
     requiresCategory: false,

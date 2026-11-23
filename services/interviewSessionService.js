@@ -1014,6 +1014,22 @@ export const getUserInterviewAnalytics = async (userId) => {
   return data;
 };
 
+/**
+ * DPDP erasure: delete the user's general-platform AI mock interview sessions
+ * (analytics + history). Campus (`visit`) sessions are left untouched.
+ */
+export const deleteUserPlatformInterviewAnalytics = async (userId) => {
+  const uid = String(userId || "").trim();
+  if (!uid) {
+    return { deletedCount: 0 };
+  }
+  const result = await InterviewSession.deleteMany({
+    userId: uid,
+    contentScope: "platform",
+  });
+  return { deletedCount: result?.deletedCount || 0 };
+};
+
 export const updateSession = async (sessionId, data) => {
   return InterviewSession.findByIdAndUpdate(
     sessionId,

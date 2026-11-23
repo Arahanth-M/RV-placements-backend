@@ -163,6 +163,8 @@ const prepPathPlanSchema = new mongoose.Schema(
       limitedData: { type: Boolean, default: false },
       /** True when generation used an uploaded JD (JD text is not stored). */
       jdProvided: { type: Boolean, default: false },
+      /** True when generation reused the durable user resume digest (no fresh upload). */
+      reusedResumeDigest: { type: Boolean, default: false },
     },
     /** Snapshot of peer PrepPath demand for this company (last 7 IST days). */
     peerDemand: {

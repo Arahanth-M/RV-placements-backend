@@ -59,6 +59,7 @@ import {
   getUserSessionSummariesPaginated,
   getUserSessionDetail,
   getUserInterviewAnalytics,
+  deleteUserPlatformInterviewAnalytics,
   updateSession,
   abandonInProgressSession,
   resumeAbandonedSession,
@@ -130,6 +131,7 @@ import { FEATURE_CONSENT_IDS } from "../config/featureConsents.js";
 import { hasFeatureConsent } from "../services/featureConsentService.js";
 import {
   BEHAVIORAL_HOURLY_LIMIT_CODE,
+  MONTHLY_QUOTA_CODE,
   PAYWALL_CODE,
   PAYWALL_FEATURES,
   PLAN_IDS,
@@ -684,15 +686,23 @@ router.get("/eligibility", async (req, res) => {
           user: req.user,
         });
         if (!access.mockAllowed) {
-          const body = paywallPayload(access.error);
+          const monthly = access.error?.code === MONTHLY_QUOTA_CODE;
+          const body = monthly
+            ? {
+                error: access.error.message,
+                feature: access.error.feature,
+              }
+            : paywallPayload(access.error);
           return res.json({
             canStart: false,
-            reason: PAYWALL_CODE,
+            reason: monthly ? MONTHLY_QUOTA_CODE : PAYWALL_CODE,
             message: body.error,
             completedCount: access.snapshot?.mockStarts || 0,
             freeMockRemaining: access.snapshot?.freeMockRemaining ?? 0,
             freeMockConsumed: access.snapshot?.freeMockConsumed === true,
             unlimitedMocks: access.snapshot?.unlimitedMocks === true,
+            paidMocksMonthlyRemaining: access.snapshot?.paidMocksMonthlyRemaining ?? null,
+            paidMocksMonthlyLimit: access.snapshot?.paidMocksMonthlyLimit ?? null,
             ...body,
             limitRequest: { status: "none" },
           });
@@ -707,28 +717,44 @@ router.get("/eligibility", async (req, res) => {
           freeMockRemaining: access.snapshot?.freeMockRemaining ?? 0,
           freeMockConsumed: access.snapshot?.freeMockConsumed === true,
           unlimitedMocks: access.snapshot?.unlimitedMocks === true,
+          paidMocksMonthlyRemaining: access.snapshot?.paidMocksMonthlyRemaining ?? null,
+          paidMocksMonthlyLimit: access.snapshot?.paidMocksMonthlyLimit ?? null,
           limitRequest: { status: "none" },
         });
       }
       const snapshot = await getGeneralAccessSnapshot(userId, new Date(), req.user);
+      const paidMocksOpen =
+        snapshot.unlimitedMocks && Number(snapshot.paidMocksMonthlyRemaining) > 0;
+      const paidMocksExhausted =
+        snapshot.unlimitedMocks && Number(snapshot.paidMocksMonthlyRemaining) <= 0;
       const canStart =
-        snapshot.unlimitedMocks ||
+        paidMocksOpen ||
         snapshot.freeMockRemaining > 0 ||
-        (!snapshot.isTestEmail && snapshot.freeMockConsumed !== true);
+        (!snapshot.isTestEmail &&
+          !snapshot.unlimitedMocks &&
+          snapshot.freeMockConsumed !== true);
       return res.json({
         canStart,
-        reason: canStart ? null : PAYWALL_CODE,
+        reason: canStart
+          ? null
+          : paidMocksExhausted
+            ? MONTHLY_QUOTA_CODE
+            : PAYWALL_CODE,
         message: canStart
           ? ""
-          : snapshot.isTestEmail
-            ? "This test email includes one AI mock interview, and that interview has already been used."
-            : "Your free AI mock interview has been used. Unlock unlimited mocks to continue.",
+          : paidMocksExhausted
+            ? `AI mock limit reached (${snapshot.paidMocksMonthlyLimit || 10} every ${snapshot.paidQuotaWindowDays || 30} days from purchase). Try again when your next window starts.`
+            : snapshot.isTestEmail
+              ? "This test email includes one AI mock interview, and that interview has already been used."
+              : "Your free AI mock interview has been used. Unlock AI mocks (up to 10 every 30 days) to continue.",
         completedCount: snapshot.mockStarts,
         nextAvailableAt: null,
         lastCompletedAt: null,
         freeMockRemaining: snapshot.freeMockRemaining,
         freeMockConsumed: snapshot.freeMockConsumed === true,
         unlimitedMocks: snapshot.unlimitedMocks,
+        paidMocksMonthlyRemaining: snapshot.paidMocksMonthlyRemaining ?? null,
+        paidMocksMonthlyLimit: snapshot.paidMocksMonthlyLimit ?? null,
         limitRequest: { status: "none" },
       });
     }
@@ -880,6 +906,15 @@ router.post("/start-interview", validateRequest(interviewStartSchema), async (re
         user: req.user,
       });
       if (!access.mockAllowed) {
+        if (access.error?.code === MONTHLY_QUOTA_CODE) {
+          return res.status(429).json({
+            code: MONTHLY_QUOTA_CODE,
+            error: access.error.message,
+            feature: access.error.feature,
+            paidMocksMonthlyRemaining: access.snapshot?.paidMocksMonthlyRemaining ?? 0,
+            paidMocksMonthlyLimit: access.snapshot?.paidMocksMonthlyLimit ?? null,
+          });
+        }
         const body = paywallPayload(access.error);
         return res.status(402).json({
           code: PAYWALL_CODE,
@@ -1214,6 +1249,28 @@ router.get("/analytics/:userId", async (req, res) => {
   } catch (error) {
     console.error("❌ Error fetching interview analytics:", error.message);
     return res.status(500).json({ error: "Failed to fetch interview analytics" });
+  }
+});
+
+/** DPDP: erase general-platform AI mock interview analytics / history. */
+router.delete("/analytics", async (req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const result = await deleteUserPlatformInterviewAnalytics(userId);
+    await Promise.all([
+      invalidateInterviewAnalytics(userId),
+      invalidateInterviewSummaries(userId),
+    ]);
+    return res.json({
+      success: true,
+      deletedCount: result.deletedCount,
+    });
+  } catch (error) {
+    console.error("❌ Error deleting interview analytics:", error.message);
+    return res.status(500).json({ error: "Failed to delete interview analytics" });
   }
 });
 

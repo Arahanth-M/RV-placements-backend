@@ -17,6 +17,7 @@ import PrepPathPlan from "../models/PrepPathPlan.js";
 import PrepPathUsage from "../models/PrepPathUsage.js";
 import BehavioralCoachAttempt from "../models/BehavioralCoachAttempt.js";
 import ResumeDraft from "../models/ResumeDraft.js";
+import UserPrepResumeDigest from "../models/UserPrepResumeDigest.js";
 import BillingTrialUsage from "../models/BillingTrialUsage.js";
 import Notification from "../models/Notification.js";
 import PeerSession from "../models/PeerSession.js";
@@ -34,7 +35,7 @@ export const ACCOUNT_DELETE_CHECKLIST = Object.freeze([
   "Confirm no refund for unused premium (per refund policy)",
   "Revoke all billing entitlements (fresh start on return)",
   "Anonymise payment orders (keep stubs; clear email)",
-  "Delete interviews, PrepPath, behavioural coach, resume drafts, trials",
+  "Delete interviews, PrepPath, PrepPath resume digests, behavioural coach, resume drafts, trials",
   "Delete notifications, peer/slots/challenges, DAU rows, blocked-login rows",
   "Anonymise or remove submissions owned by the user",
   "Delete User1 (+ legacy User if present)",
@@ -137,6 +138,12 @@ export async function deleteGeneralUserAccount(options = {}) {
     await safeDeleteMany(InterviewSession, { userId }, counts, "interviewSessions");
     await safeDeleteMany(PrepPathPlan, { userId }, counts, "prepPathPlans");
     await safeDeleteMany(PrepPathUsage, { userId }, counts, "prepPathUsage");
+    await safeDeleteMany(
+      UserPrepResumeDigest,
+      { userId },
+      counts,
+      "userPrepResumeDigests"
+    );
     await safeDeleteMany(
       BehavioralCoachAttempt,
       { userId },

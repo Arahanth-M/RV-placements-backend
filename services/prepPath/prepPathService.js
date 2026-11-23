@@ -5,6 +5,7 @@ import {
   buildResumeDigest,
   buildJdDigest,
 } from "./resumeTextExtract.js";
+import { digestToFields, fieldsToDigest } from "./resumeDigestFields.js";
 import {
   loadCompanyPrepContext,
   formatCompanyContextForPrompt,
@@ -26,9 +27,53 @@ import {
   getPrepPathQuota,
   refundPrepPathQuota,
 } from "./quota.js";
+import {
+  createUserPrepResumeDigest,
+  getUserPrepResumeDigest,
+  getUserPrepResumeDigestById,
+} from "./userResumeDigestService.js";
 import { isPlatformFresherRole } from "../../config/interviewCatalog.js";
 
 export const PREP_PATH_HISTORY_LIMIT = 10;
+export const PREP_PATH_RESUME_DIGEST_MAX = 4000;
+
+/**
+ * Parse a resume upload into a structured digest (no LLM).
+ * Used during PrepPath generate; digest is shown in View Profile after persist.
+ */
+export async function parseResumeForPrepPath({
+  resumeBuffer,
+  resumeMime,
+  resumeOriginalName,
+}) {
+  const resumeText = await extractResumeText({
+    buffer: resumeBuffer,
+    mime: resumeMime,
+    originalName: resumeOriginalName,
+  });
+  // Prefer structuring from the fuller extract, then compact into digest.
+  const fields = digestToFields(resumeText);
+  let digest = fieldsToDigest(fields, PREP_PATH_RESUME_DIGEST_MAX);
+  if (!digest) {
+    digest = buildResumeDigest(resumeText, 1500).slice(0, PREP_PATH_RESUME_DIGEST_MAX);
+  }
+  if (!digest) {
+    const err = new Error("Could not build a resume digest from that file.");
+    err.code = "RESUME_EMPTY";
+    throw err;
+  }
+
+  digest = fieldsToDigest(digestToFields(digest), PREP_PATH_RESUME_DIGEST_MAX) || digest;
+  return {
+    digest,
+    fields: digestToFields(digest),
+    resumeMeta: {
+      fileName: String(resumeOriginalName || "").slice(0, 200),
+      mime: String(resumeMime || "").slice(0, 120),
+      textChars: resumeText.length,
+    },
+  };
+}
 
 /**
  * List recent plans for a user (newest first). Never deletes older docs.
@@ -55,9 +100,13 @@ export async function getPrepPathPlanForUser(userId, planId) {
 
 /**
  * Generate + persist a PrepPath plan.
- * Writes ONLY to prep_path_plans and prep_path_usage.
- * Reads /general platform content when `scope=platform`; otherwise campus visits.
- * Resume file is not stored. Optional JD is parsed for the LLM only — not stored.
+ * Writes to prep_path_plans (+ prep_path_usage when campus quota applies) and
+ * upserts user_prep_resume_digests when a new resume is parsed.
+ * Raw resume/JD files are not stored. JD must be uploaded each time (not reused).
+ * Resume sources (first match wins):
+ * 1. `providedResumeDigest` — optional prebuilt digest (API/compat)
+ * 2. `reuseResumeDigest` — load a stored digest (`resumeDigestId` or latest)
+ * 3. fresh resume upload parse (heuristic; no LLM layout pass)
  */
 export async function generateAndSavePrepPathPlan({
   userId,
@@ -69,6 +118,10 @@ export async function generateAndSavePrepPathPlan({
   resumeBuffer,
   resumeMime,
   resumeOriginalName,
+  reuseResumeDigest = false,
+  resumeDigestId = "",
+  providedResumeDigest = "",
+  providedResumeMeta = null,
   jdBuffer,
   jdMime,
   jdOriginalName,
@@ -122,21 +175,78 @@ export async function generateAndSavePrepPathPlan({
     throw err;
   }
 
-  const resumeText = await extractResumeText({
-    buffer: resumeBuffer,
-    mime: resumeMime,
-    originalName: resumeOriginalName,
-  });
-  const resumeDigest = buildResumeDigest(resumeText, 1500);
+  let resumeDigest = "";
+  let resumeMeta = {
+    fileName: "",
+    mime: "",
+    textChars: 0,
+  };
+  let shouldPersistDigest = false;
+  let reusedStoredDigest = false;
 
-  let jdDigest = "";
-  if (jdBuffer && Buffer.isBuffer(jdBuffer) && jdBuffer.length > 0) {
-    const jdText = await extractJdText({
-      buffer: jdBuffer,
-      mime: jdMime,
-      originalName: jdOriginalName,
+  const provided = String(providedResumeDigest || "").trim().slice(0, PREP_PATH_RESUME_DIGEST_MAX);
+  if (provided) {
+    resumeDigest = provided;
+    resumeMeta = {
+      fileName: String(providedResumeMeta?.fileName || resumeOriginalName || "Resume").slice(
+        0,
+        200
+      ),
+      mime: String(providedResumeMeta?.mime || resumeMime || "").slice(0, 120),
+      textChars: Math.max(
+        0,
+        Number(providedResumeMeta?.textChars) || provided.length
+      ),
+    };
+    shouldPersistDigest = true;
+  } else if (reuseResumeDigest) {
+    const wantedId = String(resumeDigestId || "").trim();
+    const stored = wantedId
+      ? await getUserPrepResumeDigestById(uid, wantedId)
+      : await getUserPrepResumeDigest(uid, { hydrateFromPlans: true });
+    const digest = String(stored?.digest || "").trim();
+    if (!digest) {
+      const err = new Error(
+        wantedId
+          ? "That saved resume was not found. Pick another or upload a new one."
+          : "No saved resume digest found. Upload a resume to continue."
+      );
+      err.code = "RESUME_DIGEST_MISSING";
+      throw err;
+    }
+    resumeDigest = digest.slice(0, PREP_PATH_RESUME_DIGEST_MAX);
+    resumeMeta = {
+      fileName: String(stored?.resumeMeta?.fileName || "Saved resume").slice(0, 200),
+      mime: String(stored?.resumeMeta?.mime || "").slice(0, 120),
+      textChars: Math.max(0, Number(stored?.resumeMeta?.textChars) || digest.length),
+    };
+    reusedStoredDigest = true;
+  } else {
+    const parsed = await parseResumeForPrepPath({
+      resumeBuffer,
+      resumeMime,
+      resumeOriginalName,
     });
-    jdDigest = buildJdDigest(jdText, 2000);
+    resumeDigest = parsed.digest;
+    resumeMeta = parsed.resumeMeta;
+    shouldPersistDigest = true;
+  }
+
+  if (!jdBuffer || !Buffer.isBuffer(jdBuffer) || jdBuffer.length === 0) {
+    const err = new Error("Attach a job description (PDF or DOCX).");
+    err.code = "JD_REQUIRED";
+    throw err;
+  }
+  const jdText = await extractJdText({
+    buffer: jdBuffer,
+    mime: jdMime,
+    originalName: jdOriginalName,
+  });
+  const jdDigest = buildJdDigest(jdText, 2000);
+  if (!jdDigest) {
+    const err = new Error("Could not read text from the job description. Try another PDF or DOCX.");
+    err.code = "JD_EMPTY";
+    throw err;
   }
   const companyCtx = await loadCompanyPrepContext(companyId, {
     track: trackNorm,
@@ -207,22 +317,30 @@ export async function generateAndSavePrepPathPlan({
       track: trackNorm || PREP_PATH_TRACKS.FULL_TIME,
       days: dayCount,
       hoursPerDay: hpd,
-      resumeMeta: {
-        fileName: String(resumeOriginalName || "").slice(0, 200),
-        mime: String(resumeMime || "").slice(0, 120),
-        textChars: resumeText.length,
-      },
+      resumeMeta,
       resumeDigest,
       contextFlags: {
         ...companyCtx.flags,
         webAugmented: Boolean(web.webAugmented),
         limitedData: Boolean(companyCtx.limitedData),
-        jdProvided: Boolean(jdDigest),
+        jdProvided: true,
+        reusedResumeDigest: reusedStoredDigest && !provided,
       },
       roadmap,
       sources,
       ...(mockSuggestion ? { mockSuggestion } : {}),
     });
+
+    if (shouldPersistDigest) {
+      await createUserPrepResumeDigest({
+        userId: uid,
+        digest: resumeDigest,
+        resumeMeta,
+        source: "prep_path",
+      }).catch((err) => {
+        console.warn("[prepPath] resume digest save failed", err?.message || err);
+      });
+    }
 
     const peerDemand = await getCompanyPrepPathPeerDemand(companyCtx.companyId, {
       windowDays: 7,

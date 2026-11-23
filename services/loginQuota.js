@@ -1,7 +1,9 @@
 import crypto from "crypto";
 import { isPlatformOwnerEmail } from "../config/constants.js";
+import User1 from "../models/User1.js";
+import { listActiveEntitlements } from "./billing/entitlementService.js";
 
-/** Successful Google sign-ins allowed per email in a rolling 24h window. */
+/** Successful Google sign-ins allowed per paid email in a rolling 24h window. */
 export const LOGIN_QUOTA_LIMIT = 3;
 export const LOGIN_QUOTA_WINDOW_SEC = 24 * 60 * 60;
 export const LOGIN_QUOTA_EXCEEDED_REASON = "login_limit";
@@ -14,6 +16,30 @@ function sha256(input) {
 
 function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
+}
+
+/**
+ * Login cap applies only to users with an active paid entitlement.
+ * Free users and platform owners are never capped.
+ */
+export async function shouldEnforceLoginQuota(email, now = new Date()) {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return false;
+  if (isPlatformOwnerEmail(normalized)) return false;
+
+  const user = await User1.findOne({ email: normalized })
+    .select("_id googleId email")
+    .lean();
+  if (!user) return false;
+
+  const ids = [
+    String(user.googleId || "").trim(),
+    String(user._id || "").trim(),
+  ].filter(Boolean);
+  if (!ids.length) return false;
+
+  const rows = await Promise.all(ids.map((id) => listActiveEntitlements(id, now)));
+  return rows.some((list) => Array.isArray(list) && list.length > 0);
 }
 
 export function createInMemoryLoginQuotaStore() {

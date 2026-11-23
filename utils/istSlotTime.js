@@ -20,6 +20,12 @@ export function istDateParts(date = new Date()) {
   };
 }
 
+/** UTC Date for IST midnight on the 1st of the current IST calendar month. */
+export function istMonthStartUtc(date = new Date()) {
+  const p = istDateParts(date);
+  return new Date(Date.UTC(p.year, p.month - 1, 1, 0, 0, 0, 0) - IST_OFFSET_MS);
+}
+
 /** `YYYY-MM-DDTHH` in IST (hour 0–23). */
 export function istSlotKey(year, month, day, hour) {
   return `${year}-${pad2(month)}-${pad2(day)}T${pad2(hour)}`;

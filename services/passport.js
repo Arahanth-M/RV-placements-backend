@@ -17,6 +17,7 @@ import { recordBlockedLoginAttempt } from "./blockedLoginAttempts.js";
 import {
   LOGIN_QUOTA_EXCEEDED_REASON,
   loginQuota,
+  shouldEnforceLoginQuota,
 } from "./loginQuota.js";
 
 /** Google may expose the avatar on photos[], _json.picture, or legacy profile.picture */
@@ -121,14 +122,16 @@ passport.use(
           return done(null, false, { reason: "domain", attemptId });
         }
 
-        // Rolling 24h login cap per email (platform owners exempt). After domain gates
-        // so blocked attempts do not consume a slot.
-        const quota = await loginQuota.consume(normalizedEmail);
-        if (quota.exceeded) {
-          return done(null, false, {
-            reason: LOGIN_QUOTA_EXCEEDED_REASON,
-            retryAfterSeconds: quota.retryAfterSeconds,
-          });
+        // Rolling 24h login cap — paid users only (free + platform owners exempt).
+        // After domain gates so blocked attempts do not consume a slot.
+        if (await shouldEnforceLoginQuota(normalizedEmail)) {
+          const quota = await loginQuota.consume(normalizedEmail);
+          if (quota.exceeded) {
+            return done(null, false, {
+              reason: LOGIN_QUOTA_EXCEEDED_REASON,
+              retryAfterSeconds: quota.retryAfterSeconds,
+            });
+          }
         }
 
         if (isAdminLogin) {
