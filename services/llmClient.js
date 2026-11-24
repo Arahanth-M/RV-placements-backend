@@ -1,41 +1,65 @@
 import Groq from "groq-sdk";
+import OpenAI from "openai";
 import {
   detectGroqKeySlot,
   getGroqKeyEnvName,
   GROQ_KEY_ENV_BY_SLOT,
   resolveGroqApiKey,
 } from "../config/groqApiKey.js";
-import { GROQ_FAST_MODEL, GROQ_QUALITY_MODEL } from "../config/groqModels.js";
-
-const DEFAULT_ORCHESTRATOR_MODEL =
-  process.env.GROQ_ORCHESTRATOR_MODEL ||
-  process.env.GROQ_MODEL ||
-  GROQ_QUALITY_MODEL;
-
-const RATE_LIMIT_FALLBACK_MODEL =
-  process.env.GROQ_FALLBACK_MODEL || GROQ_FAST_MODEL;
+import {
+  LLM_PROVIDERS,
+  OPENROUTER_BASE_URL,
+  resolveLlmProvider,
+  resolveOpenRouterApiKey,
+} from "../config/llmProvider.js";
+import { resolveFallbackModel, resolveQualityModel } from "../config/llmModels.js";
 
 /** @type {Map<string, import("groq-sdk").Groq>} */
 const groqClientsByApiKey = new Map();
 
-let loggedKeySlot = false;
+/** @type {Map<string, import("openai").OpenAI>} */
+const openRouterClientsByApiKey = new Map();
 
-const logKeySlotOnce = (slot) => {
-  if (loggedKeySlot) return;
-  loggedKeySlot = true;
-  const envName = slot ? GROQ_KEY_ENV_BY_SLOT[slot] : getGroqKeyEnvName(slot);
-  console.info(`[Groq] API key slot=${slot || "legacy"} env=${envName}`);
+let loggedProviderOnce = false;
+
+const logProviderOnce = (provider, detail) => {
+  if (loggedProviderOnce) return;
+  loggedProviderOnce = true;
+  console.info(`[LLM] provider=${provider} ${detail}`);
 };
 
 const getGroqClient = (options = {}) => {
   const slot = options.apiKeySlot || detectGroqKeySlot();
   const apiKey = resolveGroqApiKey(slot);
-  logKeySlotOnce(slot);
+  const envName = slot ? GROQ_KEY_ENV_BY_SLOT[slot] : getGroqKeyEnvName(slot);
+  logProviderOnce(LLM_PROVIDERS.GROQ, `slot=${slot || "legacy"} env=${envName}`);
 
   let client = groqClientsByApiKey.get(apiKey);
   if (!client) {
     client = new Groq({ apiKey });
     groqClientsByApiKey.set(apiKey, client);
+  }
+  return client;
+};
+
+const getOpenRouterClient = () => {
+  const apiKey = resolveOpenRouterApiKey();
+  logProviderOnce(LLM_PROVIDERS.OPENROUTER, `env=OPENROUTER_API_KEY base=${OPENROUTER_BASE_URL}`);
+
+  let client = openRouterClientsByApiKey.get(apiKey);
+  if (!client) {
+    const defaultHeaders = {};
+    const referer = String(process.env.OPENROUTER_HTTP_REFERER || process.env.FRONTEND_URL || "").trim();
+    const title = String(process.env.OPENROUTER_APP_TITLE || "RV Placements").trim();
+    if (referer) defaultHeaders["HTTP-Referer"] = referer;
+    if (title) defaultHeaders["X-Title"] = title;
+
+    client = new OpenAI({
+      apiKey,
+      baseURL: OPENROUTER_BASE_URL,
+      defaultHeaders,
+    });
+    openRouterClientsByApiKey.set(apiKey, client);
   }
   return client;
 };
@@ -77,10 +101,47 @@ const getErrorMessage = (error) => {
     return error.message;
   }
 
-  return "Unknown error while calling Groq LLM.";
+  return "Unknown error while calling LLM.";
 };
 
-export { detectGroqKeySlot, getGroqKeyEnvName, resolveGroqApiKey };
+function buildChatRequest(messages, options, selectedModel) {
+  const request = {
+    model: selectedModel,
+    messages,
+  };
+  if (typeof options?.temperature === "number" && Number.isFinite(options.temperature)) {
+    request.temperature = options.temperature;
+  }
+  const completionBudget = completionTokenBudget(options);
+  if (completionBudget != null) {
+    request.max_completion_tokens = completionBudget;
+  }
+  if (typeof options?.reasoning_effort === "string" && options.reasoning_effort.trim()) {
+    request.reasoning_effort = options.reasoning_effort.trim();
+  }
+  if (typeof options?.include_reasoning === "boolean") {
+    request.include_reasoning = options.include_reasoning;
+  }
+  if (options?.response_format && typeof options.response_format === "object") {
+    request.response_format = options.response_format;
+  }
+  return request;
+}
+
+async function createChatCompletion(messages, options, selectedModel) {
+  const provider = resolveLlmProvider();
+  const request = buildChatRequest(messages, options, selectedModel);
+
+  if (provider === LLM_PROVIDERS.OPENROUTER) {
+    const client = getOpenRouterClient();
+    return client.chat.completions.create(request);
+  }
+
+  const client = getGroqClient(options);
+  return client.chat.completions.create(request);
+}
+
+export { detectGroqKeySlot, getGroqKeyEnvName, resolveGroqApiKey, resolveLlmProvider };
 
 export const callLLM = async (messages, options = {}) => {
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -101,41 +162,23 @@ export const callLLM = async (messages, options = {}) => {
     );
   }
 
+  const defaultModel = resolveQualityModel();
+  const fallbackModel = resolveFallbackModel();
+  const provider = resolveLlmProvider();
+
   try {
-    const client = getGroqClient(options);
     const selectedModel =
       typeof options?.model === "string" && options.model.trim()
         ? options.model.trim()
-        : DEFAULT_ORCHESTRATOR_MODEL;
+        : defaultModel;
 
-    const request = {
-      model: selectedModel,
-      messages,
-    };
-    if (typeof options?.temperature === "number" && Number.isFinite(options.temperature)) {
-      request.temperature = options.temperature;
-    }
-    const completionBudget = completionTokenBudget(options);
-    if (completionBudget != null) {
-      request.max_completion_tokens = completionBudget;
-    }
-    if (typeof options?.reasoning_effort === "string" && options.reasoning_effort.trim()) {
-      request.reasoning_effort = options.reasoning_effort.trim();
-    }
-    if (typeof options?.include_reasoning === "boolean") {
-      request.include_reasoning = options.include_reasoning;
-    }
-    if (options?.response_format && typeof options.response_format === "object") {
-      request.response_format = options.response_format;
-    }
-
-    const completion = await client.chat.completions.create(request);
+    const completion = await createChatCompletion(messages, options, selectedModel);
     const choice = completion?.choices?.[0];
     const text = String(choice?.message?.content ?? "").trim();
     if (!text && choice?.finish_reason === "length" && options?._retriedEmpty !== true) {
-      const nextBudget = raisedCompletionBudget(completionBudget);
+      const nextBudget = raisedCompletionBudget(completionTokenBudget(options));
       console.warn(
-        `[Groq] Empty completion after reasoning (finish_reason=length) on ${selectedModel}. Retrying with max_completion_tokens=${nextBudget}.`
+        `[LLM:${provider}] Empty completion after reasoning (finish_reason=length) on ${selectedModel}. Retrying with max_completion_tokens=${nextBudget}.`
       );
       return callLLM(messages, {
         ...options,
@@ -159,7 +202,7 @@ export const callLLM = async (messages, options = {}) => {
       error?.status === 413;
 
     const alreadyOnFallback =
-      options?.model === RATE_LIMIT_FALLBACK_MODEL ||
+      options?.model === fallbackModel ||
       options?.model === "llama-3.1-8b-instant" ||
       options?.model === "llama3-8b-8192";
 
@@ -167,7 +210,7 @@ export const callLLM = async (messages, options = {}) => {
     if (isJsonValidateFailed(error) && options?._retriedJson !== true) {
       const nextBudget = raisedCompletionBudget(completionTokenBudget(options));
       console.warn(
-        `[Groq] JSON validation failed on ${options?.model || DEFAULT_ORCHESTRATOR_MODEL}. Retrying with max_completion_tokens=${nextBudget}.`
+        `[LLM:${provider}] JSON validation failed on ${options?.model || defaultModel}. Retrying with max_completion_tokens=${nextBudget}.`
       );
       return callLLM(
         [
@@ -191,19 +234,19 @@ export const callLLM = async (messages, options = {}) => {
     // Retry once with the fast model (+ smaller max_tokens) if the primary hits TPM limits
     if (isRateLimit && !alreadyOnFallback && options?.allowFallback !== false) {
       console.warn(
-        `⚠️ [Groq] Rate/TPM limit on ${options?.model || DEFAULT_ORCHESTRATOR_MODEL}. Falling back to ${RATE_LIMIT_FALLBACK_MODEL}...`
+        `⚠️ [LLM:${provider}] Rate/TPM limit on ${options?.model || defaultModel}. Falling back to ${fallbackModel}...`
       );
       const requested = completionTokenBudget(options);
       const nextMax = typeof requested === "number" ? Math.min(requested, 6000) : requested;
       return callLLM(messages, {
         ...options,
-        model: RATE_LIMIT_FALLBACK_MODEL,
+        model: fallbackModel,
         reasoning_effort: options?.reasoning_effort || "low",
         max_completion_tokens: nextMax,
         max_tokens: undefined,
       });
     }
 
-    throw new Error(`Groq LLM request failed: ${message}`);
+    throw new Error(`LLM request failed (${provider}): ${message}`);
   }
 };

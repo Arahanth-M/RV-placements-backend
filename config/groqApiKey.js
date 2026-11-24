@@ -97,6 +97,7 @@ export function isGroqConfigError(message) {
   return (
     msg.includes("Missing GROQ_KEY_") ||
     msg.includes("Missing GROQ_API_KEY") ||
-    msg.includes("Missing Groq API key")
+    msg.includes("Missing Groq API key") ||
+    msg.includes("Missing OPENROUTER_API_KEY")
   );
 }

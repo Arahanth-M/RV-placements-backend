@@ -4,16 +4,25 @@ const REDIS_KEY = "platform:runtime-secrets";
 
 export const RUNTIME_SECRET_DEFS = Object.freeze([
   {
+    id: "openrouter",
+    envName: "OPENROUTER_API_KEY",
+    label: "OpenRouter (prod LLM)",
+    description:
+      "OpenRouter pay-per-go key for openai/gpt-oss-120b. Used when LLM_PROVIDER=openrouter (or when this key is set).",
+  },
+  {
     id: "groq-admin",
     envName: "GROQ_KEY_ADMIN",
-    label: "Answers, enhance, and role titles",
-    description: "Groq key for generating answers, enhancing questions, and choosing fresher roles.",
+    label: "Answers, enhance, and role titles (Groq)",
+    description:
+      "Groq key for generating answers, enhancing questions, and choosing fresher roles. Used when LLM_PROVIDER=groq.",
   },
   {
     id: "groq-web-search",
     envName: "GROQ_KEY_WEB_SEARCH",
-    label: "Research questions and experiences",
-    description: "Groq key that turns scraped pages into interview questions, OA questions, and experiences.",
+    label: "Research questions and experiences (Groq)",
+    description:
+      "Groq key that turns scraped pages into interview questions, OA questions, and experiences. Used when LLM_PROVIDER=groq.",
   },
   {
     id: "tavily",

@@ -551,7 +551,10 @@ router.post("/generate", (req, res) => {
       ) {
         return res.status(400).json({ error: message, code });
       }
-      if (String(message).includes("Groq LLM")) {
+      if (
+        String(message).includes("Groq LLM") ||
+        String(message).includes("LLM request failed")
+      ) {
         const lower = String(message).toLowerCase();
         const overloaded =
           lower.includes("rate_limit") ||

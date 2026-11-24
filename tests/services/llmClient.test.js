@@ -17,9 +17,11 @@ jest.unstable_mockModule("groq-sdk", () => ({
 const originalEnv = process.env;
 process.env = {
   ...originalEnv,
+  LLM_PROVIDER: "groq",
   GROQ_API_KEY: "gsk_test_llm_client",
 };
 delete process.env.GROQ_KEY_SLOT;
+delete process.env.OPENROUTER_API_KEY;
 
 const { callLLM } = await import("../../services/llmClient.js");
 

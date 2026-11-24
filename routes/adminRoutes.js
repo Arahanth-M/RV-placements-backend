@@ -1211,8 +1211,16 @@ submissionModRouter.post("/submissions/:id/enhance", async (req, res) => {
     return res.json({ content: enhanced });
   } catch (error) {
     const msg = String(error?.message || error || "Enhancement failed");
-    if (msg.includes("Missing GROQ_KEY_") || msg.includes("Missing GROQ_API_KEY") || msg.includes("Missing Groq API key")) {
-      return res.status(503).json({ error: "AI enhancement is not configured (missing GROQ_KEY_ADMIN)." });
+    if (
+      msg.includes("Missing GROQ_KEY_") ||
+      msg.includes("Missing GROQ_API_KEY") ||
+      msg.includes("Missing Groq API key") ||
+      msg.includes("Missing OPENROUTER_API_KEY")
+    ) {
+      return res.status(503).json({
+        error:
+          "AI enhancement is not configured (missing OPENROUTER_API_KEY or GROQ_KEY_ADMIN).",
+      });
     }
     console.error("❌ submission enhance:", msg);
     return res.status(422).json({ error: msg });
@@ -1246,8 +1254,16 @@ submissionModRouter.post("/submissions/:id/add-answer", async (req, res) => {
     return res.json({ content });
   } catch (error) {
     const msg = String(error?.message || error || "Answer generation failed");
-    if (msg.includes("Missing GROQ_KEY_") || msg.includes("Missing GROQ_API_KEY") || msg.includes("Missing Groq API key")) {
-      return res.status(503).json({ error: "AI answer generation is not configured (missing GROQ_KEY_ADMIN)." });
+    if (
+      msg.includes("Missing GROQ_KEY_") ||
+      msg.includes("Missing GROQ_API_KEY") ||
+      msg.includes("Missing Groq API key") ||
+      msg.includes("Missing OPENROUTER_API_KEY")
+    ) {
+      return res.status(503).json({
+        error:
+          "AI answer generation is not configured (missing OPENROUTER_API_KEY or GROQ_KEY_ADMIN).",
+      });
     }
     console.error("❌ submission add-answer:", msg);
     return res.status(422).json({ error: msg });

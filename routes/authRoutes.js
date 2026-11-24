@@ -94,9 +94,14 @@ const tokenCookieOptions = (overrides = {}) => ({
 });
 
 const clearTokenCookie = (res) => {
-  res.clearCookie("token", tokenCookieOptions());
+  const base = tokenCookieOptions();
+  res.clearCookie("token", base);
   // Extra expire for stubborn browsers / mismatched prior Set-Cookie attrs.
-  res.cookie("token", "", tokenCookieOptions({ maxAge: 0 }));
+  res.cookie("token", "", { ...base, maxAge: 0, expires: new Date(0) });
+  // Cover secure-flag mismatches (e.g. cookie set in prod, cleared in mixed envs).
+  res.clearCookie("token", { path: "/", sameSite: "lax", secure: true });
+  res.clearCookie("token", { path: "/", sameSite: "lax", secure: false });
+  res.clearCookie("token", { path: "/" });
 };
 
 const setTokenCookie = (res, user, options = {}) => {
